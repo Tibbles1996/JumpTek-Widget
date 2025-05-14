@@ -7,6 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
   <style>
     html, body {
@@ -28,19 +29,7 @@
     }
 
     #stats {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: white;
-      font-size: 18px;
-      font-weight: bold;
-      background: rgba(0, 0, 0, 0.6);
-      padding: 10px 20px;
-      border-radius: 10px;
-      z-index: 10;
-      text-align: center;
-      max-width: 90vw;
+      display: none; /* Hide stats */
     }
 
     .controls {
@@ -66,24 +55,16 @@
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
-  <div id="stats">
-    Airtime: 0.00s<br/>
-    Height: 0.00m<br/>
-    Highest: 0.00m<br/>
-    Lowest: 0.00m<br/>
-    Avg: 0.00m<br/>
-    Jumps: 0
-  </div>
+  <div id="stats"></div>
 
   <div class="controls">
-    <button onclick="switchCamera()">🔄 Switch Camera</button>
+    <button onclick="switchCamera()"><i class="fas fa-camera-rotate"></i> Switch</button>
   </div>
 
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    const stats = document.getElementById('stats');
 
     let currentStream = null;
     let useBackCamera = true;
@@ -91,6 +72,9 @@
     let isJumping = false;
     let jumpStart = 0;
     const jumpHeights = [];
+
+    let jumpThreshold = 0.05; // Adjustable jump sensitivity
+    let baselineY = null;
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -156,15 +140,6 @@
       const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
       const count = jumpHeights.length;
 
-      stats.innerHTML = `
-        Airtime: ${airtime.toFixed(2)}s<br/>
-        Height: ${height.toFixed(2)}m<br/>
-        Highest: ${highest.toFixed(2)}m<br/>
-        Lowest: ${lowest.toFixed(2)}m<br/>
-        Avg: ${avg.toFixed(2)}m<br/>
-        Jumps: ${count}
-      `;
-
       // Send to Lovable
       parent.postMessage({
         type: 'jump',
@@ -191,16 +166,20 @@
 
         const hip = results.poseLandmarks[23];
         const y = hip.y;
-        const threshold = 0.5;
 
-        if (!isJumping && y < threshold) {
+        if (baselineY === null) {
+          baselineY = y;
+        }
+
+        const deltaY = baselineY - y;
+
+        if (!isJumping && deltaY > jumpThreshold) {
           isJumping = true;
           jumpStart = performance.now();
-        } else if (isJumping && y >= threshold) {
+        } else if (isJumping && deltaY <= 0.01) {
           isJumping = false;
           const airtime = (performance.now() - jumpStart) / 1000;
           const height = (9.81 * airtime * airtime) / 8;
-
           updateStatsDisplay(airtime, height);
         }
       }
