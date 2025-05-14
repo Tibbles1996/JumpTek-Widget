@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -109,17 +109,18 @@
         currentStream.getTracks().forEach(track => track.stop());
       }
 
-      try {
-        const constraints = {
-          video: {
-            facingMode: useBackCamera ? 'environment' : 'user',
-            width: { ideal: 720 },
-            height: { ideal: 1280 },
-            aspectRatio: 9 / 16,
-            frameRate: { ideal: 30 }
-          }
-        };
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: useBackCamera ? { exact: 'environment' } : 'user',
+          width: { ideal: 720 },
+          height: { ideal: 1280 },
+          aspectRatio: 9 / 16,
+          frameRate: { ideal: 30 }
+        }
+      };
 
+      try {
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         currentStream = stream;
         video.srcObject = stream;
@@ -135,9 +136,7 @@
     function runPose() {
       const camera = new Camera(video, {
         onFrame: async () => {
-          requestAnimationFrame(async () => {
-            await pose.send({ image: video });
-          });
+          await pose.send({ image: video });
         },
         width: 720,
         height: 1280
@@ -155,6 +154,7 @@
       const highest = Math.max(...jumpHeights);
       const lowest = Math.min(...jumpHeights);
       const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
+      const count = jumpHeights.length;
 
       stats.innerHTML = `
         Airtime: ${airtime.toFixed(2)}s<br/>
@@ -162,8 +162,19 @@
         Highest: ${highest.toFixed(2)}m<br/>
         Lowest: ${lowest.toFixed(2)}m<br/>
         Avg: ${avg.toFixed(2)}m<br/>
-        Jumps: ${jumpHeights.length}
+        Jumps: ${count}
       `;
+
+      // Send to Lovable
+      parent.postMessage({
+        type: 'jump',
+        airtime,
+        height,
+        highest,
+        lowest,
+        average: avg,
+        count
+      }, '*');
     }
 
     function onResults(results) {
@@ -191,7 +202,6 @@
           const height = (9.81 * airtime * airtime) / 8;
 
           updateStatsDisplay(airtime, height);
-          parent.postMessage({ type: 'jump', airtime, height }, '*');
         }
       }
 
