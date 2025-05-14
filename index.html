@@ -1,4 +1,4 @@
-<html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -71,7 +71,7 @@
 
     let isJumping = false;
     let jumpStart = 0;
-    const jumpHeights = [];
+    let jumpHeights = [];
 
     let jumpThreshold = 0.02;
     let baselineY = null;
@@ -147,6 +147,7 @@
       const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
       const count = jumpHeights.length;
 
+      // Send to UI
       parent.postMessage({
         type: 'jump',
         airtime,
@@ -156,6 +157,15 @@
         average: avg,
         count
       }, '*');
+
+      // Store in localStorage (simulate user profile persistence)
+      const history = JSON.parse(localStorage.getItem('jumpHistory') || '[]');
+      history.push({ timestamp: Date.now(), airtime, height });
+      localStorage.setItem('jumpHistory', JSON.stringify(history));
+    }
+
+    function resetSession() {
+      jumpHeights = [];
     }
 
     function onResults(results) {
@@ -209,8 +219,9 @@
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
 
-          let height = 0.6 * airtime * (cameraDistanceMeters / 6.4);
-          height = Math.min(height, 1.5);
+          // Improved height estimation using airtime and gravity
+          const g = 9.81;
+          const height = (g * airtime * airtime) / 8;
 
           updateStatsDisplay(airtime, height);
         }
@@ -225,6 +236,8 @@
     window.addEventListener("message", (event) => {
       if (event.data?.type === "switchCamera") {
         switchCamera();
+      } else if (event.data?.type === "resetSession") {
+        resetSession();
       }
     });
 
