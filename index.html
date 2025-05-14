@@ -45,36 +45,9 @@
     pose.onResults(onResults);
 
     // 2) Hook up the camera
-    // In your JS
-
-const videoElement = document.getElementsByClassName('input_video')[0];
-let useBackCamera = true;
-let currentCamera;
-
-function startCamera(facingMode = 'environment') {
-  if (currentCamera) currentCamera.stop();
-
-  currentCamera = new Camera(videoElement, {
-    onFrame: async () => {
-      await pose.send({ image: videoElement });
-    },
-    width: 640,
-    height: 480,
-    facingMode: facingMode
-  });
-
-  currentCamera.start();
-}
-
-// First start: back camera
-startCamera('environment');
-
-// Handle switch
-document.getElementById('switch-camera').addEventListener('click', () => {
-  useBackCamera = !useBackCamera;
-  const mode = useBackCamera ? 'environment' : 'user';
-  startCamera(mode);
-});
+<!-- In your HTML -->
+<video class="input_video" autoplay playsinline></video>
+<button id="switch-camera">Switch Camera</button>
 
 
     // 3) Jump detection state
