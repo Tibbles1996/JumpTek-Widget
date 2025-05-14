@@ -30,33 +30,12 @@
     #stats {
       display: none;
     }
-
-    .controls {
-      position: absolute;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-    }
-
-    .controls button {
-      padding: 8px 14px;
-      font-size: 16px;
-      border: none;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.85);
-      cursor: pointer;
-    }
   </style>
 </head>
 <body>
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
   <div id="stats"></div>
-
-  <div class="controls">
-    <button onclick="switchCamera()"><i class="fas fa-camera-rotate"></i> Switch</button>
-  </div>
 
   <script>
     const video = document.getElementById('video');
@@ -65,7 +44,6 @@
 
     let cameraInstance = null;
     let currentStream = null;
-    let useBackCamera = localStorage.getItem('useBackCamera') !== 'false'; // default to back camera
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -93,7 +71,7 @@
       const constraints = {
         audio: false,
         video: {
-          facingMode: { ideal: useBackCamera ? 'environment' : 'user' },
+          facingMode: { ideal: 'environment' },
           width: { ideal: 720 },
           height: { ideal: 1280 },
           aspectRatio: 9 / 16,
@@ -122,13 +100,7 @@
       }
     }
 
-    function switchCamera() {
-      useBackCamera = !useBackCamera;
-      localStorage.setItem('useBackCamera', useBackCamera);
-      startCamera();
-    }
-
-    // --- Pose logic ---
+    // --- Pose and Jump Logic ---
     let isJumping = false;
     let jumpStart = 0;
     let jumpHeights = [];
@@ -228,11 +200,9 @@
       ctx.restore();
     }
 
-    // Message handling for external UI
+    // Only allow reset message, not switching
     window.addEventListener("message", (event) => {
-      if (event.data?.type === "switchCamera") {
-        switchCamera();
-      } else if (event.data?.type === "resetSession") {
+      if (event.data?.type === "resetSession") {
         resetSession();
       }
     });
