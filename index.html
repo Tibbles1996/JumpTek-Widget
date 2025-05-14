@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -73,9 +73,12 @@
     let jumpStart = 0;
     const jumpHeights = [];
 
-    let jumpThreshold = 0.05; // Adjustable jump sensitivity
+    let jumpThreshold = 0.02; // Slightly increased sensitivity
     let baselineY = null;
-    const alpha = 0.1; // smoothing factor for adaptive baseline
+    const alpha = 0.1;
+
+    let lastY = null;
+    let lastTime = null;
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -141,7 +144,6 @@
       const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
       const count = jumpHeights.length;
 
-      // Send to Lovable
       parent.postMessage({
         type: 'jump',
         airtime,
@@ -167,24 +169,31 @@
 
         const hip = results.poseLandmarks[23];
         const y = hip.y;
+        const now = performance.now();
 
-        if (baselineY === null) {
-          baselineY = y;
-        } else {
-          baselineY = alpha * y + (1 - alpha) * baselineY;
+        if (baselineY === null) baselineY = y;
+        else baselineY = alpha * y + (1 - alpha) * baselineY;
+
+        let velocity = 0;
+        if (lastY !== null && lastTime !== null) {
+          const dt = (now - lastTime) / 1000;
+          velocity = (y - lastY) / dt;
         }
 
         const deltaY = baselineY - y;
 
-        if (!isJumping && deltaY > jumpThreshold) {
+        if (!isJumping && deltaY > jumpThreshold && velocity < -0.5) {
           isJumping = true;
-          jumpStart = performance.now();
-        } else if (isJumping && deltaY <= 0.01) {
+          jumpStart = now;
+        } else if (isJumping && deltaY <= jumpThreshold / 2 && velocity > 0.1) {
           isJumping = false;
-          const airtime = (performance.now() - jumpStart) / 1000;
+          const airtime = (now - jumpStart) / 1000;
           const height = (9.81 * airtime * airtime) / 8;
           updateStatsDisplay(airtime, height);
         }
+
+        lastY = y;
+        lastTime = now;
       }
 
       ctx.restore();
