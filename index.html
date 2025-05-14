@@ -1,12 +1,15 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <title>JumpTek Pose Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  
   <!-- MediaPipe Pose libraries -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
   <style>
     body, html {
       margin: 0;
@@ -14,12 +17,38 @@
       overflow: hidden;
       background: #000;
     }
+
     video, canvas {
       position: absolute;
-      top: 0; left: 0;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       object-fit: contain;
+      transform-origin: center center;
+      transition: transform 0.3s ease;
+    }
+
+    /* Optional zoom buttons */
+    #zoom-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      z-index: 999;
+    }
+
+    #zoom-controls button {
+      font-size: 20px;
+      padding: 10px 15px;
+      margin: 0 5px;
+      border-radius: 10px;
+      border: none;
+      background: rgba(255, 255, 255, 0.8);
+      cursor: pointer;
+    }
+
+    #zoom-controls button:hover {
+      background: #fff;
     }
   </style>
 </head>
@@ -27,16 +56,22 @@
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
+  <!-- Optional Zoom Controls UI -->
+  <div id="zoom-controls">
+    <button onclick="zoomOut()">-</button>
+    <button onclick="zoomIn()">+</button>
+  </div>
+
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Global variables for camera control
-    let useBackCamera = true;
+    // Camera state
     let currentCamera;
+    let useBackCamera = true;
 
-    // Start MediaPipe Pose
+    // Pose setup
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
     });
@@ -47,60 +82,58 @@
     });
     pose.onResults(onResults);
 
-    // Start the camera with the given facing mode
     function startCamera(facingMode) {
       if (currentCamera) currentCamera.stop();
       currentCamera = new Camera(video, {
         onFrame: async () => await pose.send({ image: video }),
-        width: 720,
-        height: 1280,
+        width: 1280,
+        height: 720,
         facingMode: facingMode
       });
       currentCamera.start();
     }
 
-    // Wait for video metadata to load before resizing the canvas
-    video.addEventListener('loadedmetadata', () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    });
-
-    // Default start with back camera
+    // Start with back camera
     startCamera('environment');
 
-    // Switch camera function
+    // Camera switching
     window.switchCamera = function () {
       useBackCamera = !useBackCamera;
       const newFacing = useBackCamera ? 'environment' : 'user';
       startCamera(newFacing);
     };
 
-    // Listen for messages from the parent (e.g., Lovable app) to switch camera
+    // Listen for messages from parent (e.g. Lovable app)
     window.addEventListener("message", (event) => {
       if (event.data?.type === "switchCamera") {
         console.log("Received switchCamera message");
         window.switchCamera();
+      } else if (event.data?.type === "zoomIn") {
+        zoomIn();
+      } else if (event.data?.type === "zoomOut") {
+        zoomOut();
       }
     });
 
-    // Jump detection state variables
+    // Jump detection
     let isJumping = false;
     let jumpStart = 0;
     let airtimes = [];
 
     function onResults(results) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      // Ensure poseLandmarks exists before processing
-      if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+      if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS);
         drawLandmarks(ctx, results.poseLandmarks);
 
-        // Use left hip landmark (index 23) for jump detection
         const hip = results.poseLandmarks[23];
-        const y = hip.y; // normalized [0..1]
+        const y = hip.y;
         const threshold = 0.5;
 
         if (!isJumping && y < threshold) {
@@ -113,17 +146,48 @@
           airtimes.push(airtime);
           console.log('Airtime (s):', airtime);
 
-          const height = (9.81 * airtime * airtime) / 8; // Estimated height (m)
+          const height = (9.81 * airtime * airtime) / 8;
           console.log('Estimated height (m):', height);
 
-          // If embedding in Lovable, send via postMessage:
-          parent.postMessage({ type: 'jump', airtime, height }, '*');
+          parent.postMessage(
+            { type: 'jump', airtime, height },
+            '*'
+          );
         }
-      } else {
-        console.log("No pose landmarks detected.");
       }
 
       ctx.restore();
+    }
+
+    // Zoom logic
+    let zoomLevel = 1;
+    const minZoom = 1;
+    const maxZoom = 3;
+    const zoomStep = 0.1;
+
+    function applyZoom() {
+      const zoom = `scale(${zoomLevel})`;
+      video.style.transform = zoom;
+      canvas.style.transform = zoom;
+    }
+
+    function zoomIn() {
+      if (zoomLevel < maxZoom) {
+        zoomLevel = Math.min(maxZoom, zoomLevel + zoomStep);
+        applyZoom();
+      }
+    }
+
+    function zoomOut() {
+      if (zoomLevel > minZoom) {
+        zoomLevel = Math.max(minZoom, zoomLevel - zoomStep);
+        applyZoom();
+      }
+    }
+
+    function resetZoom() {
+      zoomLevel = 1;
+      applyZoom();
     }
   </script>
 </body>
