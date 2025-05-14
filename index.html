@@ -30,50 +30,57 @@
 
   <script>
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
 
-    // 1) Initialize MediaPipe Pose
-    const pose = new Pose({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-    });
-    pose.setOptions({
-      modelComplexity: 1,
-      enableSegmentation: false,
-      smoothLandmarks: true
-    });
-    pose.onResults(onResults);
+// Global tracking variables
+let useBackCamera = true;
+let currentCamera;
 
-// 2) Start Camera
-    
-async function startCamera(preferredMode) {
-  const facingMode = await testCamera(preferredMode) ? preferredMode : (preferredMode === 'user' ? 'environment' : 'user');
+// Start MediaPipe Pose
+const pose = new Pose({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+});
+pose.setOptions({
+  modelComplexity: 1,
+  enableSegmentation: false,
+  smoothLandmarks: true
+});
+pose.onResults(onResults);
 
-  if (currentCamera) {
-    currentCamera.stop();
-  }
-
+// Camera control
+function startCamera(facingMode) {
+  if (currentCamera) currentCamera.stop();
   currentCamera = new Camera(video, {
-    onFrame: async () => {
-      await pose.send({ image: video });
-    },
-    width: 360,
-    height: 640,
+    onFrame: async () => await pose.send({ image: video }),
+    width: 720,
+    height: 1280,
     facingMode: facingMode
   });
-
   currentCamera.start();
 }
-    
-// Start with rear camera by default
+
+// Default start with back camera
 startCamera('environment');
 
-// Switch camera function for Lovable
+// Track camera state
+let useBackCamera = true;
+
+// Switch camera function (called when a message is received)
 window.switchCamera = function () {
   useBackCamera = !useBackCamera;
   const newFacing = useBackCamera ? 'environment' : 'user';
   startCamera(newFacing);
-}
+};
+
+// Listen for messages from the parent (e.g., Lovable app)
+window.addEventListener("message", (event) => {
+  if (event.data?.type === "switchCamera") {
+    console.log("Received switchCamera message");
+    window.switchCamera();
+  }
+});
+
 
     // 3) Jump detection state
     let isJumping = false;
