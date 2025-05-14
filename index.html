@@ -1,4 +1,4 @@
-<html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -79,6 +79,9 @@
 
     let lastY = null;
     let lastTime = null;
+
+    const cameraDistanceFeet = 21;
+    const cameraDistanceMeters = cameraDistanceFeet * 0.3048; // ≈ 6.4 meters
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -188,7 +191,10 @@
         } else if (isJumping && deltaY <= jumpThreshold / 2 && velocity > 0.1) {
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
-          const height = (9.81 * airtime * airtime) / 8;
+
+          let height = 0.6 * airtime * (cameraDistanceMeters / 6.4); // scale with camera distance
+          height = Math.min(height, 1.5);
+
           updateStatsDisplay(airtime, height);
         }
 
