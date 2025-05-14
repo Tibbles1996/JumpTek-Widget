@@ -44,14 +44,7 @@
     });
     pose.onResults(onResults);
 
-    // 2) Hook up the camera
-    const camera = new Camera(video, {
-      onFrame: async () => await pose.send({image: video}),
-      width: 720, height: 1280
-    });
-    camera.start();
-
-    let useBackCamera = true;
+let useBackCamera = true;
 let currentCamera;
 
 function startCamera(facingMode) {
@@ -59,27 +52,27 @@ function startCamera(facingMode) {
     currentCamera.stop();
   }
 
-  currentCamera = new Camera(videoElement, {
+  currentCamera = new Camera(video, {
     onFrame: async () => {
-      await pose.send({ image: videoElement });
+      await pose.send({ image: video });
     },
-    width: 720,
-    height: 1280,
-    facingMode: facingMode
+    width: 360,
+    height: 640,
+    facingMode: { exact: facingMode }
   });
+
   currentCamera.start();
 }
 
-// Start with rear camera
+// Start with rear camera by default
 startCamera('environment');
 
-// Define switch function to be triggered by Lovable
+// Switch camera function for Lovable
 window.switchCamera = function () {
   useBackCamera = !useBackCamera;
-  const newFacingMode = useBackCamera ? 'environment' : 'user';
-  startCamera(newFacingMode);
+  const newFacing = useBackCamera ? 'environment' : 'user';
+  startCamera(newFacing);
 }
-
 
     // 3) Jump detection state
     let isJumping = false;
