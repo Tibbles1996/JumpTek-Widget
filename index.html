@@ -1,11 +1,9 @@
-<html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>JumpTek Pose Test</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-
-  <!-- MediaPipe Pose libraries -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -26,26 +24,7 @@
       left: 0;
       width: 100vw;
       height: 100vh;
-      object-fit: contain; /* <- preserve FOV instead of cropping */
-    }
-
-    .controls {
-      position: absolute;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      display: flex;
-      gap: 10px;
-    }
-
-    .controls button {
-      padding: 10px 15px;
-      font-size: 16px;
-      border: none;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.8);
-      cursor: pointer;
+      object-fit: contain;
     }
 
     #stats {
@@ -54,13 +33,30 @@
       left: 50%;
       transform: translateX(-50%);
       color: white;
-      font-size: 24px;
+      font-size: 20px;
       font-weight: bold;
-      background: rgba(0, 0, 0, 0.5);
-      padding: 10px 20px;
-      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 8px 16px;
+      border-radius: 10px;
       z-index: 10;
       text-align: center;
+    }
+
+    .controls {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+
+    .controls button {
+      padding: 8px 14px;
+      font-size: 16px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.85);
+      cursor: pointer;
     }
   </style>
 </head>
@@ -73,7 +69,7 @@
     Airtime: 0.00s<br/>
     Height: 0.00m
   </div>
-  
+
   <div class="controls">
     <button onclick="switchCamera()">🔄 Switch Camera</button>
   </div>
@@ -82,18 +78,21 @@
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const stats = document.getElementById('stats');
 
     let currentStream = null;
     let useBackCamera = true;
+    let isJumping = false;
+    let jumpStart = 0;
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
     });
 
     pose.setOptions({
-      modelComplexity: 1,
-      enableSegmentation: false,
-      smoothLandmarks: true
+      modelComplexity: 0, // Optimized for speed
+      smoothLandmarks: true,
+      enableSegmentation: false
     });
 
     pose.onResults(onResults);
@@ -103,14 +102,16 @@
         currentStream.getTracks().forEach(track => track.stop());
       }
 
-      const constraints = {
-        video: {
-          facingMode: useBackCamera ? { exact: 'environment' } : 'user',
-          aspectRatio: 9 / 16
-        }
-      };
-
       try {
+        const constraints = {
+          video: {
+            facingMode: useBackCamera ? { exact: 'environment' } : 'user',
+            width: { ideal: 720 },
+            height: { ideal: 1280 },
+            frameRate: { ideal: 30 }
+          }
+        };
+
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         currentStream = stream;
         video.srcObject = stream;
@@ -118,16 +119,20 @@
           video.play();
           runPose();
         };
-      } catch (error) {
-        console.error("Camera error:", error);
+      } catch (err) {
+        console.error('Camera error:', err);
       }
     }
 
     function runPose() {
       const camera = new Camera(video, {
-        onFrame: async () => await pose.send({ image: video }),
-        width: video.videoWidth,
-        height: video.videoHeight
+        onFrame: async () => {
+          requestAnimationFrame(async () => {
+            await pose.send({ image: video });
+          });
+        },
+        width: 720,
+        height: 1280
       });
       camera.start();
     }
@@ -136,15 +141,6 @@
       useBackCamera = !useBackCamera;
       startCamera();
     }
-
-    window.addEventListener("message", (event) => {
-      if (event.data?.type === "switchCamera") {
-        switchCamera();
-      }
-    });
-
-    let isJumping = false;
-    let jumpStart = 0;
 
     function onResults(results) {
       canvas.width = video.videoWidth;
@@ -155,8 +151,8 @@
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS);
-        drawLandmarks(ctx, results.poseLandmarks);
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
+        drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
 
         const hip = results.poseLandmarks[23];
         const y = hip.y;
@@ -170,6 +166,8 @@
           const airtime = (performance.now() - jumpStart) / 1000;
           const height = (9.81 * airtime * airtime) / 8;
 
+          stats.innerHTML = `Airtime: ${airtime.toFixed(2)}s<br/>Height: ${height.toFixed(2)}m`;
+
           parent.postMessage({ type: 'jump', airtime, height }, '*');
         }
       }
@@ -177,8 +175,13 @@
       ctx.restore();
     }
 
+    window.addEventListener("message", (event) => {
+      if (event.data?.type === "switchCamera") {
+        switchCamera();
+      }
+    });
+
     startCamera();
   </script>
-
 </body>
 </html>
