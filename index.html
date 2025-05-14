@@ -45,17 +45,12 @@
     pose.onResults(onResults);
 
     // 2) Hook up the camera
-const camera = new Camera(videoElement, {
-  onFrame: async () => {
-    await pose.send({ image: videoElement });
-  },
-  width: 640,
-  height: 480,
-  facingMode: 'environment' // This sets the default to the rear camera
-});
-camera.start();
+    const camera = new Camera(video, {
+      onFrame: async () => await pose.send({image: video}),
+      width: 640, height: 480
+    });
+    camera.start();
 
-    
     // 3) Jump detection state
     let isJumping = false;
     let jumpStart = 0;
@@ -105,4 +100,3 @@ camera.start();
   </script>
 </body>
 </html>
-
