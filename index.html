@@ -95,6 +95,7 @@
 
     pose.onResults(onResults);
 
+    // Start the camera
     async function startCamera() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
@@ -135,6 +136,7 @@
       camera.start();
     }
 
+    // Toggle between front and back camera
     function switchCamera() {
       useBackCamera = !useBackCamera;
       localStorage.setItem('useBackCamera', useBackCamera); // Save camera state to localStorage
