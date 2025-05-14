@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -47,6 +47,21 @@
       background: rgba(255,255,255,0.8);
       cursor: pointer;
     }
+
+    #stats {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      font-size: 24px;
+      font-weight: bold;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px 20px;
+      border-radius: 12px;
+      z-index: 10;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -54,6 +69,11 @@
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
+  <div id="stats">
+    Airtime: 0.00s<br/>
+    Height: 0.00m
+  </div>
+  
   <div class="controls">
     <button onclick="switchCamera()">🔄 Switch Camera</button>
   </div>
