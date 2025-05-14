@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -73,7 +73,7 @@
     let jumpStart = 0;
     const jumpHeights = [];
 
-    let jumpThreshold = 0.02; // Slightly increased sensitivity
+    let jumpThreshold = 0.02;
     let baselineY = null;
     const alpha = 0.1;
 
@@ -81,7 +81,7 @@
     let lastTime = null;
 
     const cameraDistanceFeet = 21;
-    const cameraDistanceMeters = cameraDistanceFeet * 0.3048; // ≈ 6.4 meters
+    const cameraDistanceMeters = cameraDistanceFeet * 0.3048;
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -171,8 +171,25 @@
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
 
         const hip = results.poseLandmarks[23];
+        const leftAnkle = results.poseLandmarks[27];
+        const rightAnkle = results.poseLandmarks[28];
         const y = hip.y;
         const now = performance.now();
+
+        const canvasX = canvas.width;
+        const canvasY = canvas.height;
+
+        const footInTrampoline = (pt) => {
+          const x = pt.x * canvasX;
+          const y = pt.y * canvasY;
+          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
+          const inY = y > 0.5 * canvasY && y < 0.9 * canvasY;
+          return inX && inY;
+        };
+
+        const isOnTrampoline = footInTrampoline(leftAnkle) && footInTrampoline(rightAnkle);
+
+        if (!isOnTrampoline) return;
 
         if (baselineY === null) baselineY = y;
         else baselineY = alpha * y + (1 - alpha) * baselineY;
@@ -192,7 +209,7 @@
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
 
-          let height = 0.6 * airtime * (cameraDistanceMeters / 6.4); // scale with camera distance
+          let height = 0.6 * airtime * (cameraDistanceMeters / 6.4);
           height = Math.min(height, 1.5);
 
           updateStatsDisplay(airtime, height);
