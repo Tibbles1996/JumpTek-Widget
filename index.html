@@ -55,35 +55,6 @@ const camera = new Camera(videoElement, {
 });
 camera.start();
 
-    <button id="switch-camera">Switch Camera</button>
-
-let useBackCamera = true;
-let currentCamera;
-
-function startCamera(facingMode) {
-  if (currentCamera) {
-    currentCamera.stop();
-  }
-
-  currentCamera = new Camera(videoElement, {
-    onFrame: async () => {
-      await pose.send({ image: videoElement });
-    },
-    width: 640,
-    height: 480,
-    facingMode: facingMode
-  });
-  currentCamera.start();
-}
-
-// Start with the rear camera
-startCamera('environment');
-
-document.getElementById('switch-camera').addEventListener('click', () => {
-  useBackCamera = !useBackCamera;
-  const newFacingMode = useBackCamera ? 'environment' : 'user';
-  startCamera(newFacingMode);
-});
     
     // 3) Jump detection state
     let isJumping = false;
