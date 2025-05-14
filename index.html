@@ -44,10 +44,11 @@
     });
     pose.onResults(onResults);
 
-let useBackCamera = true;
-let currentCamera;
+// 2) Start Camera
+    
+async function startCamera(preferredMode) {
+  const facingMode = await testCamera(preferredMode) ? preferredMode : (preferredMode === 'user' ? 'environment' : 'user');
 
-function startCamera(facingMode) {
   if (currentCamera) {
     currentCamera.stop();
   }
@@ -63,7 +64,7 @@ function startCamera(facingMode) {
 
   currentCamera.start();
 }
-
+    
 // Start with rear camera by default
 startCamera('environment');
 
