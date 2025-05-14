@@ -67,7 +67,7 @@
     const ctx = canvas.getContext('2d');
 
     let currentStream = null;
-    let useBackCamera = true;
+    let useBackCamera = localStorage.getItem('useBackCamera') === 'true'; // Load camera state from localStorage
 
     let isJumping = false;
     let jumpStart = 0;
@@ -137,6 +137,7 @@
 
     function switchCamera() {
       useBackCamera = !useBackCamera;
+      localStorage.setItem('useBackCamera', useBackCamera); // Save camera state to localStorage
       startCamera();
     }
 
