@@ -53,7 +53,7 @@
   </style>
 </head>
 <body>
-  <video id="video" autoplay muted playsinline></video>
+ <video id="video" autoplay muted playsinline style="aspect-ratio: 3 / 4;"></video>
   <canvas id="canvas"></canvas>
 
   <!-- Optional Zoom Controls UI -->
@@ -85,10 +85,11 @@
     function startCamera(facingMode) {
       if (currentCamera) currentCamera.stop();
       currentCamera = new Camera(video, {
-        onFrame: async () => await pose.send({ image: video }),
-        width: 1280,
-        height: 720,
-        facingMode: facingMode
+  onFrame: async () => await pose.send({ image: video }),
+  width: 480, // Lower resolution to avoid forced zoom/crop
+  height: 640,
+  facingMode: facingMode,
+  deviceId: undefined
       });
       currentCamera.start();
     }
