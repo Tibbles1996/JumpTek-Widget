@@ -1,4 +1,3 @@
-<html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -30,80 +29,79 @@
 
   <script>
     const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
 
-// Global tracking variables
-let useBackCamera = true;
-let currentCamera;
+    // Global variables for camera control
+    let useBackCamera = true;
+    let currentCamera;
 
-// Start MediaPipe Pose
-const pose = new Pose({
-  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-});
-pose.setOptions({
-  modelComplexity: 1,
-  enableSegmentation: false,
-  smoothLandmarks: true
-});
-pose.onResults(onResults);
+    // Start MediaPipe Pose
+    const pose = new Pose({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      enableSegmentation: false,
+      smoothLandmarks: true
+    });
+    pose.onResults(onResults);
 
-// Camera control
-function startCamera(facingMode) {
-  if (currentCamera) currentCamera.stop();
-  currentCamera = new Camera(video, {
-    onFrame: async () => await pose.send({ image: video }),
-    width: 720,
-    height: 1280,
-    facingMode: facingMode
-  });
-  currentCamera.start();
-}
+    // Start the camera with the given facing mode
+    function startCamera(facingMode) {
+      if (currentCamera) currentCamera.stop();
+      currentCamera = new Camera(video, {
+        onFrame: async () => await pose.send({ image: video }),
+        width: 720,
+        height: 1280,
+        facingMode: facingMode
+      });
+      currentCamera.start();
+    }
 
-// Default start with back camera
-startCamera('environment');
+    // Wait for video metadata to load before resizing the canvas
+    video.addEventListener('loadedmetadata', () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    });
 
-// Track camera state
-let useBackCamera = true;
+    // Default start with back camera
+    startCamera('environment');
 
-// Switch camera function (called when a message is received)
-window.switchCamera = function () {
-  useBackCamera = !useBackCamera;
-  const newFacing = useBackCamera ? 'environment' : 'user';
-  startCamera(newFacing);
-};
+    // Switch camera function
+    window.switchCamera = function () {
+      useBackCamera = !useBackCamera;
+      const newFacing = useBackCamera ? 'environment' : 'user';
+      startCamera(newFacing);
+    };
 
-// Listen for messages from the parent (e.g., Lovable app)
-window.addEventListener("message", (event) => {
-  if (event.data?.type === "switchCamera") {
-    console.log("Received switchCamera message");
-    window.switchCamera();
-  }
-});
+    // Listen for messages from the parent (e.g., Lovable app) to switch camera
+    window.addEventListener("message", (event) => {
+      if (event.data?.type === "switchCamera") {
+        console.log("Received switchCamera message");
+        window.switchCamera();
+      }
+    });
 
-
-    // 3) Jump detection state
+    // Jump detection state variables
     let isJumping = false;
     let jumpStart = 0;
     let airtimes = [];
 
     function onResults(results) {
-      // Resize canvas to match video
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
       ctx.save();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      if (results.poseLandmarks) {
+      // Ensure poseLandmarks exists before processing
+      if (results.poseLandmarks && results.poseLandmarks.length > 0) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS);
         drawLandmarks(ctx, results.poseLandmarks);
 
-        // Use left hip landmark (index 23)
+        // Use left hip landmark (index 23) for jump detection
         const hip = results.poseLandmarks[23];
         const y = hip.y; // normalized [0..1]
-        const threshold = 0.5; // tweak this during testing
+        const threshold = 0.5;
 
         if (!isJumping && y < threshold) {
           isJumping = true;
@@ -115,15 +113,14 @@ window.addEventListener("message", (event) => {
           airtimes.push(airtime);
           console.log('Airtime (s):', airtime);
 
-          const height = (9.81 * airtime * airtime) / 8;
+          const height = (9.81 * airtime * airtime) / 8; // Estimated height (m)
           console.log('Estimated height (m):', height);
 
           // If embedding in Lovable, send via postMessage:
-          parent.postMessage(
-            { type: 'jump', airtime, height },
-            '*'
-          );
+          parent.postMessage({ type: 'jump', airtime, height }, '*');
         }
+      } else {
+        console.log("No pose landmarks detected.");
       }
 
       ctx.restore();
