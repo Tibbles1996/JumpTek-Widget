@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <title>JumpTek Pose Test</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
   
   <!-- MediaPipe Pose libraries -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
@@ -16,49 +16,47 @@
       padding: 0;
       overflow: hidden;
       background: #000;
+      height: 100vh;
+      width: 100vw;
     }
-
     video, canvas {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       object-fit: contain;
       transform-origin: center center;
-      transition: transform 0.3s ease;
+      transition: transform 0.2s ease;
     }
-
-    /* Optional zoom buttons */
-    #zoom-controls {
+    .controls {
       position: absolute;
-      bottom: 20px;
-      left: 20px;
-      z-index: 999;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      gap: 10px;
     }
-
-    #zoom-controls button {
-      font-size: 20px;
+    .controls button {
       padding: 10px 15px;
-      margin: 0 5px;
-      border-radius: 10px;
+      font-size: 16px;
       border: none;
-      background: rgba(255, 255, 255, 0.8);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.8);
       cursor: pointer;
-    }
-
-    #zoom-controls button:hover {
-      background: #fff;
     }
   </style>
 </head>
 <body>
- <video id="video" autoplay muted playsinline style="aspect-ratio: 9 / 16;"></video>
+
+  <!-- Camera Output -->
+  <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
-  <!-- Optional Zoom Controls UI -->
-  <div id="zoom-controls">
-    <button onclick="zoomOut()">-</button>
+  <!-- Zoom Controls -->
+  <div class="controls">
+    <button onclick="zoomOut()">−</button>
     <button onclick="zoomIn()">+</button>
   </div>
 
@@ -67,56 +65,72 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    // Camera state
     let currentCamera;
     let useBackCamera = true;
 
-    // Pose setup
+    let zoomLevel = 1;
+
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
     });
+
     pose.setOptions({
       modelComplexity: 1,
       enableSegmentation: false,
       smoothLandmarks: true
     });
+
     pose.onResults(onResults);
 
     function startCamera(facingMode) {
       if (currentCamera) currentCamera.stop();
+
       currentCamera = new Camera(video, {
-  onFrame: async () => await pose.send({ image: video }),
-  width: 720, 
-  height: 1280,
-  facingMode: facingMode,
-  deviceId: undefined
+        onFrame: async () => {
+          applyZoom(); // apply zoom before processing
+          await pose.send({ image: video });
+        },
+        width: 720,
+        height: 1280,
+        facingMode: facingMode
       });
+
       currentCamera.start();
     }
 
-    // Start with back camera
+    // Start with back camera by default
     startCamera('environment');
 
-    // Camera switching
-    window.switchCamera = function () {
-      useBackCamera = !useBackCamera;
-      const newFacing = useBackCamera ? 'environment' : 'user';
-      startCamera(newFacing);
-    };
-
-    // Listen for messages from parent (e.g. Lovable app)
+    // Listen for external message to switch camera
     window.addEventListener("message", (event) => {
       if (event.data?.type === "switchCamera") {
-        console.log("Received switchCamera message");
-        window.switchCamera();
-      } else if (event.data?.type === "zoomIn") {
-        zoomIn();
-      } else if (event.data?.type === "zoomOut") {
-        zoomOut();
+        switchCamera();
       }
     });
 
-    // Jump detection
+    function switchCamera() {
+      useBackCamera = !useBackCamera;
+      const newFacing = useBackCamera ? 'environment' : 'user';
+      startCamera(newFacing);
+    }
+
+    // Zoom Controls
+    function zoomIn() {
+      zoomLevel = Math.min(3.0, zoomLevel + 0.1);
+      applyZoom();
+    }
+
+    function zoomOut() {
+      zoomLevel = Math.max(1.0, zoomLevel - 0.1);
+      applyZoom();
+    }
+
+    function applyZoom() {
+      video.style.transform = `scale(${zoomLevel})`;
+      canvas.style.transform = `scale(${zoomLevel})`;
+    }
+
+    // Jump Detection Logic
     let isJumping = false;
     let jumpStart = 0;
     let airtimes = [];
@@ -133,63 +147,26 @@
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS);
         drawLandmarks(ctx, results.poseLandmarks);
 
-        const hip = results.poseLandmarks[23];
-        const y = hip.y;
+        const hip = results.poseLandmarks[23]; // left hip
+        const y = hip.y; // normalized
         const threshold = 0.5;
 
         if (!isJumping && y < threshold) {
           isJumping = true;
           jumpStart = performance.now();
-          console.log('Jump started at', jumpStart);
         } else if (isJumping && y >= threshold) {
           isJumping = false;
           const airtime = (performance.now() - jumpStart) / 1000;
           airtimes.push(airtime);
-          console.log('Airtime (s):', airtime);
 
           const height = (9.81 * airtime * airtime) / 8;
-          console.log('Estimated height (m):', height);
-
-          parent.postMessage(
-            { type: 'jump', airtime, height },
-            '*'
-          );
+          parent.postMessage({ type: 'jump', airtime, height }, '*');
         }
       }
 
       ctx.restore();
     }
-
-    // Zoom logic
-    let zoomLevel = 1;
-    const minZoom = 1;
-    const maxZoom = 3;
-    const zoomStep = 0.1;
-
-    function applyZoom() {
-      const zoom = `scale(${zoomLevel})`;
-      video.style.transform = zoom;
-      canvas.style.transform = zoom;
-    }
-
-    function zoomIn() {
-      if (zoomLevel < maxZoom) {
-        zoomLevel = Math.min(maxZoom, zoomLevel + zoomStep);
-        applyZoom();
-      }
-    }
-
-    function zoomOut() {
-      if (zoomLevel > minZoom) {
-        zoomLevel = Math.max(minZoom, zoomLevel - zoomStep);
-        applyZoom();
-      }
-    }
-
-    function resetZoom() {
-      zoomLevel = 1;
-      applyZoom();
-    }
   </script>
+
 </body>
 </html>
