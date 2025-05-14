@@ -11,24 +11,26 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
   <style>
-    body, html {
+    html, body {
       margin: 0;
       padding: 0;
-      overflow: hidden;
       background: #000;
+      overflow: hidden;
       height: 100vh;
       width: 100vw;
     }
+
     video, canvas {
       position: absolute;
       top: 0;
       left: 0;
       width: 100vw;
       height: 100vh;
-      object-fit: contain;
+      object-fit: cover;
       transform-origin: center center;
-      transition: transform 0.2s ease;
+      transition: transform 0.3s ease;
     }
+
     .controls {
       position: absolute;
       top: 10px;
@@ -38,6 +40,7 @@
       display: flex;
       gap: 10px;
     }
+
     .controls button {
       padding: 10px 15px;
       font-size: 16px;
@@ -50,11 +53,9 @@
 </head>
 <body>
 
-  <!-- Camera Output -->
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
-  <!-- Zoom Controls -->
   <div class="controls">
     <button onclick="zoomOut()">−</button>
     <button onclick="zoomIn()">+</button>
@@ -67,7 +68,6 @@
 
     let currentCamera;
     let useBackCamera = true;
-
     let zoomLevel = 1;
 
     const pose = new Pose({
@@ -82,36 +82,43 @@
 
     pose.onResults(onResults);
 
-    function startCamera(facingMode) {
+    async function startCamera(facingMode) {
       if (currentCamera) currentCamera.stop();
 
-      currentCamera = new Camera(video, {
+      const constraints = {
+        video: {
+          facingMode,
+          width: { ideal: 720 },
+          height: { ideal: 1280 },
+          aspectRatio: 9/16
+        }
+      };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+
+        video.onloadedmetadata = () => {
+          video.play();
+          runPoseOnVideo();
+        };
+      } catch (err) {
+        console.error("Camera error:", err);
+      }
+    }
+
+    function runPoseOnVideo() {
+      const camera = new Camera(video, {
         onFrame: async () => {
-          applyZoom(); // apply zoom before processing
+          applyZoom();
           await pose.send({ image: video });
         },
         width: 720,
-        height: 1280,
-        facingMode: facingMode
+        height: 1280
       });
 
-      currentCamera.start();
-    }
-
-    // Start with back camera by default
-    startCamera('environment');
-
-    // Listen for external message to switch camera
-    window.addEventListener("message", (event) => {
-      if (event.data?.type === "switchCamera") {
-        switchCamera();
-      }
-    });
-
-    function switchCamera() {
-      useBackCamera = !useBackCamera;
-      const newFacing = useBackCamera ? 'environment' : 'user';
-      startCamera(newFacing);
+      currentCamera = camera;
+      camera.start();
     }
 
     // Zoom Controls
@@ -130,7 +137,19 @@
       canvas.style.transform = `scale(${zoomLevel})`;
     }
 
-    // Jump Detection Logic
+    // Camera Switch
+    function switchCamera() {
+      useBackCamera = !useBackCamera;
+      startCamera(useBackCamera ? 'environment' : 'user');
+    }
+
+    window.addEventListener("message", (event) => {
+      if (event.data?.type === "switchCamera") {
+        switchCamera();
+      }
+    });
+
+    // Jump Detection
     let isJumping = false;
     let jumpStart = 0;
     let airtimes = [];
@@ -147,8 +166,8 @@
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS);
         drawLandmarks(ctx, results.poseLandmarks);
 
-        const hip = results.poseLandmarks[23]; // left hip
-        const y = hip.y; // normalized
+        const hip = results.poseLandmarks[23];
+        const y = hip.y;
         const threshold = 0.5;
 
         if (!isJumping && y < threshold) {
@@ -166,6 +185,9 @@
 
       ctx.restore();
     }
+
+    // Start app
+    startCamera('environment');
   </script>
 
 </body>
