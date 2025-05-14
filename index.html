@@ -1,0 +1,103 @@
+<html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>JumpTek Pose Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- MediaPipe Pose libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    video, canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // 1) Initialize MediaPipe Pose
+    const pose = new Pose({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      enableSegmentation: false,
+      smoothLandmarks: true
+    });
+    pose.onResults(onResults);
+
+    // 2) Hook up the camera
+    const camera = new Camera(video, {
+      onFrame: async () => await pose.send({image: video}),
+      width: 640, height: 480
+    });
+    camera.start();
+
+    // 3) Jump detection state
+    let isJumping = false;
+    let jumpStart = 0;
+    let airtimes = [];
+
+    function onResults(results) {
+      // Resize canvas to match video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      if (results.poseLandmarks) {
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS);
+        drawLandmarks(ctx, results.poseLandmarks);
+
+        // Use left hip landmark (index 23)
+        const hip = results.poseLandmarks[23];
+        const y = hip.y; // normalized [0..1]
+        const threshold = 0.5; // tweak this during testing
+
+        if (!isJumping && y < threshold) {
+          isJumping = true;
+          jumpStart = performance.now();
+          console.log('Jump started at', jumpStart);
+        } else if (isJumping && y >= threshold) {
+          isJumping = false;
+          const airtime = (performance.now() - jumpStart) / 1000;
+          airtimes.push(airtime);
+          console.log('Airtime (s):', airtime);
+
+          const height = (9.81 * airtime * airtime) / 8;
+          console.log('Estimated height (m):', height);
+
+          // If embedding in Lovable, send via postMessage:
+          parent.postMessage(
+            { type: 'jump', airtime, height },
+            '*'
+          );
+        }
+      }
+
+      ctx.restore();
+    }
+  </script>
+</body>
+</html>
+
