@@ -47,7 +47,7 @@
     // 2) Hook up the camera
     const camera = new Camera(video, {
       onFrame: async () => await pose.send({image: video}),
-      width: 640, height: 480
+      width: 360, height: 640
     });
     camera.start();
 
