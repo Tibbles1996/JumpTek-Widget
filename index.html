@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>JumpTek Pose Test</title>
+  <title>JumpTek Pose Tracker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
@@ -33,13 +33,14 @@
       left: 50%;
       transform: translateX(-50%);
       color: white;
-      font-size: 20px;
+      font-size: 18px;
       font-weight: bold;
       background: rgba(0, 0, 0, 0.6);
-      padding: 8px 16px;
+      padding: 10px 20px;
       border-radius: 10px;
       z-index: 10;
       text-align: center;
+      max-width: 90vw;
     }
 
     .controls {
@@ -67,7 +68,11 @@
 
   <div id="stats">
     Airtime: 0.00s<br/>
-    Height: 0.00m
+    Height: 0.00m<br/>
+    Highest: 0.00m<br/>
+    Lowest: 0.00m<br/>
+    Avg: 0.00m<br/>
+    Jumps: 0
   </div>
 
   <div class="controls">
@@ -82,15 +87,17 @@
 
     let currentStream = null;
     let useBackCamera = true;
+
     let isJumping = false;
     let jumpStart = 0;
+    const jumpHeights = [];
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
     });
 
     pose.setOptions({
-      modelComplexity: 0, // Optimized for speed
+      modelComplexity: 0,
       smoothLandmarks: true,
       enableSegmentation: false
     });
@@ -105,9 +112,10 @@
       try {
         const constraints = {
           video: {
-            facingMode: useBackCamera ? { exact: 'environment' } : 'user',
+            facingMode: useBackCamera ? 'environment' : 'user',
             width: { ideal: 720 },
             height: { ideal: 1280 },
+            aspectRatio: 9 / 16,
             frameRate: { ideal: 30 }
           }
         };
@@ -142,6 +150,22 @@
       startCamera();
     }
 
+    function updateStatsDisplay(airtime, height) {
+      jumpHeights.push(height);
+      const highest = Math.max(...jumpHeights);
+      const lowest = Math.min(...jumpHeights);
+      const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
+
+      stats.innerHTML = `
+        Airtime: ${airtime.toFixed(2)}s<br/>
+        Height: ${height.toFixed(2)}m<br/>
+        Highest: ${highest.toFixed(2)}m<br/>
+        Lowest: ${lowest.toFixed(2)}m<br/>
+        Avg: ${avg.toFixed(2)}m<br/>
+        Jumps: ${jumpHeights.length}
+      `;
+    }
+
     function onResults(results) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -166,8 +190,7 @@
           const airtime = (performance.now() - jumpStart) / 1000;
           const height = (9.81 * airtime * airtime) / 8;
 
-          stats.innerHTML = `Airtime: ${airtime.toFixed(2)}s<br/>Height: ${height.toFixed(2)}m`;
-
+          updateStatsDisplay(airtime, height);
           parent.postMessage({ type: 'jump', airtime, height }, '*');
         }
       }
