@@ -264,12 +264,12 @@
       if (videoDevices.length > 0) {
         await startCamera(videoDevices[currentCameraIndex].deviceId);
         if (videoDevices.length === 1) {
-          switchCameraBtn.style.display = 'none';
+          switchCameraBtn.style.display = 'block';
         }
       } else {
         // fallback: just try to start
         await startCamera();
-        switchCameraBtn.style.display = 'none';
+        switchCameraBtn.style.display = 'block';
       }
     })();
 
