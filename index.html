@@ -28,6 +28,29 @@
       object-fit: contain;
     }
 
+    #switchCameraBtn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 30;
+      background: rgba(30,30,30,0.75);
+      border: none;
+      border-radius: 50%;
+      width: 48px;
+      height: 48px;
+      color: #fff;
+      font-size: 1.8em;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      transition: background 0.2s;
+    }
+    #switchCameraBtn:hover {
+      background: rgba(60,60,60,0.90);
+    }
+
     #stats {
       display: none;
     }
@@ -67,6 +90,11 @@
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
+  <!-- Switch Camera Button -->
+  <button id="switchCameraBtn" title="Switch Camera">
+    <i class="fa-solid fa-camera-rotate"></i>
+  </button>
+
   <div id="stats"></div>
 
   <div id="calibrationOverlay">
@@ -78,8 +106,11 @@
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
+    const switchCameraBtn = document.getElementById('switchCameraBtn');
 
     let currentStream = null;
+    let currentCameraIndex = 0;
+    let videoDevices = [];
     let isJumping = false;
     let jumpStart = 0;
     let baselineY = null;
@@ -101,7 +132,12 @@
 
     pose.onResults(onResults);
 
-    async function startCamera() {
+    async function getVideoDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      videoDevices = devices.filter(device => device.kind === 'videoinput');
+    }
+
+    async function startCamera(deviceId) {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
       }
@@ -109,6 +145,7 @@
       const constraints = {
         audio: false,
         video: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
           width: { ideal: 1280 },
           height: { ideal: 720 },
           aspectRatio: 9 / 16,
@@ -214,7 +251,28 @@
       ctx.restore();
     }
 
-    startCamera();
+    // Switch camera logic
+    switchCameraBtn.addEventListener('click', async () => {
+      if (videoDevices.length < 2) return;
+      currentCameraIndex = (currentCameraIndex + 1) % videoDevices.length;
+      await startCamera(videoDevices[currentCameraIndex].deviceId);
+    });
+
+    // On load: gather cameras, start with the first one
+    (async () => {
+      await getVideoDevices();
+      if (videoDevices.length > 0) {
+        await startCamera(videoDevices[currentCameraIndex].deviceId);
+        if (videoDevices.length === 1) {
+          switchCameraBtn.style.display = 'none';
+        }
+      } else {
+        // fallback: just try to start
+        await startCamera();
+        switchCameraBtn.style.display = 'none';
+      }
+    })();
+
   </script>
 </body>
 </html>
