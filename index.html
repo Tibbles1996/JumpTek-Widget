@@ -7,14 +7,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <style>
     html, body {
       margin: 0;
       padding: 0;
       background: #000;
       overflow: hidden;
-      height: 100vh;
+      height: 100dvh;
       width: 100vw;
     }
 
@@ -23,16 +22,17 @@
       top: 0;
       left: 0;
       width: 100vw;
-      height: 100vh;
-      object-fit: contain;
+      height: 100dvh;
+      object-fit: cover;
     }
 
     #stats {
-      display: none;
+      display: none; /* Hide stats */
     }
   </style>
 </head>
 <body>
+
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
   <div id="stats"></div>
@@ -42,8 +42,16 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    let Instance = null;
-    let currentStream = null;
+    let isJumping = false;
+    let jumpStart = 0;
+    let jumpHeights = [];
+
+    let jumpThreshold = 0.02;
+    let baselineY = null;
+    const alpha = 0.1;
+
+    let lastY = null;
+    let lastTime = null;
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -57,76 +65,17 @@
 
     pose.onResults(onResults);
 
-// --- Camera Function ---
-    
-    async function startCamera() {
-  if (currentStream) {
-    currentStream.getTracks().forEach(track => track.stop());
-  }
-
-  const constraints = {
-    audio: false,
-    video: {
-      facingMode: { exact: 'environment' }, // try forcing back camera
-      width: { ideal: 720 },
-      height: { ideal: 1280 },
-      aspectRatio: 9 / 16,
-      frameRate: { ideal: 30 }
-    }
-  };
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    currentStream = stream;
-    video.srcObject = stream;
-    video.onloadedmetadata = () => {
-      video.play();
-      runPose();
-    };
-
-    // Debug log: verify which camera is used
-    const track = stream.getVideoTracks()[0];
-    console.log("Camera label:", track.label);
-
-  } catch (err) {
-    console.warn("Exact facingMode failed, retrying with ideal.");
-    try {
-      const fallbackStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 720 },
-          height: { ideal: 1280 },
-          aspectRatio: 9 / 16,
-          frameRate: { ideal: 30 }
-        }
+    function startCamera() {
+      const camera = new Camera(video, {
+        onFrame: async () => {
+          await pose.send({ image: video });
+        },
+        width: 720,
+        height: 1280,
+        facingMode: 'environment' // Force back-facing camera
       });
-      currentStream = fallbackStream;
-      video.srcObject = fallbackStream;
-      video.onloadedmetadata = () => {
-        video.play();
-        runPose();
-      };
-
-      const track = fallbackStream.getVideoTracks()[0];
-      console.log("Fallback camera label:", track.label);
-
-    } catch (fallbackErr) {
-      console.error("Both camera attempts failed:", fallbackErr);
+      camera.start();
     }
-  }
-}
-
-
-    // --- Pose and Jump Logic ---
-    let isJumping = false;
-    let jumpStart = 0;
-    let jumpHeights = [];
-
-    let jumpThreshold = 0.02;
-    let baselineY = null;
-    const alpha = 0.1;
-    let lastY = null;
-    let lastTime = null;
 
     function updateStatsDisplay(airtime, height) {
       jumpHeights.push(height);
@@ -135,6 +84,7 @@
       const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
       const count = jumpHeights.length;
 
+      // Send to UI
       parent.postMessage({
         type: 'jump',
         airtime,
@@ -145,6 +95,7 @@
         count
       }, '*');
 
+      // Store in localStorage (simulate user profile persistence)
       const history = JSON.parse(localStorage.getItem('jumpHistory') || '[]');
       history.push({ timestamp: Date.now(), airtime, height });
       localStorage.setItem('jumpHistory', JSON.stringify(history));
@@ -169,11 +120,9 @@
         const hip = results.poseLandmarks[23];
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
-
-        if (!hip || !leftAnkle || !rightAnkle) return;
-
         const y = hip.y;
         const now = performance.now();
+
         const canvasX = canvas.width;
         const canvasY = canvas.height;
 
@@ -186,6 +135,7 @@
         };
 
         const isOnTrampoline = footInTrampoline(leftAnkle) && footInTrampoline(rightAnkle);
+
         if (!isOnTrampoline) return;
 
         if (baselineY === null) baselineY = y;
@@ -205,8 +155,11 @@
         } else if (isJumping && deltaY <= jumpThreshold / 2 && velocity > 0.1) {
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
+
+          // Improved height estimation using airtime and gravity
           const g = 9.81;
           const height = (g * airtime * airtime) / 8;
+
           updateStatsDisplay(airtime, height);
         }
 
@@ -217,14 +170,12 @@
       ctx.restore();
     }
 
-    // Only allow reset message, not switching
     window.addEventListener("message", (event) => {
       if (event.data?.type === "resetSession") {
         resetSession();
       }
     });
 
-    // Init
     startCamera();
   </script>
 </body>
