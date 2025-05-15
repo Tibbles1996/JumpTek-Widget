@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
   <style>
@@ -90,7 +89,6 @@
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
 
-  <!-- Switch Camera Button -->
   <button id="switchCameraBtn" title="Switch Camera">
     <i class="fa-solid fa-camera-rotate"></i>
   </button>
@@ -118,6 +116,7 @@
     let lastTime = null;
     let userInputDistance = 21 * 0.3048; // default 21 feet
     let userInputHeight = 1.0; // default 1 meter above trampoline
+    let animationFrameId;
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -135,8 +134,10 @@
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
       }
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
 
-      // Use facingMode for best iOS support
       const constraints = {
         audio: false,
         video: {
@@ -154,40 +155,21 @@
         video.srcObject = stream;
         video.onloadedmetadata = () => {
           video.play();
-          runPose();
+          // Wait until the video is actually playing before starting the frame loop
+          video.addEventListener('playing', processVideoFrame, { once: true });
         };
       } catch (err) {
-        // If facingMode fails (rare), try without it
-        if (constraints.video && constraints.video.facingMode) {
-          try {
-            delete constraints.video.facingMode;
-            const fallbackStream = await navigator.mediaDevices.getUserMedia(constraints);
-            currentStream = fallbackStream;
-            video.srcObject = fallbackStream;
-            video.onloadedmetadata = () => {
-              video.play();
-              runPose();
-            };
-          } catch (e) {
-            alert('Unable to access camera.');
-            console.error('Camera error:', err, e);
-          }
-        } else {
-          alert('Unable to access camera.');
-          console.error('Camera error:', err);
-        }
+        alert('Unable to access camera.');
+        console.error('Camera error:', err);
       }
     }
 
-    function runPose() {
-      const camera = new Camera(video, {
-        onFrame: async () => {
-          await pose.send({ image: video });
-        },
-        width: 1280,
-        height: 720
-      });
-      camera.start();
+    async function processVideoFrame() {
+      if (video.paused || video.ended) {
+        return;
+      }
+      await pose.send({ image: video });
+      animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
     function updateStatsDisplay(airtime, height) {
