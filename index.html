@@ -32,43 +32,33 @@
       display: none;
     }
 
-    .controls {
+    #calibrationOverlay {
       position: absolute;
-      top: 10px;
+      bottom: 10%;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 10;
+      width: 100%;
+      height: 0;
+      z-index: 20;
+      pointer-events: none;
     }
 
-    .controls button {
-      padding: 8px 14px;
-      font-size: 16px;
-      border: none;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.85);
-      cursor: pointer;
-    }
-
-    #calibration-dot {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
+    #calibrationDot {
       width: 10px;
       height: 10px;
-      background-color: green;
+      background-color: #0f0;
       border-radius: 50%;
-      z-index: 10;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
     }
 
-    #calibration-line {
-      position: absolute;
-      bottom: 25px;
-      left: 0;
+    #calibrationLine {
       width: 100%;
       height: 2px;
-      background-color: green;
-      z-index: 10;
+      background-color: #0f0;
+      position: absolute;
+      top: 5px;
     }
   </style>
 </head>
@@ -78,11 +68,10 @@
   <canvas id="canvas"></canvas>
 
   <div id="stats"></div>
-  <div id="calibration-dot"></div>
-  <div id="calibration-line"></div>
 
-  <div class="controls">
-    <button onclick="switchCamera()"><i class="fas fa-camera-rotate"></i> Switch</button>
+  <div id="calibrationOverlay">
+    <div id="calibrationDot"></div>
+    <div id="calibrationLine"></div>
   </div>
 
   <script>
@@ -91,29 +80,14 @@
     const ctx = canvas.getContext('2d');
 
     let currentStream = null;
-    let useBackCamera = true;
-
     let isJumping = false;
     let jumpStart = 0;
-    let jumpThreshold = 0.02;
     let baselineY = null;
     const alpha = 0.1;
-
     let lastY = null;
     let lastTime = null;
-
-    let userDistanceMeters = 6.4;
-    let userHeightAboveTrampoline = 1.0;
-
-    window.addEventListener("message", (event) => {
-      if (event.data?.type === "switchCamera") {
-        switchCamera();
-      }
-      if (event.data?.type === "calibrationInput") {
-        if (event.data.distanceMeters) userDistanceMeters = event.data.distanceMeters;
-        if (event.data.heightMeters) userHeightAboveTrampoline = event.data.heightMeters;
-      }
-    });
+    let userInputDistance = 21 * 0.3048; // default 21 feet
+    let userInputHeight = 1.0; // default 1 meter above trampoline
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -135,11 +109,11 @@
       const constraints = {
         audio: false,
         video: {
-          facingMode: useBackCamera ? { exact: 'environment' } : 'user',
-          width: { ideal: 720 },
-          height: { ideal: 1280 },
+          facingMode: { exact: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
           aspectRatio: 9 / 16,
-          frameRate: { ideal: 30 }
+          frameRate: { ideal: 120 }
         }
       };
 
@@ -167,22 +141,12 @@
       camera.start();
     }
 
-    function switchCamera() {
-      useBackCamera = !useBackCamera;
-      startCamera();
-    }
-
     function updateStatsDisplay(airtime, height) {
       parent.postMessage({
         type: 'jump',
         airtime,
         height
       }, '*');
-    }
-
-    function autoEstimateDistance(ankles) {
-      const dx = Math.abs(ankles[0].x - ankles[1].x);
-      return 1.5 / dx;
     }
 
     function onResults(results) {
@@ -206,15 +170,16 @@
         const canvasX = canvas.width;
         const canvasY = canvas.height;
 
-        const ankleX = (leftAnkle.x + rightAnkle.x) / 2;
-        const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
+        const footInTrampoline = (pt) => {
+          const x = pt.x * canvasX;
+          const y = pt.y * canvasY;
+          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
+          const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
+          return inX && inY;
+        };
 
-        const calibrationDot = document.getElementById("calibration-dot");
-        const calibrationLine = document.getElementById("calibration-line");
-        const calibrationY = 1 - calibrationDot.getBoundingClientRect().bottom / canvasY;
-
-        const estimatedDistance = autoEstimateDistance([leftAnkle, rightAnkle]);
-        const finalDistance = (userDistanceMeters + estimatedDistance) / 2;
+        const isOnTrampoline = footInTrampoline(leftAnkle) && footInTrampoline(rightAnkle);
+        if (!isOnTrampoline) return;
 
         if (baselineY === null) baselineY = y;
         else baselineY = alpha * y + (1 - alpha) * baselineY;
@@ -227,15 +192,18 @@
 
         const deltaY = baselineY - y;
 
-        if (!isJumping && deltaY > jumpThreshold && velocity < -0.5) {
+        if (!isJumping && deltaY > 0.02 && velocity < -0.5) {
           isJumping = true;
           jumpStart = now;
-        } else if (isJumping && deltaY <= jumpThreshold / 2 && velocity > 0.1) {
+        } else if (isJumping && deltaY <= 0.01 && velocity > 0.1) {
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
 
-          let height = (9.81 * airtime * airtime) / 8;
-          height *= finalDistance / 6.4;
+          const estimatedDistance = Math.abs(leftAnkle.x - rightAnkle.x);
+          const autoDistance = 0.4 / estimatedDistance;
+          const calibrationFactor = (userInputDistance + autoDistance) / 2;
+
+          let height = 0.6 * airtime * (calibrationFactor / 6.4);
 
           updateStatsDisplay(airtime, height);
         }
