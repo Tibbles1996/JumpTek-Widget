@@ -42,7 +42,7 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
-    let cameraInstance = null;
+    let Instance = null;
     let currentStream = null;
 
     const pose = new Pose({
@@ -57,19 +57,41 @@
 
     pose.onResults(onResults);
 
+// --- Camera Function ---
+    
     async function startCamera() {
-      if (cameraInstance) {
-        cameraInstance.stop();
-        cameraInstance = null;
-      }
+  if (currentStream) {
+    currentStream.getTracks().forEach(track => track.stop());
+  }
 
-      if (currentStream) {
-        currentStream.getTracks().forEach(track => track.stop());
-        currentStream = null;
-      }
+  const constraints = {
+    audio: false,
+    video: {
+      facingMode: { exact: 'environment' }, // try forcing back camera
+      width: { ideal: 720 },
+      height: { ideal: 1280 },
+      aspectRatio: 9 / 16,
+      frameRate: { ideal: 30 }
+    }
+  };
 
-      const constraints = {
-        audio: false,
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    currentStream = stream;
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      video.play();
+      runPose();
+    };
+
+    // Debug log: verify which camera is used
+    const track = stream.getVideoTracks()[0];
+    console.log("Camera label:", track.label);
+
+  } catch (err) {
+    console.warn("Exact facingMode failed, retrying with ideal.");
+    try {
+      const fallbackStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 720 },
@@ -77,28 +99,23 @@
           aspectRatio: 9 / 16,
           frameRate: { ideal: 30 }
         }
+      });
+      currentStream = fallbackStream;
+      video.srcObject = fallbackStream;
+      video.onloadedmetadata = () => {
+        video.play();
+        runPose();
       };
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        currentStream = stream;
-        video.srcObject = stream;
+      const track = fallbackStream.getVideoTracks()[0];
+      console.log("Fallback camera label:", track.label);
 
-        await video.play();
-
-        cameraInstance = new Camera(video, {
-          onFrame: async () => {
-            await pose.send({ image: video });
-          },
-          width: 1280,
-          height: 720
-        });
-
-        cameraInstance.start();
-      } catch (err) {
-        console.error('Camera error:', err);
-      }
+    } catch (fallbackErr) {
+      console.error("Both camera attempts failed:", fallbackErr);
     }
+  }
+}
+
 
     // --- Pose and Jump Logic ---
     let isJumping = false;
