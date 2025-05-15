@@ -109,8 +109,7 @@
     const switchCameraBtn = document.getElementById('switchCameraBtn');
 
     let currentStream = null;
-    let currentCameraIndex = 0;
-    let videoDevices = [];
+    let useFrontCamera = false; // false = rear, true = front
     let isJumping = false;
     let jumpStart = 0;
     let baselineY = null;
@@ -132,20 +131,16 @@
 
     pose.onResults(onResults);
 
-    async function getVideoDevices() {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      videoDevices = devices.filter(device => device.kind === 'videoinput');
-    }
-
-    async function startCamera(deviceId) {
+    async function startCamera() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
       }
 
+      // Use facingMode for best iOS support
       const constraints = {
         audio: false,
         video: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
+          facingMode: useFrontCamera ? 'user' : 'environment',
           width: { ideal: 1280 },
           height: { ideal: 720 },
           aspectRatio: 9 / 16,
@@ -162,7 +157,25 @@
           runPose();
         };
       } catch (err) {
-        console.error('Camera error:', err);
+        // If facingMode fails (rare), try without it
+        if (constraints.video && constraints.video.facingMode) {
+          try {
+            delete constraints.video.facingMode;
+            const fallbackStream = await navigator.mediaDevices.getUserMedia(constraints);
+            currentStream = fallbackStream;
+            video.srcObject = fallbackStream;
+            video.onloadedmetadata = () => {
+              video.play();
+              runPose();
+            };
+          } catch (e) {
+            alert('Unable to access camera.');
+            console.error('Camera error:', err, e);
+          }
+        } else {
+          alert('Unable to access camera.');
+          console.error('Camera error:', err);
+        }
       }
     }
 
@@ -251,26 +264,15 @@
       ctx.restore();
     }
 
-    // Switch camera logic
+    // Switch camera logic: toggles between front and rear using facingMode for iOS compatibility
     switchCameraBtn.addEventListener('click', async () => {
-      if (videoDevices.length < 2) return;
-      currentCameraIndex = (currentCameraIndex + 1) % videoDevices.length;
-      await startCamera(videoDevices[currentCameraIndex].deviceId);
+      useFrontCamera = !useFrontCamera;
+      await startCamera();
     });
 
-    // On load: gather cameras, start with the first one
+    // On load: start with the rear (environment) camera
     (async () => {
-      await getVideoDevices();
-      if (videoDevices.length > 0) {
-        await startCamera(videoDevices[currentCameraIndex].deviceId);
-        if (videoDevices.length === 1) {
-          switchCameraBtn.style.display = 'block';
-        }
-      } else {
-        // fallback: just try to start
-        await startCamera();
-        switchCameraBtn.style.display = 'block';
-      }
+      await startCamera();
     })();
 
   </script>
