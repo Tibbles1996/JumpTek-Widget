@@ -7,13 +7,15 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
   <style>
     html, body {
       margin: 0;
       padding: 0;
       background: #000;
       overflow: hidden;
-      height: 100dvh;
+      height: 100vh;
       width: 100vw;
     }
 
@@ -22,12 +24,51 @@
       top: 0;
       left: 0;
       width: 100vw;
-      height: 100dvh;
-      object-fit: cover;
+      height: 100vh;
+      object-fit: contain;
     }
 
     #stats {
-      display: none; /* Hide stats */
+      display: none;
+    }
+
+    .controls {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+
+    .controls button {
+      padding: 8px 14px;
+      font-size: 16px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.85);
+      cursor: pointer;
+    }
+
+    #calibration-dot {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 10px;
+      height: 10px;
+      background-color: green;
+      border-radius: 50%;
+      z-index: 10;
+    }
+
+    #calibration-line {
+      position: absolute;
+      bottom: 25px;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background-color: green;
+      z-index: 10;
     }
   </style>
 </head>
@@ -35,23 +76,44 @@
 
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas"></canvas>
+
   <div id="stats"></div>
+  <div id="calibration-dot"></div>
+  <div id="calibration-line"></div>
+
+  <div class="controls">
+    <button onclick="switchCamera()"><i class="fas fa-camera-rotate"></i> Switch</button>
+  </div>
 
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
 
+    let currentStream = null;
+    let useBackCamera = true;
+
     let isJumping = false;
     let jumpStart = 0;
-    let jumpHeights = [];
-
     let jumpThreshold = 0.02;
     let baselineY = null;
     const alpha = 0.1;
 
     let lastY = null;
     let lastTime = null;
+
+    let userDistanceMeters = 6.4;
+    let userHeightAboveTrampoline = 1.0;
+
+    window.addEventListener("message", (event) => {
+      if (event.data?.type === "switchCamera") {
+        switchCamera();
+      }
+      if (event.data?.type === "calibrationInput") {
+        if (event.data.distanceMeters) userDistanceMeters = event.data.distanceMeters;
+        if (event.data.heightMeters) userHeightAboveTrampoline = event.data.heightMeters;
+      }
+    });
 
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
@@ -65,44 +127,62 @@
 
     pose.onResults(onResults);
 
-    function startCamera() {
+    async function startCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: useBackCamera ? { exact: 'environment' } : 'user',
+          width: { ideal: 720 },
+          height: { ideal: 1280 },
+          aspectRatio: 9 / 16,
+          frameRate: { ideal: 30 }
+        }
+      };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        currentStream = stream;
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          runPose();
+        };
+      } catch (err) {
+        console.error('Camera error:', err);
+      }
+    }
+
+    function runPose() {
       const camera = new Camera(video, {
         onFrame: async () => {
           await pose.send({ image: video });
         },
-        width: 1280,
-        height: 720,
-        facingMode: 'environment' // Force back-facing camera
+        width: 720,
+        height: 1280
       });
       camera.start();
     }
 
-    function updateStatsDisplay(airtime, height) {
-      jumpHeights.push(height);
-      const highest = Math.max(...jumpHeights);
-      const lowest = Math.min(...jumpHeights);
-      const avg = jumpHeights.reduce((a, b) => a + b, 0) / jumpHeights.length;
-      const count = jumpHeights.length;
+    function switchCamera() {
+      useBackCamera = !useBackCamera;
+      startCamera();
+    }
 
-      // Send to UI
+    function updateStatsDisplay(airtime, height) {
       parent.postMessage({
         type: 'jump',
         airtime,
-        height,
-        highest,
-        lowest,
-        average: avg,
-        count
+        height
       }, '*');
-
-      // Store in localStorage (simulate user profile persistence)
-      const history = JSON.parse(localStorage.getItem('jumpHistory') || '[]');
-      history.push({ timestamp: Date.now(), airtime, height });
-      localStorage.setItem('jumpHistory', JSON.stringify(history));
     }
 
-    function resetSession() {
-      jumpHeights = [];
+    function autoEstimateDistance(ankles) {
+      const dx = Math.abs(ankles[0].x - ankles[1].x);
+      return 1.5 / dx;
     }
 
     function onResults(results) {
@@ -126,17 +206,15 @@
         const canvasX = canvas.width;
         const canvasY = canvas.height;
 
-        const footInTrampoline = (pt) => {
-          const x = pt.x * canvasX;
-          const y = pt.y * canvasY;
-          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
-          const inY = y > 0.5 * canvasY && y < 0.9 * canvasY;
-          return inX && inY;
-        };
+        const ankleX = (leftAnkle.x + rightAnkle.x) / 2;
+        const ankleY = (leftAnkle.y + rightAnkle.y) / 2;
 
-        const isOnTrampoline = footInTrampoline(leftAnkle) && footInTrampoline(rightAnkle);
+        const calibrationDot = document.getElementById("calibration-dot");
+        const calibrationLine = document.getElementById("calibration-line");
+        const calibrationY = 1 - calibrationDot.getBoundingClientRect().bottom / canvasY;
 
-        if (!isOnTrampoline) return;
+        const estimatedDistance = autoEstimateDistance([leftAnkle, rightAnkle]);
+        const finalDistance = (userDistanceMeters + estimatedDistance) / 2;
 
         if (baselineY === null) baselineY = y;
         else baselineY = alpha * y + (1 - alpha) * baselineY;
@@ -156,9 +234,8 @@
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
 
-          // Improved height estimation using airtime and gravity
-          const g = 9.81;
-          const height = (g * airtime * airtime) / 8;
+          let height = (9.81 * airtime * airtime) / 8;
+          height *= finalDistance / 6.4;
 
           updateStatsDisplay(airtime, height);
         }
@@ -169,12 +246,6 @@
 
       ctx.restore();
     }
-
-    window.addEventListener("message", (event) => {
-      if (event.data?.type === "resetSession") {
-        resetSession();
-      }
-    });
 
     startCamera();
   </script>
