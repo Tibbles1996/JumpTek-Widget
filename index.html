@@ -109,11 +109,10 @@
       const constraints = {
         audio: false,
         video: {
-          facingMode: { exact: 'environment' },
           width: { ideal: 1280 },
           height: { ideal: 720 },
           aspectRatio: 9 / 16,
-          frameRate: { ideal: 120 }
+          frameRate: { ideal: 30 }
         }
       };
 
@@ -135,8 +134,8 @@
         onFrame: async () => {
           await pose.send({ image: video });
         },
-        width: 720,
-        height: 1280
+        width: 1280,
+        height: 720
       });
       camera.start();
     }
