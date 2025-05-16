@@ -1,237 +1,257 @@
-<script>
-  // ===============================
-  // Initialization and Global Variables
-  // ===============================
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  const switchCameraBtn = document.getElementById('switchCameraBtn');
-  const loadingIndicator = document.getElementById('loadingIndicator'); // Optional: Add in HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JumpTek MediaPipe AI Tracker Widget</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background: #222;
+      color: #fff;
+      font-family: Arial, sans-serif;
+    }
+    #canvas {
+      width: 100vw;
+      height: 70vw;
+      max-width: 400px;
+      max-height: 700px;
+      background: #000;
+      border: 2px solid #0ff;
+      margin: 20px 0;
+    }
+    #video {
+      display: none;
+    }
+    #switchCameraBtn {
+      margin: 10px;
+      padding: 10px 20px;
+      font-size: 1rem;
+      border-radius: 5px;
+      background: #00bcd4;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    #loadingIndicator {
+      margin: 10px;
+      color: #ff0;
+    }
+  </style>
+  <!-- Load MediaPipe and Drawing Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <video id="video" autoplay playsinline></video>
+  <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">Switch Camera</button>
+  <div id="loadingIndicator" style="display:none;">Loading...</div>
 
-  let currentStream = null;
-  let useFrontCamera = false; // false = rear, true = front
-  let isJumping = false;
-  let jumpStart = 0;
-  let animationFrameId;
-  let parentOrigin = "YOUR_PARENT_ORIGIN"; // <--- Set this to your parent window's origin for security
+  <script>
+    // ===============================
+    // Initialization and Global Variables
+    // ===============================
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const switchCameraBtn = document.getElementById('switchCameraBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
 
-  // ===============================
-  // Pose Object Initialization
-  // ===============================
-  // Loads MediaPipe's Pose model from CDN, with dynamic options for scalability.
-  // Title: InitializePose
-  const poseOptions = {
-    modelComplexity: 0,
-    smoothLandmarks: true,
-    enableSegmentation: false
-  };
-  const pose = new Pose({
-    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-  });
-  pose.setOptions(poseOptions);
-  pose.onResults(onResults);
+    let currentStream = null;
+    let useFrontCamera = false; // false = rear, true = front
+    let isJumping = false;
+    let jumpStart = 0;
+    let animationFrameId;
+    let parentOrigin = "YOUR_PARENT_ORIGIN"; // <--- Set this to your parent window's origin for security
 
-  // ===============================
-  // Start Camera with Error Handling and Loading State
-  // Title: startCamera
-  // ===============================
-  async function startCamera() {
-    showLoading(true);
-    try {
-      // Stop any previous streams and animation frames
+    // ===============================
+    // Pose Object Initialization
+    // ===============================
+    const poseOptions = {
+      modelComplexity: 0,
+      smoothLandmarks: true,
+      enableSegmentation: false
+    };
+    const pose = new Pose({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+    });
+    pose.setOptions(poseOptions);
+    pose.onResults(onResults);
+
+    // ===============================
+    // Start Camera with Error Handling and Loading State
+    // ===============================
+    async function startCamera() {
+      showLoading(true);
+      try {
+        if (currentStream) {
+          currentStream.getTracks().forEach(track => track.stop());
+        }
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        const constraints = {
+          audio: false,
+          video: {
+            facingMode: useFrontCamera ? 'user' : 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            aspectRatio: 9 / 16,
+            frameRate: { ideal: 30 }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        currentStream = stream;
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          video.addEventListener('playing', processVideoFrame, { once: true });
+          showLoading(false);
+        };
+      } catch (err) {
+        showLoading(false);
+        alert('Unable to access camera. Please check your device settings and permissions.');
+        console.error('Camera error:', err);
+      }
+    }
+
+    // ===============================
+    // Loading Indicator Controls
+    // ===============================
+    function showLoading(show) {
+      if (loadingIndicator) {
+        loadingIndicator.style.display = show ? 'block' : 'none';
+      }
+    }
+
+    // ===============================
+    // Frame Processing Loop
+    // ===============================
+    async function processVideoFrame() {
+      if (video.paused || video.ended) {
+        return;
+      }
+      try {
+        await pose.send({ image: video });
+      } catch (e) {
+        console.error('Pose detection error:', e);
+      }
+      animationFrameId = requestAnimationFrame(processVideoFrame);
+    }
+
+    // ===============================
+    // Update Jump Stats and Notify Parent
+    // ===============================
+    function updateStatsDisplay(airtime, height) {
+      window.parent.postMessage({
+        type: 'jump',
+        airtime,
+        height
+      }, parentOrigin);
+    }
+
+    // ===============================
+    // Jump Logic and Canvas Drawing
+    // ===============================
+    function onResults(results) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+      if (results.poseLandmarks) {
+        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
+        drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
+
+        const leftAnkle = results.poseLandmarks[27];
+        const rightAnkle = results.poseLandmarks[28];
+
+        if (!leftAnkle || !rightAnkle) {
+          ctx.restore();
+          return;
+        }
+
+        const now = performance.now();
+        const canvasX = canvas.width;
+        const canvasY = canvas.height;
+
+        function footInTrampoline(pt) {
+          const x = pt.x * canvasX;
+          const y = pt.y * canvasY;
+          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
+          const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
+          return inX && inY;
+        }
+
+        const leftOn = footInTrampoline(leftAnkle);
+        const rightOn = footInTrampoline(rightAnkle);
+        const isOnTrampoline = leftOn && rightOn;
+
+        // Detect takeoff
+        if (!isJumping && !isOnTrampoline) {
+          isJumping = true;
+          jumpStart = now;
+        }
+        // Detect landing
+        if (isJumping && isOnTrampoline) {
+          isJumping = false;
+          const airtime = (now - jumpStart) / 1000;
+          const g = 9.81;
+          const height = 0.5 * g * Math.pow(airtime / 2, 2);
+          updateStatsDisplay(airtime, height);
+        }
+      }
+      ctx.restore();
+    }
+
+    // ===============================
+    // Camera Switch Button Handler (with Accessibility)
+    // ===============================
+    async function handleSwitchCamera() {
+      useFrontCamera = !useFrontCamera;
+      await startCamera();
+      switchCameraBtn.setAttribute('aria-pressed', String(useFrontCamera));
+    }
+    switchCameraBtn.addEventListener('click', handleSwitchCamera);
+    switchCameraBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleSwitchCamera();
+      }
+    });
+
+    // ===============================
+    // Cleanup Resources on Unload
+    // ===============================
+    function cleanupResources() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
       }
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
       }
-
-      // Set constraints, using facingMode for camera selection
-      const constraints = {
-        audio: false,
-        video: {
-          facingMode: useFrontCamera ? 'user' : 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          aspectRatio: 9 / 16,
-          frameRate: { ideal: 30 }
-        }
-      };
-
-      // Request camera access
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      currentStream = stream;
-      video.srcObject = stream;
-      video.onloadedmetadata = () => {
-        video.play();
-        video.addEventListener('playing', processVideoFrame, { once: true });
-        showLoading(false);
-      };
-    } catch (err) {
-      showLoading(false);
-      alert('Unable to access camera. Please check your device settings and permissions.');
-      console.error('Camera error:', err);
     }
-  }
+    window.addEventListener('beforeunload', cleanupResources);
 
-  // ===============================
-  // Loading Indicator Controls
-  // Title: showLoading
-  // ===============================
-  function showLoading(show) {
-    if (loadingIndicator) {
-      loadingIndicator.style.display = show ? 'block' : 'none';
+    // ===============================
+    // Camera Access Notice (optional UX)
+    // ===============================
+    function showCameraAccessNotice() {
+      // Optional: Implement a notice for the user before requesting camera access.
     }
-  }
 
-  // ===============================
-  // Frame Processing Loop
-  // Title: processVideoFrame
-  // ===============================
-  async function processVideoFrame() {
-    if (video.paused || video.ended) {
-      return;
-    }
-    try {
-      await pose.send({ image: video });
-    } catch (e) {
-      console.error('Pose detection error:', e);
-    }
-    animationFrameId = requestAnimationFrame(processVideoFrame);
-  }
-
-  // ===============================
-  // Update Jump Stats and Notify Parent
-  // Title: updateStatsDisplay
-  // ===============================
-  function updateStatsDisplay(airtime, height) {
-    // For security, always specify a target origin instead of '*'
-    window.parent.postMessage({
-      type: 'jump',
-      airtime,
-      height
-    }, parentOrigin);
-  }
-
-  // ===============================
-  // Jump Logic and Canvas Drawing
-  // Title: onResults
-  // ===============================
-  function onResults(results) {
-    // Resize canvas to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    ctx.save();
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
-    if (results.poseLandmarks) {
-      // Draw pose landmarks and connectors for visualization
-      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
-      drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
-
-      // Get ankle landmarks
-      const leftAnkle = results.poseLandmarks[27];
-      const rightAnkle = results.poseLandmarks[28];
-
-      if (!leftAnkle || !rightAnkle) {
-        // If landmarks are not detected, exit early
-        ctx.restore();
-        return;
-      }
-
-      const now = performance.now();
-      const canvasX = canvas.width;
-      const canvasY = canvas.height;
-
-      // Helper: Check if a foot is within the trampoline region
-      function footInTrampoline(pt) {
-        const x = pt.x * canvasX;
-        const y = pt.y * canvasY;
-        const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
-        const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
-        return inX && inY;
-      }
-
-      const leftOn = footInTrampoline(leftAnkle);
-      const rightOn = footInTrampoline(rightAnkle);
-      const isOnTrampoline = leftOn && rightOn;
-
-      // Detect takeoff: both ankles leave trampoline area
-      if (!isJumping && !isOnTrampoline) {
-        isJumping = true;
-        jumpStart = now;
-      }
-
-      // Detect landing: both ankles return to trampoline area
-      if (isJumping && isOnTrampoline) {
-        isJumping = false;
-        const airtime = (now - jumpStart) / 1000;
-
-        // Improved jump height formula using physics (height = 0.5 * g * (t/2)^2)
-        // Where g = 9.81 m/s^2, t = airtime
-        const g = 9.81;
-        const height = 0.5 * g * Math.pow(airtime / 2, 2);
-
-        updateStatsDisplay(airtime, height);
-      }
-    }
-    ctx.restore();
-  }
-
-  // ===============================
-  // Camera Switch Button Handler (with Accessibility)
-  // Title: handleSwitchCamera
-  // ===============================
-  async function handleSwitchCamera() {
-    useFrontCamera = !useFrontCamera;
-    await startCamera();
-    switchCameraBtn.setAttribute('aria-pressed', String(useFrontCamera));
-  }
-  // Add click and keyboard accessibility
-  switchCameraBtn.addEventListener('click', handleSwitchCamera);
-  switchCameraBtn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      handleSwitchCamera();
-    }
-  });
-  switchCameraBtn.setAttribute('aria-label', 'Switch camera');
-  switchCameraBtn.setAttribute('tabindex', '0');
-  switchCameraBtn.setAttribute('role', 'button');
-
-  // ===============================
-  // Cleanup Resources on Unload (Performance)
-  // Title: cleanupResources
-  // ===============================
-  function cleanupResources() {
-    if (currentStream) {
-      currentStream.getTracks().forEach(track => track.stop());
-    }
-    if (animationFrameId) {
-      cancelAnimationFrame(animationFrameId);
-    }
-  }
-  window.addEventListener('beforeunload', cleanupResources);
-
-  // ===============================
-  // Inform User About Camera Access (Security/UX)
-  // Title: showCameraAccessNotice
-  // ===============================
-  function showCameraAccessNotice() {
-    // Implement your preferred UI for notifying the user about camera access.
-    // For example, display a modal or message before requesting permissions.
-    // alert('This application requires access to your camera for jump detection.');
-  }
-
-  // ===============================
-  // Initialization on Page Load
-  // Title: initializeApp
-  // ===============================
-  (async () => {
-    showCameraAccessNotice();
-    await startCamera();
-  })();
-
-</script>
+    // ===============================
+    // Initialization on Page Load
+    // ===============================
+    (async () => {
+      showCameraAccessNotice();
+      await startCamera();
+    })();
+  </script>
+</body>
+</html>
