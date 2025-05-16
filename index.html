@@ -1,245 +1,136 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>JumpTek Pose Tracker</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<script>
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const switchCameraBtn = document.getElementById('switchCameraBtn');
 
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #000;
-      overflow: hidden;
-      height: 100vh;
-      width: 100vw;
+  let currentStream = null;
+  let useFrontCamera = false; // false = rear, true = front
+  let isJumping = false;
+  let jumpStart = 0;
+  let animationFrameId;
+
+  const pose = new Pose({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+  });
+
+  pose.setOptions({
+    modelComplexity: 0,
+    smoothLandmarks: true,
+    enableSegmentation: false
+  });
+
+  pose.onResults(onResults);
+
+  async function startCamera() {
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+    }
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
     }
 
-    video, canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      object-fit: contain;
-    }
-
-    #switchCameraBtn {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      z-index: 30;
-      background: rgba(30,30,30,0.75);
-      border: none;
-      border-radius: 50%;
-      width: 48px;
-      height: 48px;
-      color: #fff;
-      font-size: 1.8em;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-      transition: background 0.2s;
-    }
-    #switchCameraBtn:hover {
-      background: rgba(60,60,60,0.90);
-    }
-
-    #stats {
-      display: none;
-    }
-
-    #calibrationOverlay {
-      position: absolute;
-      bottom: 10%;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 100%;
-      height: 0;
-      z-index: 20;
-      pointer-events: none;
-    }
-
-    #calibrationDot {
-      width: 10px;
-      height: 10px;
-      background-color: #0f0;
-      border-radius: 50%;
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-    }
-
-    #calibrationLine {
-      width: 100%;
-      height: 2px;
-      background-color: #0f0;
-      position: absolute;
-      top: 5px;
-    }
-  </style>
-</head>
-<body>
-
-  <video id="video" autoplay muted playsinline></video>
-  <canvas id="canvas"></canvas>
-
-  <button id="switchCameraBtn" title="Switch Camera">
-    <i class="fa-solid fa-camera-rotate"></i>
-  </button>
-
-  <div id="stats"></div>
-
-  <div id="calibrationOverlay">
-    <div id="calibrationDot"></div>
-    <div id="calibrationLine"></div>
-  </div>
-
-  <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const switchCameraBtn = document.getElementById('switchCameraBtn');
-
-    let currentStream = null;
-    let useFrontCamera = false; // false = rear, true = front
-    let isJumping = false;
-    let jumpStart = 0;
-    let userInputDistance = 21 * 0.3048; // default 21 feet in meters
-    let animationFrameId;
-
-    const pose = new Pose({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-    });
-
-    pose.setOptions({
-      modelComplexity: 0,
-      smoothLandmarks: true,
-      enableSegmentation: false
-    });
-
-    pose.onResults(onResults);
-
-    async function startCamera() {
-      if (currentStream) {
-        currentStream.getTracks().forEach(track => track.stop());
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: useFrontCamera ? 'user' : 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        aspectRatio: 9 / 16,
+        frameRate: { ideal: 30 }
       }
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
+    };
 
-      const constraints = {
-        audio: false,
-        video: {
-          facingMode: useFrontCamera ? 'user' : 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          aspectRatio: 9 / 16,
-          frameRate: { ideal: 30 }
-        }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentStream = stream;
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        video.play();
+        video.addEventListener('playing', processVideoFrame, { once: true });
+      };
+    } catch (err) {
+      alert('Unable to access camera.');
+      console.error('Camera error:', err);
+    }
+  }
+
+  async function processVideoFrame() {
+    if (video.paused || video.ended) {
+      return;
+    }
+    await pose.send({ image: video });
+    animationFrameId = requestAnimationFrame(processVideoFrame);
+  }
+
+  function updateStatsDisplay(airtime, height) {
+    parent.postMessage({
+      type: 'jump',
+      airtime,
+      height
+    }, '*');
+  }
+
+  function onResults(results) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+    if (results.poseLandmarks) {
+      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
+      drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
+
+      const leftAnkle = results.poseLandmarks[27];
+      const rightAnkle = results.poseLandmarks[28];
+
+      const now = performance.now();
+      const canvasX = canvas.width;
+      const canvasY = canvas.height;
+
+      const footInTrampoline = (pt) => {
+        const x = pt.x * canvasX;
+        const y = pt.y * canvasY;
+        const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
+        const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
+        return inX && inY;
       };
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        currentStream = stream;
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play();
-          video.addEventListener('playing', processVideoFrame, { once: true });
-        };
-      } catch (err) {
-        alert('Unable to access camera.');
-        console.error('Camera error:', err);
+      const leftOn = footInTrampoline(leftAnkle);
+      const rightOn = footInTrampoline(rightAnkle);
+      const isOnTrampoline = leftOn && rightOn;
+
+      // Detect takeoff: when both ankles leave trampoline area
+      if (!isJumping && !isOnTrampoline) {
+        isJumping = true;
+        jumpStart = now;
+      }
+
+      // Detect landing: when both ankles return to trampoline area
+      if (isJumping && isOnTrampoline) {
+        isJumping = false;
+        const airtime = (now - jumpStart) / 1000;
+
+        // Jump height is now a direct function of airtime only:
+        const height = 0.6 * airtime; // Adjust 0.6 as needed for realism
+
+        updateStatsDisplay(airtime, height);
       }
     }
 
-    async function processVideoFrame() {
-      if (video.paused || video.ended) {
-        return;
-      }
-      await pose.send({ image: video });
-      animationFrameId = requestAnimationFrame(processVideoFrame);
-    }
+    ctx.restore();
+  }
 
-    function updateStatsDisplay(airtime, height) {
-      parent.postMessage({
-        type: 'jump',
-        airtime,
-        height
-      }, '*');
-    }
+  // Switch camera logic: toggles between front and rear using facingMode for iOS compatibility
+  switchCameraBtn.addEventListener('click', async () => {
+    useFrontCamera = !useFrontCamera;
+    await startCamera();
+  });
 
-    function onResults(results) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      ctx.save();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
-      if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
-        drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
-
-        const leftAnkle = results.poseLandmarks[27];
-        const rightAnkle = results.poseLandmarks[28];
-
-        const now = performance.now();
-        const canvasX = canvas.width;
-        const canvasY = canvas.height;
-
-        const footInTrampoline = (pt) => {
-          const x = pt.x * canvasX;
-          const y = pt.y * canvasY;
-          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
-          const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
-          return inX && inY;
-        };
-
-        const leftOn = footInTrampoline(leftAnkle);
-        const rightOn = footInTrampoline(rightAnkle);
-        const isOnTrampoline = leftOn && rightOn;
-
-        // Detect takeoff: when both ankles leave trampoline area
-        if (!isJumping && !isOnTrampoline) {
-          isJumping = true;
-          jumpStart = now;
-        }
-
-        // Detect landing: when both ankles return to trampoline area
-        if (isJumping && isOnTrampoline) {
-          isJumping = false;
-          const airtime = (now - jumpStart) / 1000;
-
-          // Estimate jump height with calibration
-          const estimatedDistance = Math.abs(leftAnkle.x - rightAnkle.x);
-          const autoDistance = 0.4 / estimatedDistance;
-          const calibrationFactor = (userInputDistance + autoDistance) / 2;
-
-          const height = 0.6 * airtime * (calibrationFactor / 6.4);
-
-          updateStatsDisplay(airtime, height);
-        }
-      }
-
-      ctx.restore();
-    }
-
-    // Switch camera logic: toggles between front and rear using facingMode for iOS compatibility
-    switchCameraBtn.addEventListener('click', async () => {
-      useFrontCamera = !useFrontCamera;
-      await startCamera();
-    });
-
-    // On load: start with the rear (environment) camera
-    (async () => {
-      await startCamera();
-    })();
-  </script>
-</body>
-</html>
+  // On load: start with the rear (environment) camera
+  (async () => {
+    await startCamera();
+  })();
+</script>
