@@ -13,6 +13,10 @@
       color: #fff;
       font-family: Arial, sans-serif;
     }
+    #container {
+      position: relative;
+      display: inline-block;
+    }
     #canvas {
       width: 100vw;
       height: 70vw;
@@ -21,19 +25,34 @@
       background: #000;
       border: 2px solid #0ff;
       margin: 20px 0;
+      display: block;
     }
     #video {
       display: none;
     }
     #switchCameraBtn {
-      margin: 10px;
-      padding: 10px 20px;
-      font-size: 1rem;
-      border-radius: 5px;
-      background: #00bcd4;
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 10;
+      margin: 0;
+      padding: 10px;
+      background: rgba(0,188,212,0.8);
       color: #fff;
       border: none;
+      border-radius: 50%;
+      font-size: 1.5rem;
       cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: background 0.2s;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #switchCameraBtn:hover {
+      background: #0097a7;
     }
     #loadingIndicator {
       margin: 10px;
@@ -45,9 +64,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
 <body>
-  <canvas id="canvas"></canvas>
+  <div id="container">
+    <canvas id="canvas"></canvas>
+    <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">🔄</button>
+  </div>
   <video id="video" autoplay playsinline></video>
-  <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">Switch Camera</button>
   <div id="loadingIndicator" style="display:none;">Loading...</div>
 
   <script>
