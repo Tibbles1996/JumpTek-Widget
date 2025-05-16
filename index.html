@@ -18,45 +18,50 @@
       display: inline-block;
     }
     #canvas {
-      width: 100vw;
-      height: 70vw;
-      max-width: 400px;
-      max-height: 700px;
+      display: block;
       background: #000;
       border: 2px solid #0ff;
       margin: 20px 0;
-      display: block;
+      width: 100vw;
+      max-width: 400px;
+      height: auto;
+      aspect-ratio: 9/16;
     }
     #video {
       display: none;
     }
     #switchCameraBtn {
       position: absolute;
-      top: 16px;
-      right: 16px;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
       z-index: 10;
       margin: 0;
-      padding: 10px;
-      background: rgba(0,188,212,0.8);
+      padding: 10px 18px;
+      background: #27ae60;
       color: #fff;
       border: none;
-      border-radius: 50%;
-      font-size: 1.5rem;
+      border-radius: 16px;
+      font-size: 1.3rem;
       cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2);
       transition: background 0.2s;
-      width: 44px;
-      height: 44px;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-weight: bold;
     }
     #switchCameraBtn:hover {
-      background: #0097a7;
+      background: #219150;
     }
     #loadingIndicator {
       margin: 10px;
       color: #ff0;
+    }
+    #trampolineNotice {
+      margin-top: 10px;
+      color: #0f0;
+      font-size: 1rem;
     }
   </style>
   <!-- Load MediaPipe and Drawing Utils -->
@@ -66,10 +71,11 @@
 <body>
   <div id="container">
     <canvas id="canvas"></canvas>
-    <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">🔄</button>
+    <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">SWITCH</button>
   </div>
   <video id="video" autoplay playsinline></video>
   <div id="loadingIndicator" style="display:none;">Loading...</div>
+  <div id="trampolineNotice">Tap four corners of the trampoline in order (clockwise or counter-clockwise)</div>
 
   <script>
     // ===============================
@@ -80,13 +86,19 @@
     const ctx = canvas.getContext('2d');
     const switchCameraBtn = document.getElementById('switchCameraBtn');
     const loadingIndicator = document.getElementById('loadingIndicator');
+    const trampolineNotice = document.getElementById('trampolineNotice');
 
     let currentStream = null;
     let useFrontCamera = false; // false = rear, true = front
     let isJumping = false;
     let jumpStart = 0;
     let animationFrameId;
-    let parentOrigin = "YOUR_PARENT_ORIGIN"; // <--- Set this to your parent window's origin for security
+    let parentOrigin = "YOUR_PARENT_ORIGIN";
+    let calibrationReady = false;
+
+    // Trampoline boundary selection
+    let trampolineCorners = [];
+    let trampolinePolygon = null;
 
     // ===============================
     // Pose Object Initialization
@@ -119,9 +131,7 @@
           video: {
             facingMode: useFrontCamera ? 'user' : 'environment',
             width: { ideal: 1280 },
-            height: { ideal: 720 },
-            aspectRatio: 9 / 16,
-            frameRate: { ideal: 30 }
+            height: { ideal: 720 }
           }
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -129,6 +139,7 @@
         video.srcObject = stream;
         video.onloadedmetadata = () => {
           video.play();
+          resizeCanvasToVideo();
           video.addEventListener('playing', processVideoFrame, { once: true });
           showLoading(false);
         };
@@ -136,6 +147,18 @@
         showLoading(false);
         alert('Unable to access camera. Please check your device settings and permissions.');
         console.error('Camera error:', err);
+      }
+    }
+
+    function resizeCanvasToVideo() {
+      // Maintain aspect ratio of the video stream
+      if (video.videoWidth && video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.style.width = "100vw";
+        canvas.style.maxWidth = "400px";
+        canvas.style.height = "auto";
+        canvas.style.aspectRatio = (video.videoWidth / video.videoHeight).toFixed(2);
       }
     }
 
@@ -175,38 +198,118 @@
     }
 
     // ===============================
+    // Utility: Point in Polygon
+    // ===============================
+    function pointInPolygon(pt, poly) {
+      // pt = [x, y], poly = array of [x, y]
+      let [x, y] = pt;
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        let xi = poly[i][0], yi = poly[i][1];
+        let xj = poly[j][0], yj = poly[j][1];
+        let intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // ===============================
+    // Draw Calibration Dot and Line
+    // ===============================
+    function drawCalibration(ctx, width, height) {
+      ctx.save();
+      const dotX = width / 2;
+      const dotY = height - 40;
+      ctx.strokeStyle = '#0f0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(dotX - 40, dotY);
+      ctx.lineTo(dotX + 40, dotY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 8, 0, 2 * Math.PI);
+      ctx.fillStyle = '#0f0';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ===============================
+    // Draw Trampoline Area
+    // ===============================
+    function drawTrampolineArea(ctx, corners) {
+      if (corners.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = '#ff0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(corners[0][0], corners[0][1]);
+      for (let i = 1; i < corners.length; ++i) {
+        ctx.lineTo(corners[i][0], corners[i][1]);
+      }
+      if (corners.length === 4) {
+        ctx.closePath();
+      }
+      ctx.stroke();
+      ctx.restore();
+      // Draw corner points
+      ctx.save();
+      ctx.fillStyle = '#ff0';
+      for (const [x, y] of corners) {
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // ===============================
     // Jump Logic and Canvas Drawing
     // ===============================
     function onResults(results) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      ctx.save();
+      // Resize canvas if needed
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        resizeCanvasToVideo();
+      }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
+      // Draw calibration dot+line
+      drawCalibration(ctx, canvas.width, canvas.height);
+
+      // Draw trampoline area if set or while selecting
+      if (trampolineCorners.length > 0) {
+        drawTrampolineArea(ctx, trampolineCorners);
+      }
+      if (trampolinePolygon) {
+        drawTrampolineArea(ctx, trampolinePolygon);
+      }
+
+      // Draw landmarks
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
 
+        // Use ankles for jump detection
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
 
-        if (!leftAnkle || !rightAnkle) {
-          ctx.restore();
-          return;
-        }
+        if (!leftAnkle || !rightAnkle) return;
 
         const now = performance.now();
-        const canvasX = canvas.width;
-        const canvasY = canvas.height;
+        const [canvasX, canvasY] = [canvas.width, canvas.height];
 
         function footInTrampoline(pt) {
           const x = pt.x * canvasX;
           const y = pt.y * canvasY;
-          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
-          const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
-          return inX && inY;
+          if (trampolinePolygon) {
+            return pointInPolygon([x, y], trampolinePolygon);
+          } else {
+            // fallback area if not yet calibrated
+            const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
+            const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
+            return inX && inY;
+          }
         }
 
         const leftOn = footInTrampoline(leftAnkle);
@@ -227,7 +330,6 @@
           updateStatsDisplay(airtime, height);
         }
       }
-      ctx.restore();
     }
 
     // ===============================
@@ -260,6 +362,23 @@
     window.addEventListener('beforeunload', cleanupResources);
 
     // ===============================
+    // Trampoline Area Selection Handler
+    // ===============================
+    canvas.addEventListener('click', function (e) {
+      if (trampolinePolygon) return; // Already set
+      // Get click position relative to canvas
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      trampolineCorners.push([x, y]);
+      if (trampolineCorners.length === 4) {
+        trampolinePolygon = trampolineCorners.slice();
+        trampolineCorners = [];
+        trampolineNotice.textContent = "Trampoline area set! You may recalibrate by refreshing.";
+      }
+    });
+
+    // ===============================
     // Camera Access Notice (optional UX)
     // ===============================
     function showCameraAccessNotice() {
@@ -273,6 +392,8 @@
       showCameraAccessNotice();
       await startCamera();
     })();
+
+    window.addEventListener('resize', resizeCanvasToVideo);
   </script>
 </body>
 </html>
