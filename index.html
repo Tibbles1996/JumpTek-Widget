@@ -71,7 +71,12 @@
 <body>
   <div id="container">
     <canvas id="canvas"></canvas>
-    <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">SWITCH</button>
+  <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button" style="background:none;border:none;padding:8px;cursor:pointer;">
+  <!-- Camera Switch SVG Icon -->
+  <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="#27ae60" viewBox="0 0 40 40">
+    <path d="M20 11.667c-3.583 0-6.625 2.334-7.667 5.583H11.25c-.958 0-1.75.792-1.75 1.75s.792 1.75 1.75 1.75h9.417l-2.167-2.167c-.334-.334-.334-.875 0-1.209.334-.334.875-.334 1.209 0l3.75 3.75c.334.334.334.875 0 1.209l-3.75 3.75a.854.854 0 0 1-1.209 0c-.334-.334-.334-.875 0-1.209l2.167-2.167H11.25c-1.917 0-3.417-1.5-3.417-3.417 0-1.917 1.5-3.416 3.417-3.416h.25C13.375 14 16.417 11.667 20 11.667Zm7.75 3.333c.334 0 .667.125.917.375.5.5.5 1.25 0 1.75l-2.167 2.167h9.417c.958 0 1.75.792 1.75 1.75s-.792 1.75-1.75 1.75H27.5l2.167-2.167c.334-.334.334-.875 0-1.209-.334-.334-.875-.334-1.209 0l-3.75 3.75c-.334.334-.334.875 0 1.209l3.75 3.75c.334.334.875.334 1.209 0 .334-.334.334-.875 0-1.209l-2.167-2.167h9.417c1.917 0 3.417-1.5 3.417-3.417 0-1.917-1.5-3.416-3.417-3.416H27.75c-.334 0-.667-.125-.917-.375-.5-.5-.5-1.25 0-1.75.25-.25.583-.375.917-.375Z"/>
+  </svg>
+</button>
   </div>
   <video id="video" autoplay playsinline></video>
   <div id="loadingIndicator" style="display:none;">Loading...</div>
@@ -220,7 +225,7 @@
     function drawCalibration(ctx, width, height) {
       ctx.save();
       const dotX = width / 2;
-      const dotY = height - 40;
+      const dotY = height - 80;
       ctx.strokeStyle = '#0f0';
       ctx.lineWidth = 2;
       ctx.beginPath();
