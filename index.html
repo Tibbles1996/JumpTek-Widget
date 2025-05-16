@@ -110,12 +110,7 @@
     let useFrontCamera = false; // false = rear, true = front
     let isJumping = false;
     let jumpStart = 0;
-    let baselineY = null;
-    const alpha = 0.1;
-    let lastY = null;
-    let lastTime = null;
-    let userInputDistance = 21 * 0.3048; // default 21 feet
-    let userInputHeight = 1.0; // default 1 meter above trampoline
+    let userInputDistance = 21 * 0.3048; // default 21 feet in meters
     let animationFrameId;
 
     const pose = new Pose({
@@ -155,7 +150,6 @@
         video.srcObject = stream;
         video.onloadedmetadata = () => {
           video.play();
-          // Wait until the video is actually playing before starting the frame loop
           video.addEventListener('playing', processVideoFrame, { once: true });
         };
       } catch (err) {
@@ -192,12 +186,10 @@
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
 
-        const hip = results.poseLandmarks[23];
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
-        const y = hip.y;
-        const now = performance.now();
 
+        const now = performance.now();
         const canvasX = canvas.width;
         const canvasY = canvas.height;
 
@@ -209,38 +201,30 @@
           return inX && inY;
         };
 
-        const isOnTrampoline = footInTrampoline(leftAnkle) && footInTrampoline(rightAnkle);
-        if (!isOnTrampoline) return;
+        const leftOn = footInTrampoline(leftAnkle);
+        const rightOn = footInTrampoline(rightAnkle);
+        const isOnTrampoline = leftOn && rightOn;
 
-        if (baselineY === null) baselineY = y;
-        else baselineY = alpha * y + (1 - alpha) * baselineY;
-
-        let velocity = 0;
-        if (lastY !== null && lastTime !== null) {
-          const dt = (now - lastTime) / 1000;
-          velocity = (y - lastY) / dt;
-        }
-
-        const deltaY = baselineY - y;
-
-        if (!isJumping && deltaY > 0.02 && velocity < -0.5) {
+        // Detect takeoff: when both ankles leave trampoline area
+        if (!isJumping && !isOnTrampoline) {
           isJumping = true;
           jumpStart = now;
-        } else if (isJumping && deltaY <= 0.01 && velocity > 0.1) {
+        }
+
+        // Detect landing: when both ankles return to trampoline area
+        if (isJumping && isOnTrampoline) {
           isJumping = false;
           const airtime = (now - jumpStart) / 1000;
 
+          // Estimate jump height with calibration
           const estimatedDistance = Math.abs(leftAnkle.x - rightAnkle.x);
           const autoDistance = 0.4 / estimatedDistance;
           const calibrationFactor = (userInputDistance + autoDistance) / 2;
 
-          let height = 0.6 * airtime * (calibrationFactor / 6.4);
+          const height = 0.6 * airtime * (calibrationFactor / 6.4);
 
           updateStatsDisplay(airtime, height);
         }
-
-        lastY = y;
-        lastTime = now;
       }
 
       ctx.restore();
@@ -256,7 +240,6 @@
     (async () => {
       await startCamera();
     })();
-
   </script>
 </body>
 </html>
