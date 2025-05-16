@@ -82,323 +82,332 @@
   <div id="loadingIndicator" style="display:none;">Loading...</div>
   <div id="trampolineNotice">Tap four corners of the trampoline in order (clockwise or counter-clockwise)</div>
 
-  <script>
-    // ===============================
-    // Initialization and Global Variables
-    // ===============================
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const switchCameraBtn = document.getElementById('switchCameraBtn');
-    const loadingIndicator = document.getElementById('loadingIndicator');
-    const trampolineNotice = document.getElementById('trampolineNotice');
+<script>
+  // ===============================
+  // Initialization and Global Variables
+  // ===============================
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const switchCameraBtn = document.getElementById('switchCameraBtn');
+  const loadingIndicator = document.getElementById('loadingIndicator');
+  const trampolineNotice = document.getElementById('trampolineNotice');
 
-    let currentStream = null;
-    let useFrontCamera = false; // false = rear, true = front
-    let isJumping = false;
-    let jumpStart = 0;
-    let animationFrameId;
-    let parentOrigin = "YOUR_PARENT_ORIGIN";
-    let calibrationReady = false;
+  let currentStream = null;
+  let useFrontCamera = false; // false = rear, true = front
+  let isJumping = false;
+  let jumpStart = 0;
+  let animationFrameId = null;
+  let parentOrigin = "YOUR_PARENT_ORIGIN";
+  let calibrationReady = false;
 
-    // Trampoline boundary selection
-    let trampolineCorners = [];
-    let trampolinePolygon = null;
+  // Trampoline boundary selection
+  let trampolineCorners = [];
+  let trampolinePolygon = null;
 
-    // ===============================
-    // Pose Object Initialization
-    // ===============================
-    const poseOptions = {
-      modelComplexity: 0,
-      smoothLandmarks: true,
-      enableSegmentation: false
-    };
-    const pose = new Pose({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-    });
-    pose.setOptions(poseOptions);
-    pose.onResults(onResults);
+  // ===============================
+  // Pose Object Initialization
+  // ===============================
+  const poseOptions = {
+    modelComplexity: 0,
+    smoothLandmarks: true,
+    enableSegmentation: false
+  };
+  const pose = new Pose({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+  });
+  pose.setOptions(poseOptions);
+  pose.onResults(onResults);
 
-    // ===============================
-    // Start Camera with Error Handling and Loading State
-    // ===============================
-    async function startCamera() {
-      showLoading(true);
-      try {
-        if (currentStream) {
-          currentStream.getTracks().forEach(track => track.stop());
+  // --- Frame Loop Management Utilities ---
+  function startFrameLoop() {
+    if (!animationFrameId) animationFrameId = requestAnimationFrame(processVideoFrame);
+  }
+  function stopFrameLoop() {
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+  }
+
+  // ===============================
+  // Start Camera with Error Handling and Loading State
+  // ===============================
+  async function startCamera() {
+    showLoading(true);
+    try {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+      stopFrameLoop();
+      const constraints = {
+        audio: false,
+        video: {
+          facingMode: useFrontCamera ? 'user' : 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
         }
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-        }
-        const constraints = {
-          audio: false,
-          video: {
-            facingMode: useFrontCamera ? 'user' : 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        currentStream = stream;
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play();
-          resizeCanvasToVideo();
-          video.addEventListener('playing', processVideoFrame, { once: true });
-          showLoading(false);
-        };
-      } catch (err) {
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentStream = stream;
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        video.play();
+        resizeCanvasToVideo();
+      };
+      video.onplaying = () => {
         showLoading(false);
-        alert('Unable to access camera. Please check your device settings and permissions.');
-        console.error('Camera error:', err);
-      }
+        startFrameLoop();
+      };
+    } catch (err) {
+      showLoading(false);
+      alert('Unable to access camera. Please check your device settings and permissions.');
+      console.error('Camera error:', err);
     }
+  }
 
-    function resizeCanvasToVideo() {
-      // Maintain aspect ratio of the video stream
-      if (video.videoWidth && video.videoHeight) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.style.width = "100vw";
-        canvas.style.maxWidth = "400px";
-        canvas.style.height = "auto";
-        canvas.style.aspectRatio = (video.videoWidth / video.videoHeight).toFixed(2);
-      }
+  function resizeCanvasToVideo() {
+    // Maintain aspect ratio of the video stream
+    if (video.videoWidth && video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.style.width = "100vw";
+      canvas.style.maxWidth = "400px";
+      canvas.style.height = "auto";
+      canvas.style.aspectRatio = (video.videoWidth / video.videoHeight).toFixed(2);
     }
+  }
 
-    // ===============================
-    // Loading Indicator Controls
-    // ===============================
-    function showLoading(show) {
-      if (loadingIndicator) {
-        loadingIndicator.style.display = show ? 'block' : 'none';
-      }
+  // ===============================
+  // Loading Indicator Controls
+  // ===============================
+  function showLoading(show) {
+    if (loadingIndicator) {
+      loadingIndicator.style.display = show ? 'block' : 'none';
     }
+  }
 
-    // ===============================
-    // Frame Processing Loop
-    // ===============================
-    async function processVideoFrame() {
-      if (video.paused || video.ended) {
-        return;
-      }
+  // ===============================
+  // Frame Processing Loop
+  // ===============================
+  async function processVideoFrame() {
+    if (!video.paused && !video.ended && video.readyState === 4) {
       try {
         await pose.send({ image: video });
       } catch (e) {
         console.error('Pose detection error:', e);
       }
-      animationFrameId = requestAnimationFrame(processVideoFrame);
     }
+    animationFrameId = requestAnimationFrame(processVideoFrame);
+  }
 
-    // ===============================
-    // Update Jump Stats and Notify Parent
-    // ===============================
-    function updateStatsDisplay(airtime, height) {
-      window.parent.postMessage({
-        type: 'jump',
-        airtime,
-        height
-      }, parentOrigin);
+  // ===============================
+  // Update Jump Stats and Notify Parent
+  // ===============================
+  function updateStatsDisplay(airtime, height) {
+    window.parent.postMessage({
+      type: 'jump',
+      airtime,
+      height
+    }, parentOrigin);
+  }
+
+  // ===============================
+  // Utility: Point in Polygon
+  // ===============================
+  function pointInPolygon(pt, poly) {
+    let [x, y] = pt;
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      let xi = poly[i][0], yi = poly[i][1];
+      let xj = poly[j][0], yj = poly[j][1];
+      let intersect = ((yi > y) !== (yj > y)) &&
+                      (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
+      if (intersect) inside = !inside;
     }
+    return inside;
+  }
 
-    // ===============================
-    // Utility: Point in Polygon
-    // ===============================
-    function pointInPolygon(pt, poly) {
-      // pt = [x, y], poly = array of [x, y]
-      let [x, y] = pt;
-      let inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        let xi = poly[i][0], yi = poly[i][1];
-        let xj = poly[j][0], yj = poly[j][1];
-        let intersect = ((yi > y) !== (yj > y)) &&
-                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
-        if (intersect) inside = !inside;
-      }
-      return inside;
+  // ===============================
+  // Draw Calibration Dot and Line
+  // ===============================
+  function drawCalibration(ctx, width, height) {
+    ctx.save();
+    const dotX = width / 2;
+    const dotY = height - 80;
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(dotX - 40, dotY);
+    ctx.lineTo(dotX + 40, dotY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 8, 0, 2 * Math.PI);
+    ctx.fillStyle = '#0f0';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ===============================
+  // Draw Trampoline Area
+  // ===============================
+  function drawTrampolineArea(ctx, corners) {
+    if (corners.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(corners[0][0], corners[0][1]);
+    for (let i = 1; i < corners.length; ++i) {
+      ctx.lineTo(corners[i][0], corners[i][1]);
     }
-
-    // ===============================
-    // Draw Calibration Dot and Line
-    // ===============================
-    function drawCalibration(ctx, width, height) {
-      ctx.save();
-      const dotX = width / 2;
-      const dotY = height - 80;
-      ctx.strokeStyle = '#0f0';
-      ctx.lineWidth = 2;
+    if (corners.length === 4) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    // Draw corner points
+    ctx.save();
+    ctx.fillStyle = '#ff0';
+    for (const [x, y] of corners) {
       ctx.beginPath();
-      ctx.moveTo(dotX - 40, dotY);
-      ctx.lineTo(dotX + 40, dotY);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, 8, 0, 2 * Math.PI);
-      ctx.fillStyle = '#0f0';
+      ctx.arc(x, y, 7, 0, 2 * Math.PI);
       ctx.fill();
-      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // ===============================
+  // Jump Logic and Canvas Drawing
+  // ===============================
+  function onResults(results) {
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      resizeCanvasToVideo();
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+    drawCalibration(ctx, canvas.width, canvas.height);
+
+    if (trampolineCorners.length > 0) {
+      drawTrampolineArea(ctx, trampolineCorners);
+    }
+    if (trampolinePolygon) {
+      drawTrampolineArea(ctx, trampolinePolygon);
     }
 
-    // ===============================
-    // Draw Trampoline Area
-    // ===============================
-    function drawTrampolineArea(ctx, corners) {
-      if (corners.length < 2) return;
-      ctx.save();
-      ctx.strokeStyle = '#ff0';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(corners[0][0], corners[0][1]);
-      for (let i = 1; i < corners.length; ++i) {
-        ctx.lineTo(corners[i][0], corners[i][1]);
-      }
-      if (corners.length === 4) {
-        ctx.closePath();
-      }
-      ctx.stroke();
-      ctx.restore();
-      // Draw corner points
-      ctx.save();
-      ctx.fillStyle = '#ff0';
-      for (const [x, y] of corners) {
-        ctx.beginPath();
-        ctx.arc(x, y, 7, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
+    if (results.poseLandmarks) {
+      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
+      drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
 
-    // ===============================
-    // Jump Logic and Canvas Drawing
-    // ===============================
-    function onResults(results) {
-      // Resize canvas if needed
-      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-        resizeCanvasToVideo();
-      }
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+      const leftAnkle = results.poseLandmarks[27];
+      const rightAnkle = results.poseLandmarks[28];
 
-      // Draw calibration dot+line
-      drawCalibration(ctx, canvas.width, canvas.height);
+      if (!leftAnkle || !rightAnkle) return;
 
-      // Draw trampoline area if set or while selecting
-      if (trampolineCorners.length > 0) {
-        drawTrampolineArea(ctx, trampolineCorners);
-      }
-      if (trampolinePolygon) {
-        drawTrampolineArea(ctx, trampolinePolygon);
-      }
+      const now = performance.now();
+      const [canvasX, canvasY] = [canvas.width, canvas.height];
 
-      // Draw landmarks
-      if (results.poseLandmarks) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
-        drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
-
-        // Use ankles for jump detection
-        const leftAnkle = results.poseLandmarks[27];
-        const rightAnkle = results.poseLandmarks[28];
-
-        if (!leftAnkle || !rightAnkle) return;
-
-        const now = performance.now();
-        const [canvasX, canvasY] = [canvas.width, canvas.height];
-
-        function footInTrampoline(pt) {
-          const x = pt.x * canvasX;
-          const y = pt.y * canvasY;
-          if (trampolinePolygon) {
-            return pointInPolygon([x, y], trampolinePolygon);
-          } else {
-            // fallback area if not yet calibrated
-            const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
-            const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
-            return inX && inY;
-          }
-        }
-
-        const leftOn = footInTrampoline(leftAnkle);
-        const rightOn = footInTrampoline(rightAnkle);
-        const isOnTrampoline = leftOn && rightOn;
-
-        // Detect takeoff
-        if (!isJumping && !isOnTrampoline) {
-          isJumping = true;
-          jumpStart = now;
-        }
-        // Detect landing
-        if (isJumping && isOnTrampoline) {
-          isJumping = false;
-          const airtime = (now - jumpStart) / 1000;
-          const g = 9.81;
-          const height = 0.5 * g * Math.pow(airtime / 2, 2);
-          updateStatsDisplay(airtime, height);
+      function footInTrampoline(pt) {
+        const x = pt.x * canvasX;
+        const y = pt.y * canvasY;
+        if (trampolinePolygon) {
+          return pointInPolygon([x, y], trampolinePolygon);
+        } else {
+          const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
+          const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
+          return inX && inY;
         }
       }
-    }
 
-    // ===============================
-    // Camera Switch Button Handler (with Accessibility)
-    // ===============================
-    async function handleSwitchCamera() {
-      useFrontCamera = !useFrontCamera;
-      await startCamera();
-      switchCameraBtn.setAttribute('aria-pressed', String(useFrontCamera));
-    }
-    switchCameraBtn.addEventListener('click', handleSwitchCamera);
-    switchCameraBtn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        handleSwitchCamera();
-      }
-    });
+      const leftOn = footInTrampoline(leftAnkle);
+      const rightOn = footInTrampoline(rightAnkle);
+      const isOnTrampoline = leftOn && rightOn;
 
-    // ===============================
-    // Cleanup Resources on Unload
-    // ===============================
-    function cleanupResources() {
-      if (currentStream) {
-        currentStream.getTracks().forEach(track => track.stop());
+      // Detect takeoff
+      if (!isJumping && !isOnTrampoline) {
+        isJumping = true;
+        jumpStart = now;
       }
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
+      // Detect landing
+      if (isJumping && isOnTrampoline) {
+        isJumping = false;
+        const airtime = (now - jumpStart) / 1000;
+        const g = 9.81;
+        const height = 0.5 * g * Math.pow(airtime / 2, 2);
+        updateStatsDisplay(airtime, height);
       }
     }
-    window.addEventListener('beforeunload', cleanupResources);
+  }
 
-    // ===============================
-    // Trampoline Area Selection Handler
-    // ===============================
-    canvas.addEventListener('click', function (e) {
-      if (trampolinePolygon) return; // Already set
-      // Get click position relative to canvas
-      const rect = canvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-      trampolineCorners.push([x, y]);
-      if (trampolineCorners.length === 4) {
-        trampolinePolygon = trampolineCorners.slice();
-        trampolineCorners = [];
-        trampolineNotice.textContent = "Trampoline area set! You may recalibrate by refreshing.";
-      }
-    });
-
-    // ===============================
-    // Camera Access Notice (optional UX)
-    // ===============================
-    function showCameraAccessNotice() {
-      // Optional: Implement a notice for the user before requesting camera access.
+  // ===============================
+  // Camera Switch Button Handler (with Accessibility)
+  // ===============================
+  async function handleSwitchCamera() {
+    useFrontCamera = !useFrontCamera;
+    await startCamera();
+    switchCameraBtn.setAttribute('aria-pressed', String(useFrontCamera));
+  }
+  switchCameraBtn.addEventListener('click', handleSwitchCamera);
+  switchCameraBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleSwitchCamera();
     }
+  });
 
-    // ===============================
-    // Initialization on Page Load
-    // ===============================
-    (async () => {
-      showCameraAccessNotice();
-      await startCamera();
-    })();
+  // ===============================
+  // Cleanup Resources on Unload
+  // ===============================
+  function cleanupResources() {
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+    }
+    stopFrameLoop();
+  }
+  window.addEventListener('beforeunload', cleanupResources);
 
-    window.addEventListener('resize', resizeCanvasToVideo);
-  </script>
+  // ===============================
+  // Trampoline Area Selection Handler
+  // ===============================
+  canvas.addEventListener('click', function (e) {
+    if (trampolinePolygon) return; // Already set
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    trampolineCorners.push([x, y]);
+    if (trampolineCorners.length === 4) {
+      trampolinePolygon = trampolineCorners.slice();
+      trampolineCorners = [];
+      trampolineNotice.textContent = "Trampoline area set! You may recalibrate by refreshing.";
+    }
+  });
+
+  // ===============================
+  // Camera Access Notice (optional UX)
+  // ===============================
+  function showCameraAccessNotice() {
+    // Optional: Implement a notice for the user before requesting camera access.
+  }
+
+  // ===============================
+  // Initialization on Page Load
+  // ===============================
+  (async () => {
+    showCameraAccessNotice();
+    await startCamera();
+  })();
+
+  window.addEventListener('resize', resizeCanvasToVideo);
+
+  // Auto-recover frame loop if tab is refocused
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && video.srcObject) {
+      video.play();
+      startFrameLoop();
+    } else {
+      stopFrameLoop();
+    }
+  });
+</script>
+  
 </body>
 </html>
