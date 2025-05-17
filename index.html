@@ -17,16 +17,14 @@
       width: 100vw; height: 100vh; background: #000; border: none; z-index: 1;
     }
     #video { display: none; }
-    #switchCameraBtn, #calibrateBtn {
+    #switchCameraBtn {
       position: absolute; top: 16px; z-index: 20; margin: 0;
       padding: 10px 18px; color: #fff; border: none; border-radius: 16px;
       font-size: 1.3rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
       transition: background 0.2s; display: flex; align-items: center; justify-content: center; font-weight: bold;
+      left: 50%; transform: translateX(-50%); background: #27ae60;
     }
-    #switchCameraBtn { left: 50%; transform: translateX(-50%); background: #27ae60; }
     #switchCameraBtn:hover { background: #219150; }
-    #calibrateBtn { left: 16px; background: #2980b9; top: 70px; }
-    #calibrateBtn:hover { background: #21618c; }
     #loadingIndicator {
       position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
       z-index: 30; color: #ff0; background: rgba(0,0,0,0.7);
@@ -47,28 +45,21 @@
   <div id="container">
     <canvas id="canvas"></canvas>
     <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
-  <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch camera" width="40" height="40" style="display:block;">
-</button>
-    <div id="trampolineNotice">Tap the four corners of the trampoline, then stand still and press "Calibrate"</div>
+      <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch camera" width="40" height="40" style="display:block;">
+    </button>
+    <div id="trampolineNotice">Tap the four corners of the trampoline. Calibration is controlled by the UI.</div>
     <div id="loadingIndicator">Loading...</div>
   </div>
   <video id="video" autoplay playsinline></video>
   <script>
     // --------- CONFIGURABLE PARAMETERS ---------
-    // Set your actual trampoline height (in meters) here!
     const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6; // Adjust as needed
-
-    // Smoothing and jump detection
     const SMOOTHING_WINDOW = 5;
     const MIN_DELTA_METERS = 0.005;
-
-    // Alignment dot detection (bright green)
     const DOT_COLOR = { r: 0, g: 255, b: 0 };
     const DOT_TOLERANCE = 50;
     const DOT_MIN_RADIUS = 8;
     const DOT_SEARCH_RADIUS = 30;
-
-    // --- NEW: Threshold for considering airborne (in pixels above baseline) ---
     const AIRBORNE_THRESHOLD_PIXELS = 15; // Adjust for sensitivity
 
     // --------- ELEMENTS AND STATE ---------
@@ -78,20 +69,14 @@
     const switchCameraBtn = document.getElementById('switchCameraBtn');
     const loadingIndicator = document.getElementById('loadingIndicator');
     const trampolineNotice = document.getElementById('trampolineNotice');
-    const calibrateBtn = document.getElementById('calibrateBtn');
 
     let currentStream = null;
     let useFrontCamera = false;
     let animationFrameId = null;
     let parentOrigin = "*";
-
-    // Calibration state
     let trampolineCorners = [];
     let trampolinePolygon = null;
-
     let jumpHeightHistory = [];
-
-    // Calibration baseline (in pixels, on canvas)
     let baselineAnkleY = null;
     let calibrationReady = false;
 
@@ -104,8 +89,11 @@
     const pose = new Pose({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
     });
-    pose.setOptions(poseOptions);
-    pose.onResults(onResults);
+    // Only assign pose.onResults ONCE:
+    pose.onResults(function (results) {
+      pose.lastResults = results;
+      onResults(results);
+    });
 
     async function startCamera() {
       showLoading(true);
@@ -128,6 +116,14 @@
         video.onloadedmetadata = () => {
           video.play();
           resizeCanvasToVideo();
+          // Uncomment for debugging the raw video stream:
+          // video.style.display = "block";
+          // video.style.zIndex = 1000;
+          // video.style.position = "absolute";
+          // video.style.top = "0";
+          // video.style.left = "0";
+          // video.style.width = "300px";
+          // video.style.height = "auto";
         };
         video.onplaying = () => {
           showLoading(false);
@@ -196,7 +192,6 @@
             b: imageData.data[idx + 2]
           };
           if (colorDistance(pixel, DOT_COLOR) < DOT_TOLERANCE) {
-            // Check surrounding area for enough green pixels
             let count = 0;
             for (let dy = -DOT_SEARCH_RADIUS; dy <= DOT_SEARCH_RADIUS; dy++) {
               for (let dx = -DOT_SEARCH_RADIUS; dx <= DOT_SEARCH_RADIUS; dx++) {
@@ -247,7 +242,6 @@
       if (corners.length === 4) ctx.closePath();
       ctx.stroke();
       ctx.restore();
-      // Draw corner points
       ctx.save();
       ctx.fillStyle = '#ff0';
       for (const [x, y] of corners) {
@@ -268,7 +262,6 @@
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
 
-      // Alignment dot detection
       let alignmentDotY = null;
       if (results.image) {
         try {
@@ -307,7 +300,6 @@
         const right = mapToCanvas(rightAnkle);
 
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
-          // Use either the polygon border or the alignment dot as ground
           let polygonGroundY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let groundY = alignmentDotY !== null
             ? Math.max(polygonGroundY, alignmentDotY)
@@ -318,26 +310,22 @@
 
           let minAnkleY = Math.min(left[1], right[1]);
 
-          // --- Calibration Logic ---
           if (!baselineAnkleY || !calibrationReady) {
             trampolineNotice.style.color = '#ff0';
-            trampolineNotice.textContent = "Stand still and press 'Calibrate' to set baseline";
+            trampolineNotice.textContent = "Calibration not set. Awaiting external UI calibration.";
             return;
           }
 
           let rawHeight = baselineAnkleY - minAnkleY;
-          // Calculate jump height in meters (relative to baseline)
           let jumpHeightMeters =
             trampolinePixelHeight > 0
               ? Math.max(0, rawHeight / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
               : 0;
 
-          // Smoothing
           jumpHeightHistory.push(jumpHeightMeters);
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // --- Only send jump if athlete is airborne (NEW LOGIC) ---
           let isAirborne =
             (baselineAnkleY - left[1] > AIRBORNE_THRESHOLD_PIXELS) &&
             (baselineAnkleY - right[1] > AIRBORNE_THRESHOLD_PIXELS);
@@ -352,49 +340,24 @@
             window.parent.postMessage(
               {
                 type: 'jump_height',
-                height: smoothedJumpHeight // height in meters
+                height: smoothedJumpHeight
               },
               parentOrigin
             );
           }
-          // Reset last sent when not airborne so jumps always get sent after landing
           if (!isAirborne) onResults.lastSent = null;
         }
       }
     }
 
-    // --------- CALIBRATION ---------
-    calibrateBtn.addEventListener('click', function () {
-      // Must have a pose for calibration
-      if (!pose || !pose.lastResults || !pose.lastResults.poseLandmarks) {
-        trampolineNotice.style.color = '#f00';
-        trampolineNotice.textContent = "Calibration failed: No pose detected. Stand still in trampoline area!";
-        return;
-      }
-      const leftAnkle = pose.lastResults.poseLandmarks[27];
-      const rightAnkle = pose.lastResults.poseLandmarks[28];
-      if (!leftAnkle || !rightAnkle || !trampolinePolygon) {
-        trampolineNotice.style.color = '#f00';
-        trampolineNotice.textContent = "Calibration failed: Make sure you are standing in the trampoline area!";
-        return;
-      }
-      function mapToCanvas(pt) {
-        return [pt.x * canvas.width, pt.y * canvas.height];
-      }
-      const left = mapToCanvas(leftAnkle);
-      const right = mapToCanvas(rightAnkle);
-
-      if (!(pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon))) {
-        trampolineNotice.style.color = '#f00';
-        trampolineNotice.textContent = "Calibration failed: Stand inside trampoline area!";
-        return;
-      }
-      baselineAnkleY = Math.min(left[1], right[1]);
+    // --------- CALIBRATION: handled externally ---------
+    // To support calibration from the parent UI, you might expose a JS function:
+    window.setJumpTekCalibration = function (ankleY) {
+      baselineAnkleY = ankleY;
       calibrationReady = true;
       trampolineNotice.style.color = '#0f0';
-      trampolineNotice.textContent = "Calibration set! Jump height will now be accurate.";
-      calibrateBtn.style.display = "none";
-    });
+      trampolineNotice.textContent = "Calibration set by UI. Jump height now accurate.";
+    };
 
     // --------- CAMERA SWITCH & EVENTS ---------
     async function handleSwitchCamera() {
@@ -419,7 +382,7 @@
     window.addEventListener('beforeunload', cleanupResources);
 
     canvas.addEventListener('click', function (e) {
-      if (trampolinePolygon) return; // Already set
+      if (trampolinePolygon) return;
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (canvas.width / rect.width);
       const y = (e.clientY - rect.top) * (canvas.height / rect.height);
@@ -427,16 +390,8 @@
       if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCorners = [];
-        trampolineNotice.textContent = "Trampoline area set! Stand still and press 'Calibrate'.";
-        calibrateBtn.style.display = "block";
+        trampolineNotice.textContent = "Trampoline area set! Calibration is controlled by the UI.";
       }
-    });
-
-    // Store last poseLandmarks for calibration
-    pose.lastResults = null;
-    pose.onResults(function (results) {
-      pose.lastResults = results;
-      onResults(results);
     });
 
     // --------- INIT ---------
