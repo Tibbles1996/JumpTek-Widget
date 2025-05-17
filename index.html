@@ -59,7 +59,7 @@
     <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
       <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch camera" width="40" height="40" style="display:block;">
     </button>
-    <div id="trampolineNotice">Tap the four corners of the trampoline. Calibration is controlled by the UI.</div>
+    <div id="trampolineNotice">Tap the four corners of the trampoline. Then press calibrate.</div>
     <div id="loadingIndicator">Loading...</div>
   </div>
   <script>
@@ -316,7 +316,7 @@
 
           if (!baselineAnkleY || !calibrationReady) {
             trampolineNotice.style.color = '#ff0';
-            trampolineNotice.textContent = "Calibration not set. Awaiting external UI calibration.";
+            trampolineNotice.textContent = "Calibration not set.";
             return;
           }
 
@@ -359,7 +359,7 @@
       baselineAnkleY = ankleY;
       calibrationReady = true;
       trampolineNotice.style.color = '#0f0';
-      trampolineNotice.textContent = "Calibration set by UI. Jump height now accurate.";
+      trampolineNotice.textContent = "Calibration set.";
     };
 
     // --------- CAMERA SWITCH & EVENTS ---------
@@ -393,7 +393,7 @@
       if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCorners = [];
-        trampolineNotice.textContent = "Trampoline area set! Calibration is controlled by the UI.";
+        trampolineNotice.textContent = "Trampoline area set!.";
       }
     });
 
