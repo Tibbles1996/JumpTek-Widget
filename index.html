@@ -34,6 +34,7 @@
       height: 100vh;
       background: #000;
       border: none;
+      z-index: 1;
     }
     #video {
       display: none;
@@ -93,7 +94,6 @@
       z-index: 30;
     }
   </style>
-  <!-- Load MediaPipe and Drawing Utils -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
@@ -127,9 +127,65 @@
     let trampolineCorners = [];
     let trampolinePolygon = null;
 
+    // Jump smoothing
+    const SMOOTHING_WINDOW = 5;
+    let jumpHeightHistory = [];
+
     // FPS Throttle
     let lastFrameTime = 0;
     const TARGET_FPS = 15;
+
+    // Alignment dot parameters
+    const DOT_COLOR = { r: 0, g: 255, b: 0 }; // bright green
+    const DOT_TOLERANCE = 50;
+    const DOT_MIN_RADIUS = 8; // pixels
+    const DOT_SEARCH_RADIUS = 30; // pixels
+
+    function colorDistance(c1, c2) {
+      return Math.sqrt(
+        (c1.r - c2.r) ** 2 +
+        (c1.g - c2.g) ** 2 +
+        (c1.b - c2.b) ** 2
+      );
+    }
+
+    // Find the green dot on the trampoline (lowest visible dot on the frame)
+    function findAlignmentDot(imageData, width, height) {
+      let foundYs = [];
+      for (let y = height - 1; y >= 0; y -= 2) { // scan from bottom up
+        for (let x = 0; x < width; x += 2) {
+          const idx = (y * width + x) * 4;
+          const pixel = {
+            r: imageData.data[idx],
+            g: imageData.data[idx + 1],
+            b: imageData.data[idx + 2]
+          };
+          if (colorDistance(pixel, DOT_COLOR) < DOT_TOLERANCE) {
+            // Check area around this point for enough green pixels
+            let count = 0;
+            for (let dy = -DOT_SEARCH_RADIUS; dy <= DOT_SEARCH_RADIUS; dy++) {
+              for (let dx = -DOT_SEARCH_RADIUS; dx <= DOT_SEARCH_RADIUS; dx++) {
+                let xx = x + dx, yy = y + dy;
+                if (xx < 0 || xx >= width || yy < 0 || yy >= height) continue;
+                let idx2 = (yy * width + xx) * 4;
+                let p2 = {
+                  r: imageData.data[idx2],
+                  g: imageData.data[idx2 + 1],
+                  b: imageData.data[idx2 + 2]
+                };
+                if (colorDistance(p2, DOT_COLOR) < DOT_TOLERANCE) count++;
+              }
+            }
+            if (count >= Math.PI * DOT_MIN_RADIUS * DOT_MIN_RADIUS * 0.5) {
+              foundYs.push({ x, y });
+              // Only get the lowest (first found), so return immediately
+              return { x, y };
+            }
+          }
+        }
+      }
+      return null;
+    }
 
     // MediaPipe Pose setup
     const poseOptions = {
@@ -143,7 +199,6 @@
     pose.setOptions(poseOptions);
     pose.onResults(onResults);
 
-    // Camera
     async function startCamera() {
       showLoading(true);
       try {
@@ -231,7 +286,6 @@
       return inside;
     }
 
-    // Draw trampoline corners and area
     function drawTrampolineArea(ctx, corners) {
       if (corners.length < 2) return;
       ctx.save();
@@ -256,10 +310,6 @@
       ctx.restore();
     }
 
-    // --- Smoothing setup ---
-    const SMOOTHING_WINDOW = 5; // Increase for more smoothing
-    let jumpHeightHistory = [];
-
     // Main MediaPipe results handler
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
@@ -273,6 +323,34 @@
       }
       if (trampolinePolygon) {
         drawTrampolineArea(ctx, trampolinePolygon);
+      }
+
+      // --- Alignment Dot Detection ---
+      let alignmentDotY = null;
+      if (results.image) {
+        try {
+          // Draw to offscreen canvas and get image data
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = canvas.width;
+          tempCanvas.height = canvas.height;
+          const tempCtx = tempCanvas.getContext('2d');
+          tempCtx.drawImage(results.image, 0, 0, tempCanvas.width, tempCanvas.height);
+          const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+          const dot = findAlignmentDot(imageData, tempCanvas.width, tempCanvas.height);
+          if (dot) {
+            alignmentDotY = dot.y;
+            // Draw the detected dot for visual feedback
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(dot.x, dot.y, DOT_MIN_RADIUS + 2, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#0f0';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            ctx.restore();
+          }
+        } catch (err) {
+          // Ignore detection errors
+        }
       }
 
       if (results.poseLandmarks) {
@@ -290,31 +368,39 @@
         const left = mapToCanvas(leftAnkle);
         const right = mapToCanvas(rightAnkle);
 
-        // If both feet are in the trampoline, proceed
+        // Only proceed if both feet are in the trampoline
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
-          // Calculate the "jump height" as how high the lowest ankle is above the lowest trampoline corner
-          let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
-          let minAnkleY = Math.min(left[1], right[1]);
-          let trampolineHeight = maxCornerY - Math.min(...trampolinePolygon.map(([_, y]) => y));
-          let rawHeight = maxCornerY - minAnkleY;
-          let normalizedJumpHeight = trampolineHeight > 0 ? Math.max(0, Math.min(1, rawHeight / trampolineHeight)) : 0;
+          // Calculate the "ground" as the greater (lower on screen) of
+          // (1) the lowest trampoline polygon Y
+          // (2) the alignment dot Y (if found)
+          let polygonGroundY = Math.max(...trampolinePolygon.map(([_, y]) => y));
+          let groundY = alignmentDotY !== null
+            ? Math.max(polygonGroundY, alignmentDotY)
+            : polygonGroundY;
 
-          // --- Smoothing: moving average ---
+          // Calculate trampoline height (highest to lowest corner)
+          let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
+          let trampolineHeight = groundY - minCornerY;
+
+          // Use the lowest ankle Y
+          let minAnkleY = Math.min(left[1], right[1]);
+          let rawHeight = groundY - minAnkleY;
+          let normalizedJumpHeight = trampolineHeight > 0
+            ? Math.max(0, Math.min(1, rawHeight / trampolineHeight))
+            : 0;
+
+          // Smoothing
           jumpHeightHistory.push(normalizedJumpHeight);
-          if (jumpHeightHistory.length > SMOOTHING_WINDOW) {
-            jumpHeightHistory.shift();
-          }
-          // Calculate the average of the last N values
+          if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // Optional: Thresholding for update
-          const MIN_DELTA = 0.01; // Only send if change is significant
+          // Thresholding
+          const MIN_DELTA = 0.01;
           if (
             typeof onResults.lastSent === "undefined" ||
             Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA
           ) {
             onResults.lastSent = smoothedJumpHeight;
-            // Send jump height to parent
             window.parent.postMessage(
               {
                 type: 'jump_height',
