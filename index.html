@@ -79,7 +79,10 @@
       pointer-events: none;
     }
     #trampolineNotice {
-        position: static;      /* Remove absolute positioning */
+position: absolute;
+  left: 50%;
+  bottom: 40px; /* 40px from the bottom, so it's under the calibration dot at 80px */
+  transform: translateX(-50%);
   color: #0f0;
   background: rgba(0,0,0,0.7);
   padding: 10px 24px;
@@ -88,9 +91,8 @@
   width: auto;
   max-width: 90vw;
   text-align: center;
-  margin: 16px auto 0 auto; /* Space above, centered */
   pointer-events: none;
-  z-index: 20;
+  z-index: 30;
     }
   </style>
   <!-- Load MediaPipe and Drawing Utils -->
