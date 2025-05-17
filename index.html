@@ -17,16 +17,42 @@
       width: 100vw; height: 100vh; background: #000; border: none; z-index: 1;
     }
     #video { display: none; }
-    #switchCameraBtn, #calibrateBtn {
-      position: absolute; top: 16px; z-index: 20; margin: 0;
-      padding: 10px 18px; color: #fff; border: none; border-radius: 16px;
-      font-size: 1.3rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      transition: background 0.2s; display: flex; align-items: center; justify-content: center; font-weight: bold;
+    #buttonRow {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 20px;
+      z-index: 20;
     }
-    #switchCameraBtn { left: 70%; transform: translateX(-50%); background: #27ae60; }
+    #switchCameraBtn, #calibrateBtn {
+      position: static; /* Remove absolute positioning */
+      margin: 0;
+      padding: 10px 18px;
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      font-size: 1.3rem;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+    #switchCameraBtn { background: #27ae60; }
     #switchCameraBtn:hover { background: #219150; }
-    #calibrateBtn { left: 60%; background: #2980b9; top: 10px; }
+    #calibrateBtn { background: #2980b9; }
     #calibrateBtn:hover { background: #21618c; }
+    #switchCameraBtn img {
+      margin-right: 8px;
+      width: 32px;
+      height: 32px;
+      vertical-align: middle;
+      display: block;
+    }
     #loadingIndicator {
       position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
       z-index: 30; color: #ff0; background: rgba(0,0,0,0.7);
@@ -46,14 +72,14 @@
 <body>
   <div id="container">
     <canvas id="canvas"></canvas>
-    <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
-      <svg xmlns="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" width="40" height="40" fill="#fff" viewBox="0 0 40 40">
-        <path d="M20 11.667c-3.583 0-6.625 2.334-7.667 5.583H11.25c-.958 0-1.75.792-1.75 1.75s.792 1.75 1.75 1.75h9.417l-2.167-2.167c-.334-.334-.334-.875 0-1.209.334-.334.875-.334 1.209 0l3.75 3.75c.334.334.334.875 0 1.209l-3.75 3.75c-.334.334-.875.334-1.209 0-.334-.334-.334-.875 0-1.209l2.167-2.167H11.25c-.958 0-1.75-.792-1.75-1.75s.792-1.75 1.75-1.75h1.083c1.042-3.249 4.084-5.583 7.667-5.583 4.042 0 7.333 3.292 7.333 7.333s-3.291 7.333-7.333 7.333c-2.125 0-4.042-.875-5.417-2.292-.333-.334-.875-.334-1.208 0-.334.334-.334.875 0 1.209C13.958 29.292 16.833 30.833 20 30.833c5.125 0 9.333-4.208 9.333-9.333S25.125 11.667 20 11.667z"/>
-      </svg>
-    </button>
-    <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: block;">
-      Calibrate
-    </button>
+    <div id="buttonRow">
+      <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
+        <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
+      </button>
+      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: block;">
+        Calibrate
+      </button>
+    </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then stand still and press "Calibrate"</div>
     <div id="loadingIndicator">Loading...</div>
   </div>
