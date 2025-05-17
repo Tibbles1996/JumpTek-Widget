@@ -79,21 +79,18 @@
       pointer-events: none;
     }
     #trampolineNotice {
-      position: absolute;
-      left: 50%;
-      bottom: 30px;
-      transform: translateX(-50%);
-      color: #0f0;
-      background: rgba(0,0,0,0.7);
-      padding: 10px 24px;
-      border-radius: 16px;
-      font-size: 1.2rem;
-      z-index: 20;
-      width: auto;
-      max-width: 90vw;
-      text-align: center;
-      margin: 0;
-      pointer-events: none;
+        position: static;      /* Remove absolute positioning */
+  color: #0f0;
+  background: rgba(0,0,0,0.7);
+  padding: 10px 24px;
+  border-radius: 16px;
+  font-size: 1.2rem;
+  width: auto;
+  max-width: 90vw;
+  text-align: center;
+  margin: 16px auto 0 auto; /* Space above, centered */
+  pointer-events: none;
+  z-index: 20;
     }
   </style>
   <!-- Load MediaPipe and Drawing Utils -->
