@@ -110,7 +110,21 @@
   </div>
   <video id="video" autoplay playsinline></video>
   <script>
-    // Elements
+    // --------- CONFIGURABLE PARAMETERS ---------
+    // Set your actual trampoline height (in meters) here!
+    const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6; // Example: 0.6 meters, adjust as needed
+
+    // Smoothing and jump detection
+    const SMOOTHING_WINDOW = 5;
+    const MIN_DELTA_METERS = 0.005; // Only send jump height if change exceeds this value
+
+    // Alignment dot detection (bright green)
+    const DOT_COLOR = { r: 0, g: 255, b: 0 };
+    const DOT_TOLERANCE = 50;
+    const DOT_MIN_RADIUS = 8;
+    const DOT_SEARCH_RADIUS = 30;
+
+    // --------- ELEMENTS AND STATE ---------
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -121,73 +135,15 @@
     let currentStream = null;
     let useFrontCamera = false;
     let animationFrameId = null;
-    let parentOrigin = "*"; // Use "*" or restrict if known
+    let parentOrigin = "*";
 
-    // Trampoline calibration state
+    // Calibration state
     let trampolineCorners = [];
     let trampolinePolygon = null;
 
-    // Jump smoothing
-    const SMOOTHING_WINDOW = 5;
     let jumpHeightHistory = [];
 
-    // FPS Throttle
-    let lastFrameTime = 0;
-    const TARGET_FPS = 15;
-
-    // Alignment dot parameters
-    const DOT_COLOR = { r: 0, g: 255, b: 0 }; // bright green
-    const DOT_TOLERANCE = 50;
-    const DOT_MIN_RADIUS = 8; // pixels
-    const DOT_SEARCH_RADIUS = 30; // pixels
-
-    function colorDistance(c1, c2) {
-      return Math.sqrt(
-        (c1.r - c2.r) ** 2 +
-        (c1.g - c2.g) ** 2 +
-        (c1.b - c2.b) ** 2
-      );
-    }
-
-    // Find the green dot on the trampoline (lowest visible dot on the frame)
-    function findAlignmentDot(imageData, width, height) {
-      let foundYs = [];
-      for (let y = height - 1; y >= 0; y -= 2) { // scan from bottom up
-        for (let x = 0; x < width; x += 2) {
-          const idx = (y * width + x) * 4;
-          const pixel = {
-            r: imageData.data[idx],
-            g: imageData.data[idx + 1],
-            b: imageData.data[idx + 2]
-          };
-          if (colorDistance(pixel, DOT_COLOR) < DOT_TOLERANCE) {
-            // Check area around this point for enough green pixels
-            let count = 0;
-            for (let dy = -DOT_SEARCH_RADIUS; dy <= DOT_SEARCH_RADIUS; dy++) {
-              for (let dx = -DOT_SEARCH_RADIUS; dx <= DOT_SEARCH_RADIUS; dx++) {
-                let xx = x + dx, yy = y + dy;
-                if (xx < 0 || xx >= width || yy < 0 || yy >= height) continue;
-                let idx2 = (yy * width + xx) * 4;
-                let p2 = {
-                  r: imageData.data[idx2],
-                  g: imageData.data[idx2 + 1],
-                  b: imageData.data[idx2 + 2]
-                };
-                if (colorDistance(p2, DOT_COLOR) < DOT_TOLERANCE) count++;
-              }
-            }
-            if (count >= Math.PI * DOT_MIN_RADIUS * DOT_MIN_RADIUS * 0.5) {
-              foundYs.push({ x, y });
-              // Only get the lowest (first found), so return immediately
-              return { x, y };
-            }
-          }
-        }
-      }
-      return null;
-    }
-
-    // MediaPipe Pose setup
+    // --------- CAMERA & SETUP ---------
     const poseOptions = {
       modelComplexity: 0,
       smoothLandmarks: true,
@@ -242,12 +198,13 @@
     }
 
     function showLoading(show) {
-      if (loadingIndicator) {
-        loadingIndicator.style.display = show ? 'block' : 'none';
-      }
+      loadingIndicator.style.display = show ? 'block' : 'none';
     }
 
-    // Frame Loop (throttled)
+    // --------- FRAME LOOP ---------
+    let lastFrameTime = 0;
+    const TARGET_FPS = 15;
+
     function startFrameLoop() {
       if (!animationFrameId) animationFrameId = requestAnimationFrame(processVideoFrame);
     }
@@ -262,17 +219,56 @@
       if (!video.paused && !video.ended && video.readyState === 4) {
         if (!lastFrameTime || (now - lastFrameTime > 1000 / TARGET_FPS)) {
           lastFrameTime = now;
-          try {
-            await pose.send({ image: video });
-          } catch (e) {
-            console.error('Pose detection error:', e);
-          }
+          try { await pose.send({ image: video }); }
+          catch (e) { console.error('Pose detection error:', e); }
         }
       }
       animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
-    // Utility: Point in Polygon
+    // --------- ALIGNMENT DOT DETECTION ---------
+    function colorDistance(c1, c2) {
+      return Math.sqrt(
+        (c1.r - c2.r) ** 2 +
+        (c1.g - c2.g) ** 2 +
+        (c1.b - c2.b) ** 2
+      );
+    }
+    function findAlignmentDot(imageData, width, height) {
+      for (let y = height - 1; y >= 0; y -= 2) {
+        for (let x = 0; x < width; x += 2) {
+          const idx = (y * width + x) * 4;
+          const pixel = {
+            r: imageData.data[idx],
+            g: imageData.data[idx + 1],
+            b: imageData.data[idx + 2]
+          };
+          if (colorDistance(pixel, DOT_COLOR) < DOT_TOLERANCE) {
+            // Check surrounding area for enough green pixels
+            let count = 0;
+            for (let dy = -DOT_SEARCH_RADIUS; dy <= DOT_SEARCH_RADIUS; dy++) {
+              for (let dx = -DOT_SEARCH_RADIUS; dx <= DOT_SEARCH_RADIUS; dx++) {
+                let xx = x + dx, yy = y + dy;
+                if (xx < 0 || xx >= width || yy < 0 || yy >= height) continue;
+                let idx2 = (yy * width + xx) * 4;
+                let p2 = {
+                  r: imageData.data[idx2],
+                  g: imageData.data[idx2 + 1],
+                  b: imageData.data[idx2 + 2]
+                };
+                if (colorDistance(p2, DOT_COLOR) < DOT_TOLERANCE) count++;
+              }
+            }
+            if (count >= Math.PI * DOT_MIN_RADIUS * DOT_MIN_RADIUS * 0.5) {
+              return { x, y };
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    // --------- MAIN MEDIAPIPE HANDLER ---------
     function pointInPolygon(pt, poly) {
       let [x, y] = pt;
       let inside = false;
@@ -310,7 +306,6 @@
       ctx.restore();
     }
 
-    // Main MediaPipe results handler
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         resizeCanvasToVideo();
@@ -318,18 +313,13 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      if (trampolineCorners.length > 0) {
-        drawTrampolineArea(ctx, trampolineCorners);
-      }
-      if (trampolinePolygon) {
-        drawTrampolineArea(ctx, trampolinePolygon);
-      }
+      if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
+      if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
 
-      // --- Alignment Dot Detection ---
+      // Alignment dot detection
       let alignmentDotY = null;
       if (results.image) {
         try {
-          // Draw to offscreen canvas and get image data
           const tempCanvas = document.createElement('canvas');
           tempCanvas.width = canvas.width;
           tempCanvas.height = canvas.height;
@@ -339,7 +329,6 @@
           const dot = findAlignmentDot(imageData, tempCanvas.width, tempCanvas.height);
           if (dot) {
             alignmentDotY = dot.y;
-            // Draw the detected dot for visual feedback
             ctx.save();
             ctx.beginPath();
             ctx.arc(dot.x, dot.y, DOT_MIN_RADIUS + 2, 0, 2 * Math.PI);
@@ -348,9 +337,7 @@
             ctx.stroke();
             ctx.restore();
           }
-        } catch (err) {
-          // Ignore detection errors
-        }
+        } catch (err) {}
       }
 
       if (results.poseLandmarks) {
@@ -361,50 +348,46 @@
         const rightAnkle = results.poseLandmarks[28];
         if (!leftAnkle || !rightAnkle || !trampolinePolygon) return;
 
-        // Map normalized ankle coordinates to canvas
         function mapToCanvas(pt) {
           return [pt.x * canvas.width, pt.y * canvas.height];
         }
         const left = mapToCanvas(leftAnkle);
         const right = mapToCanvas(rightAnkle);
 
-        // Only proceed if both feet are in the trampoline
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
-          // Calculate the "ground" as the greater (lower on screen) of
-          // (1) the lowest trampoline polygon Y
-          // (2) the alignment dot Y (if found)
+          // Use either the polygon border or the alignment dot as ground
           let polygonGroundY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let groundY = alignmentDotY !== null
             ? Math.max(polygonGroundY, alignmentDotY)
             : polygonGroundY;
 
-          // Calculate trampoline height (highest to lowest corner)
           let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
-          let trampolineHeight = groundY - minCornerY;
+          let trampolinePixelHeight = groundY - minCornerY;
 
-          // Use the lowest ankle Y
           let minAnkleY = Math.min(left[1], right[1]);
           let rawHeight = groundY - minAnkleY;
-          let normalizedJumpHeight = trampolineHeight > 0
-            ? Math.max(0, Math.min(1, rawHeight / trampolineHeight))
-            : 0;
+
+          // Calculate jump height in meters (not normalized)
+          let jumpHeightMeters =
+            trampolinePixelHeight > 0
+              ? Math.max(0, rawHeight / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
+              : 0;
 
           // Smoothing
-          jumpHeightHistory.push(normalizedJumpHeight);
+          jumpHeightHistory.push(jumpHeightMeters);
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // Thresholding
-          const MIN_DELTA = 0.01;
+          // Only send if significant change
           if (
             typeof onResults.lastSent === "undefined" ||
-            Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA
+            Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
           ) {
             onResults.lastSent = smoothedJumpHeight;
             window.parent.postMessage(
               {
                 type: 'jump_height',
-                height: smoothedJumpHeight
+                height: smoothedJumpHeight // height in meters
               },
               parentOrigin
             );
@@ -413,7 +396,7 @@
       }
     }
 
-    // Camera switch button
+    // --------- CAMERA SWITCH & EVENTS ---------
     async function handleSwitchCamera() {
       useFrontCamera = !useFrontCamera;
       await startCamera();
@@ -427,7 +410,6 @@
       }
     });
 
-    // Cleanup on unload
     function cleanupResources() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
@@ -436,7 +418,6 @@
     }
     window.addEventListener('beforeunload', cleanupResources);
 
-    // Trampoline area selection handler
     canvas.addEventListener('click', function (e) {
       if (trampolinePolygon) return; // Already set
       const rect = canvas.getBoundingClientRect();
@@ -450,14 +431,9 @@
       }
     });
 
-    // Init
-    (async () => {
-      await startCamera();
-    })();
-
+    // --------- INIT ---------
+    (async () => { await startCamera(); })();
     window.addEventListener('resize', resizeCanvasToVideo);
-
-    // Auto-recover frame loop if tab is refocused
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && video.srcObject) {
         video.play();
