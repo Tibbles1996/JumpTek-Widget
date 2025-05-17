@@ -48,7 +48,7 @@
     <canvas id="canvas"></canvas>
     <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
       <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="#fff" viewBox="0 0 40 40">
-        <path d="M20 11.667c-3.583 0-6.625 2.334-7.667 5.583H11.25c-.958 0-1.75.792-1.75 1.75s.792 1.75 1.75 1.75h9.417l-2.167-2.167c-.334-.334-.334-.875 0-1.209.334-.334.875-.334 1.209 0l3.75 3.75c.334.334.334.875 0 1.209l-3.75 3.75c-.334.334-.875.334-1.209 0-.334-.334-.334-.875 0-1.209l2.167-2.167H11.25c-.958 0-1.75-.792-1.75-1.75s.792-1.75 1.75-1.75h1.083c1.042-3.249 4.084-5.583 7.667-5.583 4.042 0 7.333 3.292 7.333 7.333s-3.291 7.333-7.333 7.333c-2.125 0-4.042-.875-5.417-2.292-.333-.334-.875-.334-1.208 0-.334.334-.334.875 0 1.209C13.958 29.292 16.833 30.833 20 30.833c5.125 0 9.333-4.208 9.333-9.333S25.125 11.667 20 11.667z"/>
+        <path d="M20 11.667c-3.583 0-6.625 2.334-7.667 5.583H11.25c-.958 0-1.75.792-1.75 1.75s.792 1.75 1.75 1.75h9.417l-2.167-2.167c-.334-.334-.334-.875 0-1.209.334-.334.875-.334 1.209 0l3.75 3.7[...]"/>
       </svg>
     </button>
     <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: block;">
@@ -61,17 +61,20 @@
   <script>
     // --------- CONFIGURABLE PARAMETERS ---------
     // Set your actual trampoline height (in meters) here!
-    const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6; // Example: 0.6 meters, adjust as needed
+    const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6; // Adjust as needed
 
     // Smoothing and jump detection
     const SMOOTHING_WINDOW = 5;
-    const MIN_DELTA_METERS = 0.005; // Only send jump height if change exceeds this value
+    const MIN_DELTA_METERS = 0.005;
 
     // Alignment dot detection (bright green)
     const DOT_COLOR = { r: 0, g: 255, b: 0 };
     const DOT_TOLERANCE = 50;
     const DOT_MIN_RADIUS = 8;
     const DOT_SEARCH_RADIUS = 30;
+
+    // --- NEW: Threshold for considering airborne (in pixels above baseline) ---
+    const AIRBORNE_THRESHOLD_PIXELS = 15; // Adjust for sensitivity
 
     // --------- ELEMENTS AND STATE ---------
     const video = document.getElementById('video');
@@ -339,10 +342,16 @@
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // Only send if significant change
+          // --- Only send jump if athlete is airborne (NEW LOGIC) ---
+          let isAirborne =
+            (baselineAnkleY - left[1] > AIRBORNE_THRESHOLD_PIXELS) &&
+            (baselineAnkleY - right[1] > AIRBORNE_THRESHOLD_PIXELS);
+
           if (
-            typeof onResults.lastSent === "undefined" ||
-            Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
+            isAirborne && (
+              typeof onResults.lastSent === "undefined" ||
+              Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
+            )
           ) {
             onResults.lastSent = smoothedJumpHeight;
             window.parent.postMessage(
@@ -353,6 +362,8 @@
               parentOrigin
             );
           }
+          // Reset last sent when not airborne so jumps always get sent after landing
+          if (!isAirborne) onResults.lastSent = null;
         }
       }
     }
