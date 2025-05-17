@@ -33,9 +33,7 @@
       width: 100vw;
       height: 100vh;
       background: #000;
-      border: none; /* Remove blue border */
-      margin: 0;
-      padding: 0;
+      border: none;
     }
     #video {
       display: none;
@@ -79,20 +77,20 @@
       pointer-events: none;
     }
     #trampolineNotice {
-position: absolute;
-  left: 50%;
-  bottom: 30px; /* 40px from the bottom, so it's under the calibration dot at 80px */
-  transform: translateX(-50%);
-  color: #0f0;
-  background: rgba(0,0,0,0.7);
-  padding: 10px 24px;
-  border-radius: 16px;
-  font-size: 1.2rem;
-  width: auto;
-  max-width: 90vw;
-  text-align: center;
-  pointer-events: none;
-  z-index: 30;
+      position: absolute;
+      left: 50%;
+      bottom: 30px;
+      transform: translateX(-50%);
+      color: #0f0;
+      background: rgba(0,0,0,0.7);
+      padding: 10px 24px;
+      border-radius: 16px;
+      font-size: 1.2rem;
+      width: auto;
+      max-width: 90vw;
+      text-align: center;
+      pointer-events: none;
+      z-index: 30;
     }
   </style>
   <!-- Load MediaPipe and Drawing Utils -->
@@ -103,9 +101,8 @@ position: absolute;
   <div id="container">
     <canvas id="canvas"></canvas>
     <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
-      <!-- Camera Switch SVG Icon -->
       <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" fill="#fff" viewBox="0 0 40 40">
-        <path d="M20 11.667c-3.583 0-6.625 2.334-7.667 5.583H11.25c-.958 0-1.75.792-1.75 1.75s.792 1.75 1.75 1.75h9.417l-2.167-2.167c-.334-.334-.334-.875 0-1.209.334-.334.875-.334 1.209 0l3.75 3.75c.334.334.334.875 0 1.209l-3.75 3.75c-.334.334-.875.334-1.209 0-.334-.334-.334-.875 0-1.209l2.167-2.167H11.25c-1.917 0-3.5-1.583-3.5-3.5s1.583-3.5 3.5-3.5h1.083C13.375 13.334 16.417 11 20 11zm8.75 10.25H19.333l2.167 2.167c.334.334.334.875 0 1.209-.334.334-.875.334-1.209 0l-3.75-3.75c-.334-.334-.334-.875 0-1.209l3.75-3.75c.334-.334.875-.334 1.209 0 .334.334.334.875 0 1.209l-2.167 2.167h9.417c.958 0 1.75.792 1.75 1.75s-.792 1.75-1.75 1.75z"/>
+        <path d="M20 11.667c-3.583 0-6.625 2.334-7.667 5.583H11.25c-.958 0-1.75.792-1.75 1.75s.792 1.75 1.75 1.75h9.417l-2.167-2.167c-.334-.334-.334-.875 0-1.209.334-.334.875-.334 1.209 0l3.75 3.75c.334.334.334.875 0 1.209l-3.75 3.75c-.334.334-.875.334-1.209 0-.334-.334-.334-.875 0-1.209l2.167-2.167H11.25c-.958 0-1.75-.792-1.75-1.75s.792-1.75 1.75-1.75h1.083c1.042-3.25 4.084-5.583 7.667-5.583 2.917 0 5.459 1.5 6.917 3.75.292.417.875.542 1.292.25.417-.292.542-.875.25-1.292-1.75-2.625-4.917-4.208-8.459-4.208z"/>
       </svg>
     </button>
     <div id="trampolineNotice">Tap the four corners of the trampoline</div>
@@ -113,9 +110,7 @@ position: absolute;
   </div>
   <video id="video" autoplay playsinline></video>
   <script>
-    // ===============================
-    // Initialization and Global Variables
-    // ===============================
+    // Elements
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -124,20 +119,19 @@ position: absolute;
     const trampolineNotice = document.getElementById('trampolineNotice');
 
     let currentStream = null;
-    let useFrontCamera = false; // false = rear, true = front
-    let isJumping = false;
-    let jumpStart = 0;
+    let useFrontCamera = false;
     let animationFrameId = null;
-    let parentOrigin = "YOUR_PARENT_ORIGIN";
-    let calibrationReady = false;
+    let parentOrigin = "*"; // Use "*" or restrict if known
 
-    // Trampoline boundary selection
+    // Trampoline calibration state
     let trampolineCorners = [];
     let trampolinePolygon = null;
 
-    // ===============================
-    // Pose Object Initialization
-    // ===============================
+    // FPS Throttle
+    let lastFrameTime = 0;
+    const TARGET_FPS = 15;
+
+    // MediaPipe Pose setup
     const poseOptions = {
       modelComplexity: 0,
       smoothLandmarks: true,
@@ -149,22 +143,7 @@ position: absolute;
     pose.setOptions(poseOptions);
     pose.onResults(onResults);
 
-    // ===============================
-    // Frame Loop Management Utilities
-    // ===============================
-    function startFrameLoop() {
-      if (!animationFrameId) animationFrameId = requestAnimationFrame(processVideoFrame);
-    }
-    function stopFrameLoop() {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-    }
-
-    // ===============================
-    // Start Camera with Error Handling and Loading State
-    // ===============================
+    // Camera
     async function startCamera() {
       showLoading(true);
       try {
@@ -176,8 +155,8 @@ position: absolute;
           audio: false,
           video: {
             facingMode: useFrontCamera ? 'user' : 'environment',
-            width: { ideal: 1109 },
-            height: { ideal: 624 }
+            width: { ideal: 640 },
+            height: { ideal: 360 }
           }
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -200,7 +179,6 @@ position: absolute;
 
     function resizeCanvasToVideo() {
       if (video.videoWidth && video.videoHeight) {
-        // Always fill the viewport
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         canvas.style.width = "100vw";
@@ -208,43 +186,38 @@ position: absolute;
       }
     }
 
-    // ===============================
-    // Loading Indicator Controls
-    // ===============================
     function showLoading(show) {
       if (loadingIndicator) {
         loadingIndicator.style.display = show ? 'block' : 'none';
       }
     }
 
-    // ===============================
-    // Frame Processing Loop
-    // ===============================
-    async function processVideoFrame() {
+    // Frame Loop (throttled)
+    function startFrameLoop() {
+      if (!animationFrameId) animationFrameId = requestAnimationFrame(processVideoFrame);
+    }
+    function stopFrameLoop() {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    }
+
+    async function processVideoFrame(now) {
       if (!video.paused && !video.ended && video.readyState === 4) {
-        try {
-          await pose.send({ image: video });
-        } catch (e) {
-          console.error('Pose detection error:', e);
+        if (!lastFrameTime || (now - lastFrameTime > 1000 / TARGET_FPS)) {
+          lastFrameTime = now;
+          try {
+            await pose.send({ image: video });
+          } catch (e) {
+            console.error('Pose detection error:', e);
+          }
         }
       }
       animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
-    // ===============================
-    // Update Jump Stats and Notify Parent
-    // ===============================
-    function updateStatsDisplay(airtime, height) {
-      window.parent.postMessage({
-        type: 'jump',
-        airtime,
-        height
-      }, parentOrigin);
-    }
-
-    // ===============================
     // Utility: Point in Polygon
-    // ===============================
     function pointInPolygon(pt, poly) {
       let [x, y] = pt;
       let inside = false;
@@ -258,29 +231,7 @@ position: absolute;
       return inside;
     }
 
-    // ===============================
-    // Draw Calibration Dot and Line
-    // ===============================
-    function drawCalibration(ctx, width, height) {
-      ctx.save();
-      const dotX = width / 2;
-      const dotY = height - 80;
-      ctx.strokeStyle = '#0f0';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(dotX - 40, dotY);
-      ctx.lineTo(dotX + 40, dotY);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, 8, 0, 2 * Math.PI);
-      ctx.fillStyle = '#0f0';
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // ===============================
-    // Draw Trampoline Area
-    // ===============================
+    // Draw trampoline corners and area
     function drawTrampolineArea(ctx, corners) {
       if (corners.length < 2) return;
       ctx.save();
@@ -305,18 +256,13 @@ position: absolute;
       ctx.restore();
     }
 
-    // ===============================
-    // Jump Logic and Canvas Drawing
-    // ===============================
+    // Main MediaPipe results handler
     function onResults(results) {
-      // Always keep canvas in sync with viewport
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         resizeCanvasToVideo();
       }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
-      drawCalibration(ctx, canvas.width, canvas.height);
 
       if (trampolineCorners.length > 0) {
         drawTrampolineArea(ctx, trampolineCorners);
@@ -331,47 +277,37 @@ position: absolute;
 
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
+        if (!leftAnkle || !rightAnkle || !trampolinePolygon) return;
 
-        if (!leftAnkle || !rightAnkle) return;
-
-        const now = performance.now();
-        const [canvasX, canvasY] = [canvas.width, canvas.height];
-
-        function footInTrampoline(pt) {
-          const x = pt.x * canvasX;
-          const y = pt.y * canvasY;
-          if (trampolinePolygon) {
-            return pointInPolygon([x, y], trampolinePolygon);
-          } else {
-            const inX = x > 0.1 * canvasX && x < 0.9 * canvasX;
-            const inY = y > 0.4 * canvasY && y < 0.9 * canvasY;
-            return inX && inY;
-          }
+        // Map normalized ankle coordinates to canvas
+        function mapToCanvas(pt) {
+          return [pt.x * canvas.width, pt.y * canvas.height];
         }
+        const left = mapToCanvas(leftAnkle);
+        const right = mapToCanvas(rightAnkle);
 
-        const leftOn = footInTrampoline(leftAnkle);
-        const rightOn = footInTrampoline(rightAnkle);
-        const isOnTrampoline = leftOn && rightOn;
+        // If both feet are in the trampoline, proceed
+        if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
+          // Calculate the "jump height" as how high the lowest ankle is above the lowest trampoline corner
+          // 1. Find lowest (max y) trampoline corner
+          let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
+          // 2. Find lowest ankle y
+          let minAnkleY = Math.min(left[1], right[1]);
+          // 3. Height is the difference (clamped to [0,1]), normalized by the trampoline height
+          let trampolineHeight = maxCornerY - Math.min(...trampolinePolygon.map(([_, y]) => y));
+          let rawHeight = maxCornerY - minAnkleY;
+          let normalizedJumpHeight = trampolineHeight > 0 ? Math.max(0, Math.min(1, rawHeight / trampolineHeight)) : 0;
 
-        // Detect takeoff
-        if (!isJumping && !isOnTrampoline) {
-          isJumping = true;
-          jumpStart = now;
-        }
-        // Detect landing
-        if (isJumping && isOnTrampoline) {
-          isJumping = false;
-          const airtime = (now - jumpStart) / 1000;
-          const g = 9.81;
-          const height = 0.5 * g * Math.pow(airtime / 2, 2);
-          updateStatsDisplay(airtime, height);
+          // Send jump height to parent
+          window.parent.postMessage({
+            type: 'jump_height',
+            height: normalizedJumpHeight
+          }, parentOrigin);
         }
       }
     }
 
-    // ===============================
-    // Camera Switch Button Handler (with Accessibility)
-    // ===============================
+    // Camera switch button
     async function handleSwitchCamera() {
       useFrontCamera = !useFrontCamera;
       await startCamera();
@@ -385,9 +321,7 @@ position: absolute;
       }
     });
 
-    // ===============================
-    // Cleanup Resources on Unload
-    // ===============================
+    // Cleanup on unload
     function cleanupResources() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
@@ -396,9 +330,7 @@ position: absolute;
     }
     window.addEventListener('beforeunload', cleanupResources);
 
-    // ===============================
-    // Trampoline Area Selection Handler
-    // ===============================
+    // Trampoline area selection handler
     canvas.addEventListener('click', function (e) {
       if (trampolinePolygon) return; // Already set
       const rect = canvas.getBoundingClientRect();
@@ -408,22 +340,12 @@ position: absolute;
       if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCorners = [];
-        trampolineNotice.textContent = "Trampoline area set! You may recalibrate by refreshing.";
+        trampolineNotice.textContent = "Trampoline area set! Refresh to recalibrate.";
       }
     });
 
-    // ===============================
-    // Camera Access Notice (optional UX)
-    // ===============================
-    function showCameraAccessNotice() {
-      // Optional: Implement a notice for the user before requesting camera access.
-    }
-
-    // ===============================
-    // Initialization on Page Load
-    // ===============================
+    // Init
     (async () => {
-      showCameraAccessNotice();
       await startCamera();
     })();
 
