@@ -27,7 +27,7 @@
       z-index: 20;
     }
     #switchCameraBtn, #calibrateBtn {
-      position: static; /* Remove absolute positioning */
+      position: static;
       margin: 0;
       padding: 10px 18px;
       color: #fff;
@@ -86,14 +86,9 @@
   <video id="video" autoplay playsinline></video>
   <script>
     // --------- CONFIGURABLE PARAMETERS ---------
-    // Set your actual trampoline height (in meters) here!
-    const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6; // Example: 0.6 meters, adjust as needed
-
-    // Smoothing and jump detection
+    const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
     const SMOOTHING_WINDOW = 5;
-    const MIN_DELTA_METERS = 0.002; // Only send jump height if change exceeds this value
-
-    // Alignment dot detection (bright green)
+    const MIN_DELTA_METERS = 0.002;
     const DOT_COLOR = { r: 0, g: 255, b: 0 };
     const DOT_TOLERANCE = 50;
     const DOT_MIN_RADIUS = 8;
@@ -346,15 +341,13 @@
 
           let minAnkleY = Math.min(left[1], right[1]);
 
-          // --- Calibration Logic ---
-          if (!baselineAnkleY || !calibrationReady) {
-            trampolineNotice.style.color = '#ff0';
-            trampolineNotice.textContent = "Stand still and press 'Calibrate' to set baseline";
-            return;
+          // Always set a baseline if not set yet (for pre-calibration mode)
+          if (baselineAnkleY === null) {
+            baselineAnkleY = minAnkleY;
+            calibrationReady = false;
           }
 
           let rawHeight = baselineAnkleY - minAnkleY;
-          // Calculate jump height in meters (relative to baseline)
           let jumpHeightMeters =
             trampolinePixelHeight > 0
               ? Math.max(0, rawHeight / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
@@ -374,10 +367,20 @@
             window.parent.postMessage(
               {
                 type: 'jump_height',
-                height: smoothedJumpHeight // height in meters
+                height: smoothedJumpHeight,
+                calibrated: calibrationReady
               },
               parentOrigin
             );
+          }
+
+          // Show appropriate notice
+          if (!calibrationReady) {
+            trampolineNotice.style.color = '#ff0';
+            trampolineNotice.textContent = "Uncalibrated: Press 'Calibrate' for accurate jump height";
+          } else {
+            trampolineNotice.style.color = '#0f0';
+            trampolineNotice.textContent = "Calibration set! Jump height is accurate.";
           }
         }
       }
