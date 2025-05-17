@@ -12,7 +12,6 @@
     #container {
       position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000;
     }
-    /* Make the video visible and full screen */
     #video {
       display: block;
       position: absolute;
@@ -25,7 +24,7 @@
     #canvas {
       display: block; position: absolute; top: 0; left: 0;
       width: 100vw; height: 100vh; background: transparent; border: none; z-index: 1;
-      pointer-events: none;
+      pointer-events: auto; /* <-- FIXED: allow clicks for calibration */
     }
     #switchCameraBtn {
       position: absolute; top: 16px; z-index: 20; margin: 0;
@@ -53,7 +52,6 @@
 </head>
 <body>
   <div id="container">
-    <!-- Video feed is now visible and fills the background -->
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
     <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
@@ -144,7 +142,6 @@
         canvas.height = window.innerHeight;
         canvas.style.width = "100vw";
         canvas.style.height = "100vh";
-        // Video is always full screen, so nothing to adjust for #video
       }
     }
 
@@ -260,8 +257,6 @@
         resizeCanvasToVideo();
       }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      // Don't draw the video frame onto the canvas, since video is now visible behind canvas
-      // ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
