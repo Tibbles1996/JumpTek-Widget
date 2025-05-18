@@ -109,15 +109,15 @@
     let parentOrigin = "*";
 
     // Calibration state
-    let trampolineCorners = [];
+    let trampolineCorners2D = [];
     let trampolinePolygon = null;
-    let trampolineCenter = null;  // NEW: center of the trampoline
-    let trampolinePlane = null;   // NEW: best-fit simulated plane
+    let trampolineCenter = null;
+    let trampolinePlane3D = null; // --- 3D PLANE CODE ---
+    let trampolineCorners3D = []; // --- 3D PLANE CODE ---
 
     let jumpHeightHistory = [];
 
-    // Calibration baseline (in pixels, on canvas)
-    let baselineAnkleDist = null; // NEW: baseline is now a distance to plane
+    let baselineAnkleDist = null;
     let calibrationReady = false;
 
     // --------- CAMERA & SETUP ---------
@@ -246,38 +246,12 @@
     }
 
     // --------- UTILS FOR NEW CALIBRATION ---------
-    // Get center of quadrilateral (average of corners)
     function getQuadrilateralCenter(corners) {
       let cx = 0, cy = 0;
       for (const [x, y] of corners) { cx += x; cy += y; }
       return [cx / corners.length, cy / corners.length];
     }
 
-    // Fit a 2D line y = a*x + b to trampoline corners
-    function fitTrampolinePlane(corners) {
-      let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
-      for (const [x, y] of corners) {
-        sumX += x;
-        sumY += y;
-        sumXX += x * x;
-        sumXY += x * y;
-      }
-      let n = corners.length;
-      let denominator = n * sumXX - sumX * sumX;
-      let a = (n * sumXY - sumX * sumY) / denominator;
-      let b = (sumY * sumXX - sumX * sumXY) / denominator;
-      return { a, b };
-    }
-
-    // Distance from point (x, y) to the line y = a*x + b
-    function perpendicularDistanceToPlane(x, y, plane) {
-      let { a, b } = plane;
-      // Line: y = a*x + b => ax - y + b = 0
-      // Distance from (x0, y0) to line: |a*x0 - y0 + b| / sqrt(a^2 + 1)
-      return Math.abs(a * x - y + b) / Math.sqrt(a * a + 1);
-    }
-
-    // --------- MAIN MEDIAPIPE HANDLER ---------
     function pointInPolygon(pt, poly) {
       let [x, y] = pt;
       let inside = false;
@@ -304,7 +278,6 @@
       if (corners.length === 4) ctx.closePath();
       ctx.stroke();
       ctx.restore();
-      // Draw corner points
       ctx.save();
       ctx.fillStyle = '#ff0';
       for (const [x, y] of corners) {
@@ -318,12 +291,10 @@
     function drawTrampolineCenterAndLevel(ctx, center) {
       if (!center) return;
       ctx.save();
-      // Draw center dot
       ctx.beginPath();
       ctx.arc(center[0], center[1], 10, 0, 2 * Math.PI);
       ctx.fillStyle = '#0f0';
       ctx.fill();
-      // Draw horizontal (level) line through center
       let lineLength = 120;
       let y = center[1];
       let x1 = center[0] - lineLength / 2;
@@ -337,6 +308,33 @@
       ctx.restore();
     }
 
+    // --- 3D PLANE CODE ---
+    // Fit a 3D plane to three points
+    function fit3DPlane(p1, p2, p3) {
+      // p1, p2, p3: [x, y, z]
+      const v1 = [p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]];
+      const v2 = [p3[0]-p1[0], p3[1]-p1[1], p3[2]-p1[2]];
+      // Cross product v1 x v2 = n
+      const n = [
+        v1[1]*v2[2] - v1[2]*v2[1],
+        v1[2]*v2[0] - v1[0]*v2[2],
+        v1[0]*v2[1] - v1[1]*v2[0]
+      ];
+      const len = Math.hypot(n[0], n[1], n[2]);
+      return { n: [n[0]/len, n[1]/len, n[2]/len], p0: p1 };
+    }
+    // Signed vertical (Y) height above plane (using Y axis only)
+    function verticalDistanceToPlaneY(point, plane) {
+      const [nx, ny, nz] = plane.n;
+      const [x0, y0, z0] = plane.p0;
+      // Distance along normal: d = n·(P-P0)
+      const d = nx*(point[0]-x0) + ny*(point[1]-y0) + nz*(point[2]-z0);
+      // Project normal onto Y axis for true vertical height
+      return ny === 0 ? 0 : d / ny;
+    }
+    // --- END 3D PLANE CODE ---
+
+    // --------- MAIN MEDIAPIPE HANDLER ---------
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         resizeCanvasToVideo();
@@ -344,11 +342,10 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-      if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
+      if (trampolineCorners2D.length > 0) drawTrampolineArea(ctx, trampolineCorners2D);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
 
-      // Draw center dot & level line if boundary is set
-      if (trampolineCenter && trampolinePlane) {
+      if (trampolineCenter && trampolinePlane3D) {
         drawTrampolineCenterAndLevel(ctx, trampolineCenter);
       }
 
@@ -383,7 +380,7 @@
 
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
-        if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane) return;
+        if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane3D) return;
 
         function mapToCanvas(pt) {
           return [pt.x * canvas.width, pt.y * canvas.height];
@@ -392,12 +389,13 @@
         const right = mapToCanvas(rightAnkle);
 
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
-          // --------- NEW: Calculate distance to trampoline plane ---------
-          let leftDist = perpendicularDistanceToPlane(left[0], left[1], trampolinePlane);
-          let rightDist = perpendicularDistanceToPlane(right[0], right[1], trampolinePlane);
-          let ankleDist = Math.min(leftDist, rightDist); // Use closest ankle
+          // --- 3D PLANE CODE ---
+          const leftAnkle3D = [leftAnkle.x, leftAnkle.y, leftAnkle.z];
+          const rightAnkle3D = [rightAnkle.x, rightAnkle.y, rightAnkle.z];
+          let leftY = verticalDistanceToPlaneY(leftAnkle3D, trampolinePlane3D);
+          let rightY = verticalDistanceToPlaneY(rightAnkle3D, trampolinePlane3D);
+          let ankleDist = Math.min(leftY, rightY);
 
-          // Always set a baseline if not set yet (for pre-calibration mode)
           if (baselineAnkleDist === null) {
             baselineAnkleDist = ankleDist;
             calibrationReady = false;
@@ -405,7 +403,7 @@
 
           let rawHeight = baselineAnkleDist - ankleDist;
 
-          // Use the pixel height of trampoline for scaling
+          // Use the Y span of trampoline for scaling
           let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
           let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let trampolinePixelHeight = maxCornerY - minCornerY;
@@ -420,7 +418,6 @@
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // Only send if significant change
           if (
             typeof onResults.lastSent === "undefined" ||
             Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
@@ -436,7 +433,6 @@
             );
           }
 
-          // Show appropriate notice
           if (!calibrationReady) {
             trampolineNotice.style.color = '#ff0';
             trampolineNotice.textContent = "Uncalibrated: Press 'Calibrate' for accurate jump height";
@@ -450,7 +446,6 @@
 
     // --------- CALIBRATION ---------
     calibrateBtn.addEventListener('click', function () {
-      // Must have a pose for calibration
       if (!pose || !pose.lastResults || !pose.lastResults.poseLandmarks) {
         trampolineNotice.style.color = '#f00';
         trampolineNotice.textContent = "Calibration failed: No pose detected. Stand still in trampoline area!";
@@ -458,7 +453,7 @@
       }
       const leftAnkle = pose.lastResults.poseLandmarks[27];
       const rightAnkle = pose.lastResults.poseLandmarks[28];
-      if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane) {
+      if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane3D) {
         trampolineNotice.style.color = '#f00';
         trampolineNotice.textContent = "Calibration failed: Make sure you are standing in the trampoline area!";
         return;
@@ -474,10 +469,13 @@
         trampolineNotice.textContent = "Calibration failed: Stand inside trampoline area!";
         return;
       }
-      // NEW: use ankle distance to plane for calibration baseline
-      let leftDist = perpendicularDistanceToPlane(left[0], left[1], trampolinePlane);
-      let rightDist = perpendicularDistanceToPlane(right[0], right[1], trampolinePlane);
-      baselineAnkleDist = Math.min(leftDist, rightDist);
+      // --- 3D PLANE CODE ---
+      const leftAnkle3D = [leftAnkle.x, leftAnkle.y, leftAnkle.z];
+      const rightAnkle3D = [rightAnkle.x, rightAnkle.y, rightAnkle.z];
+      baselineAnkleDist = Math.min(
+        verticalDistanceToPlaneY(leftAnkle3D, trampolinePlane3D),
+        verticalDistanceToPlaneY(rightAnkle3D, trampolinePlane3D)
+      );
       calibrationReady = true;
       trampolineNotice.style.color = '#0f0';
       trampolineNotice.textContent = "Calibration set! Jump height will now be accurate.";
@@ -511,12 +509,32 @@
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (canvas.width / rect.width);
       const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-      trampolineCorners.push([x, y]);
-      if (trampolineCorners.length === 4) {
-        trampolinePolygon = trampolineCorners.slice();
-        trampolineCenter = getQuadrilateralCenter(trampolinePolygon); // NEW
-        trampolinePlane = fitTrampolinePlane(trampolinePolygon);      // NEW
-        trampolineCorners = [];
+      trampolineCorners2D.push([x, y]);
+      // --- 3D PLANE CODE ---
+      // Map 2D click to nearest pose landmark's 3D coordinate
+      let best3D = null, bestDist = Infinity;
+      if (pose.lastResults && pose.lastResults.poseLandmarks) {
+        for (const pt of pose.lastResults.poseLandmarks) {
+          let px = pt.x * canvas.width, py = pt.y * canvas.height;
+          let d = (px - x) ** 2 + (py - y) ** 2;
+          if (d < bestDist) {
+            bestDist = d;
+            best3D = [pt.x, pt.y, pt.z];
+          }
+        }
+      }
+      if (best3D) trampolineCorners3D.push(best3D);
+      // --- END 3D PLANE CODE ---
+      if (trampolineCorners2D.length === 4) {
+        trampolinePolygon = trampolineCorners2D.slice();
+        trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
+        // --- 3D PLANE CODE ---
+        if (trampolineCorners3D.length >= 3) {
+          trampolinePlane3D = fit3DPlane(trampolineCorners3D[0], trampolineCorners3D[1], trampolineCorners3D[2]);
+        }
+        trampolineCorners2D = [];
+        trampolineCorners3D = [];
+        // --- END 3D PLANE CODE ---
         trampolineNotice.textContent = "Trampoline area set! Stand still and press 'Calibrate'.";
         calibrateBtn.style.display = "block";
       }
