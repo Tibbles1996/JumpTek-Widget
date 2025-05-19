@@ -163,6 +163,34 @@
   </div>
   <video id="video" autoplay playsinline></video>
   <script>
+    // --------- HD ZONE DRAWING HELPERS ---------
+    function interpolateZone(corners, zoneW, zoneH, bedW, bedH) {
+      const cx = (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4;
+      const cy = (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4;
+      const percW = zoneW / bedW;
+      const percH = zoneH / bedH;
+      return corners.map(([x, y]) => [
+        cx + (x-cx) * percW,
+        cy + (y-cy) * percH
+      ]);
+    }
+    function drawZoneRect(ctx, corners, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
+      const zone = interpolateZone(corners, zoneW, zoneH, bedW, bedH);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.setLineDash(dash);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(zone[0][0], zone[0][1]);
+      for (let i = 1; i < 4; i++) ctx.lineTo(zone[i][0], zone[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    // --------- END HD ZONE HELPERS ---------
+
     // --------- SETTINGS POPOVER LOGIC ---------
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsPopover = document.getElementById('settingsPopover');
@@ -395,7 +423,6 @@
     function computeCameraAngleCorrection() {
       const hypotenuse = Math.sqrt(cameraDistanceMeters ** 2 + cameraHeightMeters ** 2);
       if (hypotenuse === 0) return 1.0;
-      // Correction = 1 / cos(theta), where theta is angle from horizontal
       return cameraDistanceMeters / hypotenuse;
     }
 
@@ -411,6 +438,21 @@
       if (trampolineCenter && trampolinePlane) {
         drawTrampolineCenterAndLevel(ctx, trampolineCenter);
       }
+
+      // --------- DRAW HD ZONES ---------
+      if (trampolinePolygon && trampolinePolygon.length === 4) {
+        // Standard Eurotramp comp bed (4.28 x 2.14 m)
+        const bedW = 4.28, bedH = 2.14;
+        // Center zone (white, faint)
+        drawZoneRect(ctx, trampolinePolygon, 0.4, 0.2, bedW, bedH, "#fff", 0.22, []);
+        // 1st red (0.8 x 0.4)
+        drawZoneRect(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
+        // 2nd red (1.2 x 0.6)
+        drawZoneRect(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
+        // Outer blue (1.6 x 0.8) - max penalty
+        drawZoneRect(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
+      }
+      // --------- END DRAW HD ZONES ---------
 
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
@@ -428,13 +470,13 @@
 
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
           let currentAnkleY = (left[1] + right[1]) / 2;
+          let currentAnkleX = (left[0] + right[0]) / 2;
           let jumpHeightPixels = baselineAnkleHeight !== null ? baselineAnkleHeight - currentAnkleY : 0;
 
           let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
           let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let trampolinePixelHeight = maxCornerY - minCornerY;
 
-          // Correction factor based on camera viewing angle
           let correction = 1 / computeCameraAngleCorrection();
 
           let jumpHeightMeters =
@@ -447,6 +489,26 @@
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
+          // HD deduction calc (Eurotramp/FIG)
+          const bedW = 4.28, bedH = 2.14;
+          // Find center of polygon
+          const cx = (trampolinePolygon[0][0] + trampolinePolygon[1][0] + trampolinePolygon[2][0] + trampolinePolygon[3][0]) / 4;
+          const cy = (trampolinePolygon[0][1] + trampolinePolygon[1][1] + trampolinePolygon[2][1] + trampolinePolygon[3][1]) / 4;
+          // Approximate: map canvas X/Y to meters using calibration
+          const pxW = (Math.hypot(trampolinePolygon[0][0] - trampolinePolygon[1][0], trampolinePolygon[0][1] - trampolinePolygon[1][1])
+                    + Math.hypot(trampolinePolygon[2][0] - trampolinePolygon[3][0], trampolinePolygon[2][1] - trampolinePolygon[3][1]))/2;
+          const pxH = (Math.hypot(trampolinePolygon[1][0] - trampolinePolygon[2][0], trampolinePolygon[1][1] - trampolinePolygon[2][1])
+                    + Math.hypot(trampolinePolygon[3][0] - trampolinePolygon[0][0], trampolinePolygon[3][1] - trampolinePolygon[0][1]))/2;
+          let localX = ((currentAnkleX - cx) / pxW) * bedW;
+          let localY = ((currentAnkleY - cy) / pxH) * bedH;
+          let absX = Math.abs(localX);
+          let absY = Math.abs(localY);
+
+          let hdDeduction = 0.3;
+          if (absX <= 0.2 && absY <= 0.1) hdDeduction = 0.0;
+          else if (absX <= 0.4 && absY <= 0.2) hdDeduction = 0.1;
+          else if (absX <= 0.6 && absY <= 0.3) hdDeduction = 0.2;
+
           // Only send if significant change
           if (
             typeof onResults.lastSent === "undefined" ||
@@ -457,7 +519,8 @@
               {
                 type: 'jump_height',
                 height: smoothedJumpHeight,
-                calibrated: calibrationReady
+                calibrated: calibrationReady,
+                hd_deduction: hdDeduction
               },
               parentOrigin
             );
@@ -474,11 +537,8 @@
         }
 
         // --- START MEASURING LINE ---
-        // Draw line from trampoline center to ankle midpoint, with distance bubble
         if (trampolineCenter) {
           const ankleMid = [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2];
-
-          // Draw the measuring line
           ctx.save();
           ctx.strokeStyle = '#3cf';
           ctx.lineWidth = 4;
@@ -492,7 +552,6 @@
           const dy = ankleMid[1] - trampolineCenter[1];
           const pixelDist = Math.sqrt(dx*dx + dy*dy);
 
-          // If trampolinePolygon exists, convert pixel distance to meters
           let metersDist = null;
           if (trampolinePolygon && trampolinePolygon.length === 4) {
             let minY = Math.min(...trampolinePolygon.map(([_, y]) => y));
@@ -504,7 +563,6 @@
               : null;
           }
 
-          // Draw the bubble at the midpoint of the line
           const bubbleX = (trampolineCenter[0] + ankleMid[0]) / 2;
           const bubbleY = (trampolineCenter[1] + ankleMid[1]) / 2;
           ctx.beginPath();
@@ -517,7 +575,6 @@
           ctx.strokeStyle = '#3cf';
           ctx.stroke();
 
-          // Draw the distance text
           ctx.fillStyle = '#222';
           ctx.font = 'bold 1.25rem Arial';
           ctx.textAlign = 'center';
@@ -528,7 +585,6 @@
           ctx.restore();
         }
         // --- END MEASURING LINE ---
-
       }
     }
 
