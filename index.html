@@ -167,8 +167,9 @@
   </div>
   <video id="video" autoplay playsinline></video>
   <script>
-    // --------- HD ZONE DRAWING HELPERS ---------
+    // --------- PERSPECTIVE MAPPING HELPERS ---------
     function mapBedToPoly(u, v, poly) {
+      // Bilinear mapping from UV (0-1) to polygon in image
       const [P0, P1, P2, P3] = poly;
       const x = (1-u)*(1-v)*P0[0] + u*(1-v)*P1[0] + u*v*P2[0] + (1-u)*v*P3[0];
       const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
@@ -191,7 +192,7 @@
       ctx.globalAlpha = alpha;
       ctx.setLineDash(dash);
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i=1; i<pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
@@ -200,12 +201,37 @@
       ctx.setLineDash([]);
       ctx.restore();
     }
-    // --------- ADD: FULL ZONE HELPER ---------
     function drawFullZone(ctx, poly, bedW, bedH, color, alpha=1, dash=[]) {
       drawZone(ctx, poly, bedW, bedH, bedW, bedH, color, alpha, dash);
     }
-    // --------- END HD ZONE HELPERS ---------
 
+    // --------- CENTER PLUS WITH PERSPECTIVE ---------
+    function drawCenterPlus(ctx, poly) {
+      if (!poly || poly.length !== 4) return;
+      // Center in UV space is (0.5, 0.5)
+      // Plus arms: 0.5m horizontal, 0.24m vertical (adjust as needed)
+      const bedW = 4.28, bedH = 2.14;
+      const armLengthU = 0.5 / bedW; // 0.5m wide, relative to bed width
+      const armLengthV = 0.24 / bedH; // 0.24m tall, relative to bed height
+
+      // Horizontal
+      const [leftX, leftY] = mapBedToPoly(0.5 - armLengthU/2, 0.5, poly);
+      const [rightX, rightY] = mapBedToPoly(0.5 + armLengthU/2, 0.5, poly);
+      // Vertical
+      const [topX, topY] = mapBedToPoly(0.5, 0.5 - armLengthV/2, poly);
+      const [botX, botY] = mapBedToPoly(0.5, 0.5 + armLengthV/2, poly);
+
+      ctx.save();
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.moveTo(leftX, leftY); ctx.lineTo(rightX, rightY);
+      ctx.moveTo(topX, topY); ctx.lineTo(botX, botY);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // --------- UTILS ---------
     function getUVFromPoint(x, y, poly) {
       let best = {u:0, v:0, d:1e9};
       for (let u = 0; u <= 1; u += 0.02) {
@@ -216,33 +242,6 @@
         }
       }
       return [best.u, best.v];
-    }
-
-    // --------- RED PLUS CENTER MARKER ---------
-    function drawCenterPlus(ctx, poly) {
-      if (!poly || poly.length !== 4) return;
-      // Center in UV space is (0.5, 0.5)
-      const [cx, cy] = mapBedToPoly(0.5, 0.5, poly);
-      // Plus arms: 0.25m horizontal, 0.12m vertical (adjust as needed)
-      const bedW = 4.28, bedH = 2.14;
-      const armLengthW = 0.25;
-      const armLengthH = 0.12;
-      // Horizontal
-      const [leftX, leftY] = mapBedToPoly(0.5 - armLengthW/2/bedW, 0.5, poly);
-      const [rightX, rightY] = mapBedToPoly(0.5 + armLengthW/2/bedW, 0.5, poly);
-      // Vertical
-      const [topX, topY] = mapBedToPoly(0.5, 0.5 - armLengthH/2/bedH, poly);
-      const [botX, botY] = mapBedToPoly(0.5, 0.5 + armLengthH/2/bedH, poly);
-      ctx.save();
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(leftX, leftY);
-      ctx.lineTo(rightX, rightY);
-      ctx.moveTo(topX, topY);
-      ctx.lineTo(botX, botY);
-      ctx.stroke();
-      ctx.restore();
     }
 
     // --------- SETTINGS POPOVER LOGIC ---------
@@ -441,16 +440,16 @@
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
 
-      // --------- DRAW ZONE DIAGRAM & CENTER PLUS ---------
+      // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
         const bedW = 4.28, bedH = 2.14;
         // Full trampoline overlay (zone covers the entire mapped polygon)
-        drawFullZone(ctx, trampolinePolygon, bedW, bedH, "#fff", 0.18, []);
-        // If you want to keep the inner/colored zones, add the lines below:
-        // drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
-        // drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
-        // drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
-        // Center plus
+        drawFullZone(ctx, trampolinePolygon, bedW, bedH, "#fff", 0.14, []);
+        // Inner colored zones (all mapped)
+        drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.95, []);
+        drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "orange", 0.75, [7,7]);
+        drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.65, [2,12]);
+        // Large perspective-correct plus sign
         drawCenterPlus(ctx, trampolinePolygon);
       }
 
