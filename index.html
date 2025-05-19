@@ -17,16 +17,14 @@
       width: 100vw; height: 100vh; background: #000; border: none; z-index: 1;
     }
     #video {
-  display: block;
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 0; /* Adjust as needed relative to your canvas */
-  /* Optionally, add opacity if you want to see overlays: */
-  /* opacity: 0.7; */
-}
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+    }
     #buttonRow {
       position: absolute;
       top: 20px;
@@ -98,10 +96,7 @@
       from { opacity: 0; transform: translateX(-50%) scale(0.97); }
       to   { opacity: 1; transform: translateX(-50%) scale(1); }
     }
-    #settingsPopover label {
-      font-size: 1rem;
-      margin-bottom: 2px;
-    }
+    #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
     #settingsPopover input[type="number"] {
       padding: 6px;
       font-size: 1rem;
@@ -173,9 +168,7 @@
   <video id="video" autoplay playsinline></video>
   <script>
     // --------- HD ZONE DRAWING HELPERS ---------
-    // Bilinear mapping from canonical trampoline bed to arbitrary quadrilateral
     function mapBedToPoly(u, v, poly) {
-      // poly: [topLeft, topRight, bottomRight, bottomLeft]
       const [P0, P1, P2, P3] = poly;
       const x = (1-u)*(1-v)*P0[0] + u*(1-v)*P1[0] + u*v*P2[0] + (1-u)*v*P3[0];
       const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
@@ -209,53 +202,68 @@
     }
     // --------- END HD ZONE HELPERS ---------
 
-    // --------- INVERSE MAPPING: Get (u, v) from a point in the quadrilateral ---------
     function getUVFromPoint(x, y, poly) {
-      // Brute-force grid search, accurate enough for real-time HD scoring
       let best = {u:0, v:0, d:1e9};
       for (let u = 0; u <= 1; u += 0.02) {
         for (let v = 0; v <= 1; v += 0.02) {
           const [px, py] = mapBedToPoly(u, v, poly);
-          const d = Math.abs(px - x) + Math.abs(py - y); // L1 norm is fast
+          const d = Math.abs(px - x) + Math.abs(py - y);
           if (d < best.d) best = {u, v, d};
         }
       }
       return [best.u, best.v];
     }
 
+    // --------- RED PLUS CENTER MARKER ---------
+    function drawCenterPlus(ctx, poly) {
+      if (!poly || poly.length !== 4) return;
+      // Center in UV space is (0.5, 0.5)
+      const [cx, cy] = mapBedToPoly(0.5, 0.5, poly);
+      // Plus arms: 0.25m horizontal, 0.12m vertical (adjust as needed)
+      const bedW = 4.28, bedH = 2.14;
+      const armLengthW = 0.25;
+      const armLengthH = 0.12;
+      // Horizontal
+      const [leftX, leftY] = mapBedToPoly(0.5 - armLengthW/2/bedW, 0.5, poly);
+      const [rightX, rightY] = mapBedToPoly(0.5 + armLengthW/2/bedW, 0.5, poly);
+      // Vertical
+      const [topX, topY] = mapBedToPoly(0.5, 0.5 - armLengthH/2/bedH, poly);
+      const [botX, botY] = mapBedToPoly(0.5, 0.5 + armLengthH/2/bedH, poly);
+      ctx.save();
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(leftX, leftY);
+      ctx.lineTo(rightX, rightY);
+      ctx.moveTo(topX, topY);
+      ctx.lineTo(botX, botY);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // --------- SETTINGS POPOVER LOGIC ---------
+    // (unchanged; your code for popover and settings inputs here)
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-    function openSettings() {
-      settingsPopover.classList.add('open');
-    }
-    function closeSettings() {
-      settingsPopover.classList.remove('open');
-    }
+    function openSettings() { settingsPopover.classList.add('open'); }
+    function closeSettings() { settingsPopover.classList.remove('open'); }
     settingsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (settingsPopover.classList.contains('open')) {
-        closeSettings();
-      } else {
-        openSettings();
-      }
+      if (settingsPopover.classList.contains('open')) closeSettings();
+      else openSettings();
     });
     closeSettingsBtn.addEventListener('click', closeSettings);
     document.addEventListener('mousedown', (e) => {
       if (settingsPopover.classList.contains('open') &&
           !settingsPopover.contains(e.target) &&
-          e.target !== settingsBtn) {
-        closeSettings();
-      }
+          e.target !== settingsBtn) closeSettings();
     });
 
     // --------- CONFIGURABLE PARAMETERS ---------
     let REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
     const SMOOTHING_WINDOW = 5;
     const MIN_DELTA_METERS = 0.002;
-
-    // Camera calibration values (defaults)
     let cameraDistanceMeters = 2.0;
     let cameraHeightMeters = 1.0;
 
@@ -285,13 +293,10 @@
     let useFrontCamera = false;
     let animationFrameId = null;
     let parentOrigin = "*";
-
-    // Calibration state
     let trampolineCorners = [];
     let trampolinePolygon = null;
     let trampolineCenter = null;
     let trampolinePlane = null;
-
     let jumpHeightHistory = [];
     let baselineAnkleHeight = null;
     let calibrationReady = false;
@@ -340,7 +345,6 @@
         console.error('Camera error:', err);
       }
     }
-
     function resizeCanvasToVideo() {
       if (video.videoWidth && video.videoHeight) {
         canvas.width = window.innerWidth;
@@ -349,7 +353,6 @@
         canvas.style.height = "100vh";
       }
     }
-
     function showLoading(show) {
       loadingIndicator.style.display = show ? 'block' : 'none';
     }
@@ -357,7 +360,6 @@
     // --------- FRAME LOOP ---------
     let lastFrameTime = 0;
     const TARGET_FPS = 32;
-
     function startFrameLoop() {
       if (!animationFrameId) animationFrameId = requestAnimationFrame(processVideoFrame);
     }
@@ -367,7 +369,6 @@
         animationFrameId = null;
       }
     }
-
     async function processVideoFrame(now) {
       if (!video.paused && !video.ended && video.readyState === 4) {
         if (!lastFrameTime || (now - lastFrameTime > 1000 / TARGET_FPS)) {
@@ -379,17 +380,13 @@
       animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
-    // --------- TRAMPOLINE GEOMETRY & 3D PLANE FIT ---------
+    // --------- TRAMPOLINE GEOMETRY ---------
     function getQuadrilateralCenter(corners) {
       let cx = 0, cy = 0;
       for (const [x, y] of corners) { cx += x; cy += y; }
       return [cx / corners.length, cy / corners.length];
     }
-
-    function fitPlaneFromCorners(corners) {
-      return { a: 0, b: 0, c: 1, d: 0 };
-    }
-
+    function fitPlaneFromCorners(corners) { return { a: 0, b: 0, c: 1, d: 0 }; }
     function drawTrampolineArea(ctx, corners) {
       if (corners.length < 2) return;
       ctx.save();
@@ -412,39 +409,8 @@
       }
       ctx.restore();
     }
-
-   function drawTrampolineCenterAndLevel(ctx, poly) {
-  if (!poly || poly.length !== 4) return;
-  ctx.save();
-  // Draw center
-  const center = getQuadrilateralCenter(poly);
-  ctx.beginPath();
-  ctx.arc(center[0], center[1], 10, 0, 2 * Math.PI);
-  ctx.fillStyle = '#0f0';
-  ctx.fill();
-
-  // Interpolate the midpoints between top and bottom edges (middle line in perspective)
-  const leftMid = [
-    (poly[0][0] + poly[3][0]) / 2,
-    (poly[0][1] + poly[3][1]) / 2
-  ];
-  const rightMid = [
-    (poly[1][0] + poly[2][0]) / 2,
-    (poly[1][1] + poly[2][1]) / 2
-  ];
-
-  ctx.beginPath();
-  ctx.moveTo(leftMid[0], leftMid[1]);
-  ctx.lineTo(rightMid[0], rightMid[1]);
-  ctx.strokeStyle = '#0f0';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-  ctx.restore();
-}
-
     function pointInPolygon(pt, poly) {
-      let [x, y] = pt;
-      let inside = false;
+      let [x, y] = pt; let inside = false;
       for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
         let xi = poly[i][0], yi = poly[i][1];
         let xj = poly[j][0], yj = poly[j][1];
@@ -455,13 +421,13 @@
       return inside;
     }
 
-    // --------- JUMP HEIGHT CALCULATION WITH CAMERA CORRECTION ---------
     function computeCameraAngleCorrection() {
       const hypotenuse = Math.sqrt(cameraDistanceMeters ** 2 + cameraHeightMeters ** 2);
       if (hypotenuse === 0) return 1.0;
       return cameraDistanceMeters / hypotenuse;
     }
 
+    // --------- MAIN RENDER ---------
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         resizeCanvasToVideo();
@@ -471,19 +437,19 @@
 
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
-     if (trampolinePolygon && trampolinePolygon.length === 4) {
-       drawTrampolineCenterAndLevel(ctx, trampolinePolygon);
-     }
 
-      // --------- DRAW HD ZONES (FILL THE MARKED QUAD) ---------
+      // --------- DRAW ZONE DIAGRAM & CENTER PLUS ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
         const bedW = 4.28, bedH = 2.14;
-        drawZone(ctx, trampolinePolygon, 0.4, 0.2, bedW, bedH, "#fff", 0.22, []);
+        // Full trampoline
+        drawZone(ctx, trampolinePolygon, bedW, bedH, bedW, bedH, "#fff", 0.18, []);
+        // Inner zones
         drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
         drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
         drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
+        // Center plus
+        drawCenterPlus(ctx, trampolinePolygon);
       }
-      // --------- END DRAW HD ZONES ---------
 
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
@@ -493,9 +459,7 @@
         const rightAnkle = results.poseLandmarks[28];
         if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane) return;
 
-        function mapToCanvas(pt) {
-          return [pt.x * canvas.width, pt.y * canvas.height];
-        }
+        function mapToCanvas(pt) { return [pt.x * canvas.width, pt.y * canvas.height]; }
         const left = mapToCanvas(leftAnkle);
         const right = mapToCanvas(rightAnkle);
 
@@ -503,24 +467,19 @@
           let currentAnkleY = (left[1] + right[1]) / 2;
           let currentAnkleX = (left[0] + right[0]) / 2;
           let jumpHeightPixels = baselineAnkleHeight !== null ? baselineAnkleHeight - currentAnkleY : 0;
-
           let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
           let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let trampolinePixelHeight = maxCornerY - minCornerY;
-
           let correction = 1 / computeCameraAngleCorrection();
-
           let jumpHeightMeters =
             trampolinePixelHeight > 0
               ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction)
               : 0;
 
-          // Smoothing
           jumpHeightHistory.push(jumpHeightMeters);
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // HD deduction calc (Eurotramp/FIG) - using real mapped position
           const bedW = 4.28, bedH = 2.14;
           const [ankleU, ankleV] = getUVFromPoint(currentAnkleX, currentAnkleY, trampolinePolygon);
           const xMeters = (ankleU - 0.5) * bedW;
@@ -532,7 +491,6 @@
           else if (absX <= 0.4 && absY <= 0.2) hdDeduction = 0.1;
           else if (absX <= 0.6 && absY <= 0.3) hdDeduction = 0.2;
 
-          // Only send if significant change
           if (
             typeof onResults.lastSent === "undefined" ||
             Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
@@ -549,7 +507,6 @@
             );
           }
 
-          // Show appropriate notice
           if (!calibrationReady) {
             trampolineNotice.style.color = '#ff0';
             trampolineNotice.textContent = "Uncalibrated: Press 'Calibrate' for accurate jump height";
@@ -559,7 +516,7 @@
           }
         }
 
-        // --- START MEASURING LINE ---
+        // --- Measuring line ---
         if (trampolineCenter) {
           const ankleMid = [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2];
           ctx.save();
@@ -569,12 +526,9 @@
           ctx.moveTo(trampolineCenter[0], trampolineCenter[1]);
           ctx.lineTo(ankleMid[0], ankleMid[1]);
           ctx.stroke();
-
-          // Calculate pixel distance
           const dx = ankleMid[0] - trampolineCenter[0];
           const dy = ankleMid[1] - trampolineCenter[1];
           const pixelDist = Math.sqrt(dx*dx + dy*dy);
-
           let metersDist = null;
           if (trampolinePolygon && trampolinePolygon.length === 4) {
             let minY = Math.min(...trampolinePolygon.map(([_, y]) => y));
@@ -585,7 +539,6 @@
               ? pixelDist / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction
               : null;
           }
-
           const bubbleX = (trampolineCenter[0] + ankleMid[0]) / 2;
           const bubbleY = (trampolineCenter[1] + ankleMid[1]) / 2;
           ctx.beginPath();
@@ -597,17 +550,14 @@
           ctx.lineWidth = 2;
           ctx.strokeStyle = '#3cf';
           ctx.stroke();
-
           ctx.fillStyle = '#222';
           ctx.font = 'bold 1.25rem Arial';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           let label = metersDist !== null ? metersDist.toFixed(2) + ' m' : pixelDist.toFixed(0) + ' px';
           ctx.fillText(label, bubbleX, bubbleY);
-
           ctx.restore();
         }
-        // --- END MEASURING LINE ---
       }
     }
 
@@ -627,7 +577,6 @@
         calibrateBtn.style.display = "block";
       }
     });
-
     calibrateBtn.addEventListener('click', function () {
       if (!pose || !pose.lastResults || !pose.lastResults.poseLandmarks) {
         trampolineNotice.style.color = '#f00';
@@ -672,7 +621,6 @@
         handleSwitchCamera();
       }
     });
-
     function cleanupResources() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
