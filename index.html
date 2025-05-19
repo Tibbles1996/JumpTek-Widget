@@ -16,7 +16,17 @@
       display: block; position: absolute; top: 0; left: 0;
       width: 100vw; height: 100vh; background: #000; border: none; z-index: 1;
     }
-    #video { display: none; }
+    #video {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0; /* Adjust as needed relative to your canvas */
+  /* Optionally, add opacity if you want to see overlays: */
+  /* opacity: 0.7; */
+}
     #buttonRow {
       position: absolute;
       top: 20px;
