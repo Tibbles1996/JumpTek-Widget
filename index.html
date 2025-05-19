@@ -188,6 +188,17 @@
     function drawZone(ctx, poly, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
       const uvs = getZoneUVs(zoneW, zoneH, bedW, bedH);
       const pts = uvs.map(([u, v]) => mapBedToPoly(u, v, poly));
+      // fill inner zone
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.3;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      // stroke border
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.setLineDash(dash);
@@ -195,14 +206,37 @@
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i=1; i<pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
+      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     }
     function drawFullZone(ctx, poly, bedW, bedH, color, alpha=1, dash=[]) {
-      drawZone(ctx, poly, bedW, bedH, bedW, bedH, color, alpha, dash);
+      // fill full trampoline area
+      const pts = poly;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.2;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      // stroke border
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.setLineDash(dash);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
     }
 
     // --------- CENTER PLUS WITH PERSPECTIVE ---------
