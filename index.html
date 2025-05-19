@@ -65,11 +65,78 @@
       border-radius: 16px; font-size: 1.2rem; width: auto; max-width: 90vw;
       text-align: center; pointer-events: none; z-index: 30;
     }
+    /* Accordion styles */
+    #settingsAccordion {
+      position: absolute;
+      top: 0px;
+      left: 0px;
+      width: 100vw;
+      z-index: 50;
+      background: rgba(34,34,34,0.95);
+    }
+    #settingsAccordion summary {
+      cursor: pointer;
+      padding: 16px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      background: #111;
+      border-bottom: 1px solid #444;
+      color: #fff;
+    }
+    #settingsAccordion[open] {
+      border-bottom: 2px solid #27ae60;
+    }
+    #settingsContent {
+      padding: 16px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #settingsContent label {
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+    #settingsContent input[type="number"] {
+      padding: 6px;
+      font-size: 1rem;
+      border-radius: 6px;
+      border: 1px solid #888;
+      margin-bottom: 10px;
+      width: 120px;
+      background: #222;
+      color: #fff;
+    }
+    #settingsContent .desc {
+      color: #aaa;
+      font-size: 0.95rem;
+      margin-bottom: 14px;
+      margin-top: -5px;
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
 <body>
+  <details id="settingsAccordion">
+    <summary>📏 Camera & Calibration Settings</summary>
+    <div id="settingsContent">
+      <div>
+        <label for="cameraDistance">Camera distance from trampoline center (meters):</label>
+        <input type="number" step="0.01" min="0.1" max="20" value="2.0" id="cameraDistance">
+        <div class="desc">Measure horizontally from the camera lens to the center of the trampoline.</div>
+      </div>
+      <div>
+        <label for="cameraHeight">Camera height above trampoline surface (meters):</label>
+        <input type="number" step="0.01" min="0" max="10" value="1.0" id="cameraHeight">
+        <div class="desc">Measure vertically from the trampoline mat to the center of the camera lens.</div>
+      </div>
+      <div>
+        <label for="trampolineHeight">Trampoline mat height (meters):</label>
+        <input type="number" step="0.01" min="0.1" max="2.0" value="0.6" id="trampolineHeight">
+        <div class="desc">Vertical distance from ground to trampoline mat.</div>
+      </div>
+    </div>
+  </details>
   <div id="container">
     <canvas id="canvas"></canvas>
     <div id="buttonRow">
@@ -86,9 +153,13 @@
   <video id="video" autoplay playsinline></video>
   <script>
     // --------- CONFIGURABLE PARAMETERS ---------
-    const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
+    let REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
     const SMOOTHING_WINDOW = 5;
     const MIN_DELTA_METERS = 0.002;
+
+    // Camera calibration values (defaults)
+    let cameraDistanceMeters = 2.0;
+    let cameraHeightMeters = 1.0;
 
     // --------- ELEMENTS AND STATE ---------
     const video = document.getElementById('video');
@@ -98,6 +169,22 @@
     const loadingIndicator = document.getElementById('loadingIndicator');
     const trampolineNotice = document.getElementById('trampolineNotice');
     const calibrateBtn = document.getElementById('calibrateBtn');
+
+    // Accordion input elements
+    const cameraDistanceInput = document.getElementById('cameraDistance');
+    const cameraHeightInput = document.getElementById('cameraHeight');
+    const trampolineHeightInput = document.getElementById('trampolineHeight');
+
+    // Update values when user changes input
+    cameraDistanceInput.addEventListener('input', function() {
+      cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
+    });
+    cameraHeightInput.addEventListener('input', function() {
+      cameraHeightMeters = parseFloat(cameraHeightInput.value) || 1.0;
+    });
+    trampolineHeightInput.addEventListener('input', function() {
+      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
+    });
 
     let currentStream = null;
     let useFrontCamera = false;
@@ -111,7 +198,7 @@
     let trampolinePlane = null; // {a, b, c, d} for ax + by + cz + d = 0
 
     let jumpHeightHistory = [];
-    let baselineAnkleHeight = null; // baseline Z above trampoline plane
+    let baselineAnkleHeight = null; // baseline Y pixel above trampoline plane
     let calibrationReady = false;
 
     // --------- CAMERA & SETUP ---------
@@ -214,23 +301,8 @@
         A.push([x, y, 1]);
         b.push(0); // trampoline plane at z=0
       }
-      // Use pseudo-inverse for least squares
-      function pseudoInverse(A) {
-        const AT = math.transpose(A);
-        const ATA = math.multiply(AT, A);
-        const ATb = math.multiply(AT, b);
-        return math.lusolve(ATA, ATb).map(row => row[0]);
-      }
       // We'll just set plane as z=0 for the trampoline
       return { a: 0, b: 0, c: 1, d: 0 }; // z = 0
-    }
-
-    // Given a plane and a point, return the height above the plane
-    function pointHeightAbovePlane(x, y, z, plane) {
-      // plane: ax + by + cz + d = 0
-      // distance = (a*x + b*y + c*z + d) / sqrt(a^2 + b^2 + c^2)
-      const { a, b, c, d } = plane;
-      return (a * x + b * y + c * z + d) / Math.sqrt(a * a + b * b + c * c);
     }
 
     // --------- DRAWING ---------
@@ -294,6 +366,18 @@
       return inside;
     }
 
+    // --------- JUMP HEIGHT CALCULATION WITH CAMERA CORRECTION ---------
+    function computeCameraAngleCorrection() {
+      // Returns the cosine of the angle between the camera viewing direction and the vertical
+      // Camera viewing vector: from camera to trampoline center
+      // Assumes camera is horizontally aligned with trampoline center (no pan left/right)
+      // cos(theta) = vertical component / length of vector
+      // theta = atan2(cameraDistanceMeters, cameraHeightMeters)
+      const hypotenuse = Math.sqrt(cameraDistanceMeters ** 2 + cameraHeightMeters ** 2);
+      if (hypotenuse === 0) return 1.0;
+      return cameraDistanceMeters / hypotenuse; // This factor "compresses" the vertical in the image
+    }
+
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         resizeCanvasToVideo();
@@ -335,9 +419,14 @@
           let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let trampolinePixelHeight = maxCornerY - minCornerY;
 
+          // Correction factor based on camera viewing angle
+          // When camera is above or far, vertical movement appears less in the image
+          // Correction = 1 / cos(theta), where theta is the angle between camera-trampoline and the horizontal
+          let correction = 1 / computeCameraAngleCorrection();
+
           let jumpHeightMeters =
             trampolinePixelHeight > 0
-              ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
+              ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction)
               : 0;
 
           // Smoothing
@@ -367,7 +456,7 @@
             trampolineNotice.textContent = "Uncalibrated: Press 'Calibrate' for accurate jump height";
           } else {
             trampolineNotice.style.color = '#0f0';
-            trampolineNotice.textContent = "Calibration set! Jump height is accurate.";
+            trampolineNotice.textContent = `Calibration set! Jump height is accurate.`;
           }
         }
       }
