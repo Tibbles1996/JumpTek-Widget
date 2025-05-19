@@ -64,7 +64,6 @@
       border-radius: 16px; font-size: 1.2rem; width: auto; max-width: 90vw;
       text-align: center; pointer-events: none; z-index: 30;
     }
-    /* Settings popover styles */
     #settingsPopover {
       display: none;
       position: absolute;
@@ -164,26 +163,35 @@
   <video id="video" autoplay playsinline></video>
   <script>
     // --------- HD ZONE DRAWING HELPERS ---------
-    function interpolateZone(corners, zoneW, zoneH, bedW, bedH) {
-      const cx = (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4;
-      const cy = (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4;
-      const percW = zoneW / bedW;
-      const percH = zoneH / bedH;
-      return corners.map(([x, y]) => [
-        cx + (x-cx) * percW,
-        cy + (y-cy) * percH
-      ]);
+    // Bilinear mapping from canonical trampoline bed to arbitrary quadrilateral
+    function mapBedToPoly(u, v, poly) {
+      // poly: [topLeft, topRight, bottomRight, bottomLeft]
+      const [P0, P1, P2, P3] = poly;
+      const x = (1-u)*(1-v)*P0[0] + u*(1-v)*P1[0] + u*v*P2[0] + (1-u)*v*P3[0];
+      const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
+      return [x, y];
     }
-    function drawZoneRect(ctx, corners, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
-      const zone = interpolateZone(corners, zoneW, zoneH, bedW, bedH);
+    function getZoneUVs(zoneW, zoneH, bedW, bedH) {
+      const u0 = 0.5 - zoneW/2/bedW, u1 = 0.5 + zoneW/2/bedW;
+      const v0 = 0.5 - zoneH/2/bedH, v1 = 0.5 + zoneH/2/bedH;
+      return [
+        [u0, v0], // top-left
+        [u1, v0], // top-right
+        [u1, v1], // bottom-right
+        [u0, v1], // bottom-left
+      ];
+    }
+    function drawZone(ctx, poly, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
+      const uvs = getZoneUVs(zoneW, zoneH, bedW, bedH);
+      const pts = uvs.map(([u, v]) => mapBedToPoly(u, v, poly));
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.setLineDash(dash);
       ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(zone[0][0], zone[0][1]);
-      for (let i = 1; i < 4; i++) ctx.lineTo(zone[i][0], zone[i][1]);
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i=1; i<pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -191,11 +199,24 @@
     }
     // --------- END HD ZONE HELPERS ---------
 
+    // --------- INVERSE MAPPING: Get (u, v) from a point in the quadrilateral ---------
+    function getUVFromPoint(x, y, poly) {
+      // Brute-force grid search, accurate enough for real-time HD scoring
+      let best = {u:0, v:0, d:1e9};
+      for (let u = 0; u <= 1; u += 0.02) {
+        for (let v = 0; v <= 1; v += 0.02) {
+          const [px, py] = mapBedToPoly(u, v, poly);
+          const d = Math.abs(px - x) + Math.abs(py - y); // L1 norm is fast
+          if (d < best.d) best = {u, v, d};
+        }
+      }
+      return [best.u, best.v];
+    }
+
     // --------- SETTINGS POPOVER LOGIC ---------
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-
     function openSettings() {
       settingsPopover.classList.add('open');
     }
@@ -211,8 +232,6 @@
       }
     });
     closeSettingsBtn.addEventListener('click', closeSettings);
-
-    // Close settings if clicking outside
     document.addEventListener('mousedown', (e) => {
       if (settingsPopover.classList.contains('open') &&
           !settingsPopover.contains(e.target) &&
@@ -242,8 +261,6 @@
     const cameraDistanceInput = document.getElementById('cameraDistance');
     const cameraHeightInput = document.getElementById('cameraHeight');
     const trampolineHeightInput = document.getElementById('trampolineHeight');
-
-    // Update values when user changes input
     cameraDistanceInput.addEventListener('input', function() {
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
     });
@@ -439,18 +456,13 @@
         drawTrampolineCenterAndLevel(ctx, trampolineCenter);
       }
 
-      // --------- DRAW HD ZONES ---------
+      // --------- DRAW HD ZONES (FILL THE MARKED QUAD) ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
-        // Standard Eurotramp comp bed (4.28 x 2.14 m)
         const bedW = 4.28, bedH = 2.14;
-        // Center zone (white, faint)
-        drawZoneRect(ctx, trampolinePolygon, 0.4, 0.2, bedW, bedH, "#fff", 0.22, []);
-        // 1st red (0.8 x 0.4)
-        drawZoneRect(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
-        // 2nd red (1.2 x 0.6)
-        drawZoneRect(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
-        // Outer blue (1.6 x 0.8) - max penalty
-        drawZoneRect(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
+        drawZone(ctx, trampolinePolygon, 0.4, 0.2, bedW, bedH, "#fff", 0.22, []);
+        drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
+        drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
+        drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
       }
       // --------- END DRAW HD ZONES ---------
 
@@ -489,20 +501,12 @@
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
 
-          // HD deduction calc (Eurotramp/FIG)
+          // HD deduction calc (Eurotramp/FIG) - using real mapped position
           const bedW = 4.28, bedH = 2.14;
-          // Find center of polygon
-          const cx = (trampolinePolygon[0][0] + trampolinePolygon[1][0] + trampolinePolygon[2][0] + trampolinePolygon[3][0]) / 4;
-          const cy = (trampolinePolygon[0][1] + trampolinePolygon[1][1] + trampolinePolygon[2][1] + trampolinePolygon[3][1]) / 4;
-          // Approximate: map canvas X/Y to meters using calibration
-          const pxW = (Math.hypot(trampolinePolygon[0][0] - trampolinePolygon[1][0], trampolinePolygon[0][1] - trampolinePolygon[1][1])
-                    + Math.hypot(trampolinePolygon[2][0] - trampolinePolygon[3][0], trampolinePolygon[2][1] - trampolinePolygon[3][1]))/2;
-          const pxH = (Math.hypot(trampolinePolygon[1][0] - trampolinePolygon[2][0], trampolinePolygon[1][1] - trampolinePolygon[2][1])
-                    + Math.hypot(trampolinePolygon[3][0] - trampolinePolygon[0][0], trampolinePolygon[3][1] - trampolinePolygon[0][1]))/2;
-          let localX = ((currentAnkleX - cx) / pxW) * bedW;
-          let localY = ((currentAnkleY - cy) / pxH) * bedH;
-          let absX = Math.abs(localX);
-          let absY = Math.abs(localY);
+          const [ankleU, ankleV] = getUVFromPoint(currentAnkleX, currentAnkleY, trampolinePolygon);
+          const xMeters = (ankleU - 0.5) * bedW;
+          const yMeters = (ankleV - 0.5) * bedH;
+          const absX = Math.abs(xMeters), absY = Math.abs(yMeters);
 
           let hdDeduction = 0.3;
           if (absX <= 0.2 && absY <= 0.1) hdDeduction = 0.0;
