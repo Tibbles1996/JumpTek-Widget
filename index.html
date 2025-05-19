@@ -175,18 +175,19 @@
       const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
       return [x, y];
     }
-    function getZoneUVs(zoneW, zoneH, bedW, bedH) {
-      const u0 = 0.5 - zoneW/2/bedW, u1 = 0.5 + zoneW/2/bedW;
-      const v0 = 0.5 - zoneH/2/bedH, v1 = 0.5 + zoneH/2/bedH;
+
+    function getZoneUVs(zoneU0, zoneV0, zoneU1, zoneV1) {
       return [
-        [u0, v0], // top-left
-        [u1, v0], // top-right
-        [u1, v1], // bottom-right
-        [u0, v1], // bottom-left
+        [zoneU0, zoneV0], // top-left
+        [zoneU1, zoneV0], // top-right
+        [zoneU1, zoneV1], // bottom-right
+        [zoneU0, zoneV1], // bottom-left
       ];
     }
-    function drawZone(ctx, poly, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
-      const uvs = getZoneUVs(zoneW, zoneH, bedW, bedH);
+
+    // Draw a zone over the trampoline polygon, with the zone's normalized UV bounds [u0,v0] to [u1,v1]
+    function drawZone(ctx, poly, zoneU0, zoneV0, zoneU1, zoneV1, color, alpha=1, dash=[]) {
+      const uvs = getZoneUVs(zoneU0, zoneV0, zoneU1, zoneV1);
       const pts = uvs.map(([u, v]) => mapBedToPoly(u, v, poly));
       // fill inner zone
       ctx.save();
@@ -212,31 +213,10 @@
       ctx.setLineDash([]);
       ctx.restore();
     }
-    function drawFullZone(ctx, poly, bedW, bedH, color, alpha=1, dash=[]) {
-      // fill full trampoline area
-      const pts = poly;
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.2;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-      // stroke border
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
+
+    // For filling the entire trampoline polygon (u,v=0..1)
+    function drawFullZone(ctx, poly, color, alpha=1, dash=[]) {
+      drawZone(ctx, poly, 0, 0, 1, 1, color, alpha, dash);
     }
 
     // --------- CENTER PLUS WITH PERSPECTIVE ---------
@@ -476,13 +456,12 @@
 
       // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
-        const bedW = 4.28, bedH = 2.14;
-        // Full trampoline overlay (zone covers the entire mapped polygon)
-        drawFullZone(ctx, trampolinePolygon, bedW, bedH, "#fff", 0.14, []);
-        // Inner colored zones (all mapped)
-        drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.95, []);
-        drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "orange", 0.75, [7,7]);
-        drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.65, [2,12]);
+        // Full trampoline overlay (zone covers the entire mapped polygon, always perspective-correct)
+        drawFullZone(ctx, trampolinePolygon, "#fff", 0.14, []);
+        // Inner colored zones (using UV fractions for perspective-correct overlays)
+        drawZone(ctx, trampolinePolygon, 0.5-0.8/2/4.28, 0.5-0.4/2/2.14, 0.5+0.8/2/4.28, 0.5+0.4/2/2.14, "red", 0.95, []);
+        drawZone(ctx, trampolinePolygon, 0.5-1.2/2/4.28, 0.5-0.6/2/2.14, 0.5+1.2/2/4.28, 0.5+0.6/2/2.14, "orange", 0.75, [7,7]);
+        drawZone(ctx, trampolinePolygon, 0.5-1.6/2/4.28, 0.5-0.8/2/2.14, 0.5+1.6/2/4.28, 0.5+0.8/2/2.14, "#3498db", 0.65, [2,12]);
         // Large perspective-correct plus sign
         drawCenterPlus(ctx, trampolinePolygon);
       }
