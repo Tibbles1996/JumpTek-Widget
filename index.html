@@ -200,6 +200,10 @@
       ctx.setLineDash([]);
       ctx.restore();
     }
+    // --------- ADD: FULL ZONE HELPER ---------
+    function drawFullZone(ctx, poly, bedW, bedH, color, alpha=1, dash=[]) {
+      drawZone(ctx, poly, bedW, bedH, bedW, bedH, color, alpha, dash);
+    }
     // --------- END HD ZONE HELPERS ---------
 
     function getUVFromPoint(x, y, poly) {
@@ -242,7 +246,6 @@
     }
 
     // --------- SETTINGS POPOVER LOGIC ---------
-    // (unchanged; your code for popover and settings inputs here)
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
@@ -441,12 +444,12 @@
       // --------- DRAW ZONE DIAGRAM & CENTER PLUS ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
         const bedW = 4.28, bedH = 2.14;
-        // Full trampoline
-        drawZone(ctx, trampolinePolygon, bedW, bedH, bedW, bedH, "#fff", 0.18, []);
-        // Inner zones
-        drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
-        drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
-        drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
+        // Full trampoline overlay (zone covers the entire mapped polygon)
+        drawFullZone(ctx, trampolinePolygon, bedW, bedH, "#fff", 0.18, []);
+        // If you want to keep the inner/colored zones, add the lines below:
+        // drawZone(ctx, trampolinePolygon, 0.8, 0.4, bedW, bedH, "red", 0.85, []);
+        // drawZone(ctx, trampolinePolygon, 1.2, 0.6, bedW, bedH, "red", 0.6, [7,7]);
+        // drawZone(ctx, trampolinePolygon, 1.6, 0.8, bedW, bedH, "#3498db", 0.6, [2,12]);
         // Center plus
         drawCenterPlus(ctx, trampolinePolygon);
       }
