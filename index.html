@@ -472,6 +472,63 @@
             trampolineNotice.textContent = `Calibration set! Jump height is accurate.`;
           }
         }
+
+        // --- START MEASURING LINE ---
+        // Draw line from trampoline center to ankle midpoint, with distance bubble
+        if (trampolineCenter) {
+          const ankleMid = [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2];
+
+          // Draw the measuring line
+          ctx.save();
+          ctx.strokeStyle = '#3cf';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(trampolineCenter[0], trampolineCenter[1]);
+          ctx.lineTo(ankleMid[0], ankleMid[1]);
+          ctx.stroke();
+
+          // Calculate pixel distance
+          const dx = ankleMid[0] - trampolineCenter[0];
+          const dy = ankleMid[1] - trampolineCenter[1];
+          const pixelDist = Math.sqrt(dx*dx + dy*dy);
+
+          // If trampolinePolygon exists, convert pixel distance to meters
+          let metersDist = null;
+          if (trampolinePolygon && trampolinePolygon.length === 4) {
+            let minY = Math.min(...trampolinePolygon.map(([_, y]) => y));
+            let maxY = Math.max(...trampolinePolygon.map(([_, y]) => y));
+            let trampolinePixelHeight = maxY - minY;
+            let correction = 1 / computeCameraAngleCorrection();
+            metersDist = trampolinePixelHeight > 0
+              ? pixelDist / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction
+              : null;
+          }
+
+          // Draw the bubble at the midpoint of the line
+          const bubbleX = (trampolineCenter[0] + ankleMid[0]) / 2;
+          const bubbleY = (trampolineCenter[1] + ankleMid[1]) / 2;
+          ctx.beginPath();
+          ctx.arc(bubbleX, bubbleY, 32, 0, 2 * Math.PI);
+          ctx.fillStyle = '#fff';
+          ctx.globalAlpha = 0.85;
+          ctx.fill();
+          ctx.globalAlpha = 1.0;
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#3cf';
+          ctx.stroke();
+
+          // Draw the distance text
+          ctx.fillStyle = '#222';
+          ctx.font = 'bold 1.25rem Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          let label = metersDist !== null ? metersDist.toFixed(2) + ' m' : pixelDist.toFixed(0) + ' px';
+          ctx.fillText(label, bubbleX, bubbleY);
+
+          ctx.restore();
+        }
+        // --- END MEASURING LINE ---
+
       }
     }
 
@@ -487,7 +544,7 @@
         trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
         trampolinePlane = fitPlaneFromCorners(trampolinePolygon);
         trampolineCorners = [];
-        trampolineNotice.textContent = "Trampoline area set! Stand still in the center and press 'Calibrate'.";
+        trampolineNotice.textContent = "Trampoline area set! Stand in the center and press the wrench.";
         calibrateBtn.style.display = "block";
       }
     });
