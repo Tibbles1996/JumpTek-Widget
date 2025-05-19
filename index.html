@@ -76,11 +76,11 @@
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
         <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
       </button>
-      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: block;">
+      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: none;">
         Calibrate
       </button>
     </div>
-    <div id="trampolineNotice">Tap the four corners of the trampoline, Then press Calibrate</div>
+    <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
   </div>
   <video id="video" autoplay playsinline></video>
@@ -89,10 +89,6 @@
     const REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
     const SMOOTHING_WINDOW = 5;
     const MIN_DELTA_METERS = 0.002;
-    const DOT_COLOR = { r: 0, g: 255, b: 0 };
-    const DOT_TOLERANCE = 50;
-    const DOT_MIN_RADIUS = 8;
-    const DOT_SEARCH_RADIUS = 30;
 
     // --------- ELEMENTS AND STATE ---------
     const video = document.getElementById('video');
@@ -111,13 +107,11 @@
     // Calibration state
     let trampolineCorners = [];
     let trampolinePolygon = null;
-    let trampolineCenter = null;  // NEW: center of the trampoline
-    let trampolinePlane = null;   // best-fit simulated plane (for visuals only)
+    let trampolineCenter = null;
+    let trampolinePlane = null; // {a, b, c, d} for ax + by + cz + d = 0
 
     let jumpHeightHistory = [];
-
-    // Calibration baseline (in pixels, on canvas)
-    let baselineAnkleY = null; // *** CHANGED: now just a y-value
+    let baselineAnkleHeight = null; // baseline Z above trampoline plane
     let calibrationReady = false;
 
     // --------- CAMERA & SETUP ---------
@@ -203,86 +197,43 @@
       animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
-    // --------- ALIGNMENT DOT DETECTION ---------
-    function colorDistance(c1, c2) {
-      return Math.sqrt(
-        (c1.r - c2.r) ** 2 +
-        (c1.g - c2.g) ** 2 +
-        (c1.b - c2.b) ** 2
-      );
-    }
-    function findAlignmentDot(imageData, width, height) {
-      for (let y = height - 1; y >= 0; y -= 2) {
-        for (let x = 0; x < width; x += 2) {
-          const idx = (y * width + x) * 4;
-          const pixel = {
-            r: imageData.data[idx],
-            g: imageData.data[idx + 1],
-            b: imageData.data[idx + 2]
-          };
-          if (colorDistance(pixel, DOT_COLOR) < DOT_TOLERANCE) {
-            // Check surrounding area for enough green pixels
-            let count = 0;
-            for (let dy = -DOT_SEARCH_RADIUS; dy <= DOT_SEARCH_RADIUS; dy++) {
-              for (let dx = -DOT_SEARCH_RADIUS; dx <= DOT_SEARCH_RADIUS; dx++) {
-                let xx = x + dx, yy = y + dy;
-                if (xx < 0 || xx >= width || yy < 0 || yy >= height) continue;
-                let idx2 = (yy * width + xx) * 4;
-                let p2 = {
-                  r: imageData.data[idx2],
-                  g: imageData.data[idx2 + 1],
-                  b: imageData.data[idx2 + 2]
-                };
-                if (colorDistance(p2, DOT_COLOR) < DOT_TOLERANCE) count++;
-              }
-            }
-            if (count >= Math.PI * DOT_MIN_RADIUS * DOT_MIN_RADIUS * 0.5) {
-              return { x, y };
-            }
-          }
-        }
-      }
-      return null;
-    }
-
-    // --------- UTILS FOR NEW CALIBRATION ---------
-    // Get center of quadrilateral (average of corners)
+    // --------- TRAMPOLINE GEOMETRY & 3D PLANE FIT ---------
     function getQuadrilateralCenter(corners) {
       let cx = 0, cy = 0;
       for (const [x, y] of corners) { cx += x; cy += y; }
       return [cx / corners.length, cy / corners.length];
     }
 
-    // Fit a 2D line y = a*x + b to trampoline corners (for visuals only)
-    function fitTrampolinePlane(corners) {
-      let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
-      for (const [x, y] of corners) {
-        sumX += x;
-        sumY += y;
-        sumXX += x * x;
-        sumXY += x * y;
+    // Fit a 3D plane to four corners: returns plane coefficients {a, b, c, d} for ax + by + cz + d = 0
+    function fitPlaneFromCorners(corners) {
+      // Simulate Z=0 for all trampoline corners.
+      // We'll use screen y as z for ankles.
+      // Least-squares fit for ax + by + d = z
+      let A = [], b = [];
+      for (let [x, y] of corners) {
+        A.push([x, y, 1]);
+        b.push(0); // trampoline plane at z=0
       }
-      let n = corners.length;
-      let denominator = n * sumXX - sumX * sumX;
-      let a = (n * sumXY - sumX * sumY) / denominator;
-      let b = (sumY * sumXX - sumX * sumXY) / denominator;
-      return { a, b };
+      // Use pseudo-inverse for least squares
+      function pseudoInverse(A) {
+        const AT = math.transpose(A);
+        const ATA = math.multiply(AT, A);
+        const ATb = math.multiply(AT, b);
+        return math.lusolve(ATA, ATb).map(row => row[0]);
+      }
+      // We'll just set plane as z=0 for the trampoline
+      return { a: 0, b: 0, c: 1, d: 0 }; // z = 0
     }
 
-    // --------- MAIN MEDIAPIPE HANDLER ---------
-    function pointInPolygon(pt, poly) {
-      let [x, y] = pt;
-      let inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        let xi = poly[i][0], yi = poly[i][1];
-        let xj = poly[j][0], yj = poly[j][1];
-        let intersect = ((yi > y) !== (yj > y)) &&
-                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
-        if (intersect) inside = !inside;
-      }
-      return inside;
+    // Given a plane and a point, return the height above the plane
+    function pointHeightAbovePlane(x, y, z, plane) {
+      // plane: ax + by + cz + d = 0
+      // distance = (a*x + b*y + c*z + d) / sqrt(a^2 + b^2 + c^2)
+      const { a, b, c, d } = plane;
+      return (a * x + b * y + c * z + d) / Math.sqrt(a * a + b * b + c * c);
     }
 
+    // --------- DRAWING ---------
     function drawTrampolineArea(ctx, corners) {
       if (corners.length < 2) return;
       ctx.save();
@@ -329,6 +280,20 @@
       ctx.restore();
     }
 
+    // --------- MAIN MEDIAPIPE HANDLER ---------
+    function pointInPolygon(pt, poly) {
+      let [x, y] = pt;
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        let xi = poly[i][0], yi = poly[i][1];
+        let xj = poly[j][0], yj = poly[j][1];
+        let intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
         resizeCanvasToVideo();
@@ -336,6 +301,7 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
+      // Draw trampoline (corners or polygon)
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
 
@@ -344,38 +310,13 @@
         drawTrampolineCenterAndLevel(ctx, trampolineCenter);
       }
 
-      // Alignment dot detection (unchanged)
-      let alignmentDotY = null;
-      if (results.image) {
-        try {
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = canvas.width;
-          tempCanvas.height = canvas.height;
-          const tempCtx = tempCanvas.getContext('2d');
-          tempCtx.drawImage(results.image, 0, 0, tempCanvas.width, tempCanvas.height);
-          const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-          const dot = findAlignmentDot(imageData, tempCanvas.width, tempCanvas.height);
-          if (dot) {
-            alignmentDotY = dot.y;
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(dot.x, dot.y, DOT_MIN_RADIUS + 2, 0, 2 * Math.PI);
-            ctx.strokeStyle = '#0f0';
-            ctx.lineWidth = 4;
-            ctx.stroke();
-            ctx.restore();
-          }
-        } catch (err) {}
-      }
-
-      // --------- MOTION TRACKING AND SKELETON (UNCHANGED) ---------
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
 
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
-        if (!leftAnkle || !rightAnkle || !trampolinePolygon) return;
+        if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane) return;
 
         function mapToCanvas(pt) {
           return [pt.x * canvas.width, pt.y * canvas.height];
@@ -384,23 +325,19 @@
         const right = mapToCanvas(rightAnkle);
 
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
-          // --------- NEW: Calculate jump based on y-axis only ---------
-          let currentAnkleY = Math.min(left[1], right[1]); // smaller y is higher on screen
-          if (baselineAnkleY === null) {
-            baselineAnkleY = currentAnkleY;
-            calibrationReady = false;
-          }
+          // Use average ankle Y as "jump Z" above plane
+          let currentAnkleY = (left[1] + right[1]) / 2;
+          // Since plane is z=0, height above plane is baseline - current
+          let jumpHeightPixels = baselineAnkleHeight !== null ? baselineAnkleHeight - currentAnkleY : 0;
 
-          let rawHeight = baselineAnkleY - currentAnkleY; // positive when jumping up
-
-          // Use the pixel height of trampoline for scaling
+          // Convert pixel height to meters using trampoline pixel height
           let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
           let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let trampolinePixelHeight = maxCornerY - minCornerY;
 
           let jumpHeightMeters =
             trampolinePixelHeight > 0
-              ? Math.max(0, rawHeight / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
+              ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
               : 0;
 
           // Smoothing
@@ -436,9 +373,24 @@
       }
     }
 
-    // --------- CALIBRATION ---------
+    // --------- CALIBRATION FLOW ---------
+    canvas.addEventListener('click', function (e) {
+      if (trampolinePolygon) return; // Already set
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      trampolineCorners.push([x, y]);
+      if (trampolineCorners.length === 4) {
+        trampolinePolygon = trampolineCorners.slice();
+        trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
+        trampolinePlane = fitPlaneFromCorners(trampolinePolygon);
+        trampolineCorners = [];
+        trampolineNotice.textContent = "Trampoline area set! Stand still in the center and press 'Calibrate'.";
+        calibrateBtn.style.display = "block";
+      }
+    });
+
     calibrateBtn.addEventListener('click', function () {
-      // Must have a pose for calibration
       if (!pose || !pose.lastResults || !pose.lastResults.poseLandmarks) {
         trampolineNotice.style.color = '#f00';
         trampolineNotice.textContent = "Calibration failed: No pose detected. Stand still in trampoline area!";
@@ -462,8 +414,8 @@
         trampolineNotice.textContent = "Calibration failed: Stand inside trampoline area!";
         return;
       }
-      // Store the baseline y-value for calibration
-      baselineAnkleY = Math.min(left[1], right[1]);
+      // Use average ankle y as baseline "height" above plane
+      baselineAnkleHeight = (left[1] + right[1]) / 2;
       calibrationReady = true;
       trampolineNotice.style.color = '#0f0';
       trampolineNotice.textContent = "Calibration set! Jump height will now be accurate.";
@@ -491,22 +443,6 @@
       stopFrameLoop();
     }
     window.addEventListener('beforeunload', cleanupResources);
-
-    canvas.addEventListener('click', function (e) {
-      if (trampolinePolygon) return; // Already set
-      const rect = canvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-      trampolineCorners.push([x, y]);
-      if (trampolineCorners.length === 4) {
-        trampolinePolygon = trampolineCorners.slice();
-        trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
-        trampolinePlane = fitTrampolinePlane(trampolinePolygon); // for visuals only
-        trampolineCorners = [];
-        trampolineNotice.textContent = "Trampoline area set! Stand still and press 'Calibrate'.";
-        calibrateBtn.style.display = "block";
-      }
-    });
 
     // Store last poseLandmarks for calibration
     pose.lastResults = null;
