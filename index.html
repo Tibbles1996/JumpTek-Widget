@@ -403,24 +403,34 @@
       ctx.restore();
     }
 
-    function drawTrampolineCenterAndLevel(ctx, center) {
-      if (!center) return;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(center[0], center[1], 10, 0, 2 * Math.PI);
-      ctx.fillStyle = '#0f0';
-      ctx.fill();
-      let lineLength = 120;
-      let y = center[1];
-      let x1 = center[0] - lineLength / 2;
-      let x2 = center[0] + lineLength / 2;
-      ctx.beginPath();
-      ctx.moveTo(x1, y);
-      ctx.lineTo(x2, y);
-      ctx.strokeStyle = '#0f0';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      ctx.restore();
+   function drawTrampolineCenterAndLevel(ctx, poly) {
+  if (!poly || poly.length !== 4) return;
+  ctx.save();
+  // Draw center
+  const center = getQuadrilateralCenter(poly);
+  ctx.beginPath();
+  ctx.arc(center[0], center[1], 10, 0, 2 * Math.PI);
+  ctx.fillStyle = '#0f0';
+  ctx.fill();
+
+  // Interpolate the midpoints between top and bottom edges (middle line in perspective)
+  const leftMid = [
+    (poly[0][0] + poly[3][0]) / 2,
+    (poly[0][1] + poly[3][1]) / 2
+  ];
+  const rightMid = [
+    (poly[1][0] + poly[2][0]) / 2,
+    (poly[1][1] + poly[2][1]) / 2
+  ];
+
+  ctx.beginPath();
+  ctx.moveTo(leftMid[0], leftMid[1]);
+  ctx.lineTo(rightMid[0], rightMid[1]);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+}
     }
 
     function pointInPolygon(pt, poly) {
@@ -452,9 +462,9 @@
 
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
-      if (trampolineCenter && trampolinePlane) {
-        drawTrampolineCenterAndLevel(ctx, trampolineCenter);
-      }
+     if (trampolinePolygon && trampolinePolygon.length === 4) {
+       drawTrampolineCenterAndLevel(ctx, trampolinePolygon);
+     }
 
       // --------- DRAW HD ZONES (FILL THE MARKED QUAD) ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
