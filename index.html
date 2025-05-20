@@ -1,5 +1,3 @@
-Here is my full file. Tell me why my camera feed is not working:
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,6 +24,8 @@ Here is my full file. Tell me why my camera feed is not working:
       width: 100vw;
       height: 100vh;
       z-index: 0;
+      opacity: 0; /* Hide video element, only use for capture */
+      pointer-events: none;
     }
     #buttonRow {
       position: absolute;
@@ -189,7 +189,7 @@ Here is my full file. Tell me why my camera feed is not working:
   <video id="video" autoplay playsinline></video>
 
   <script>
-    // --------- ELEMENTS & STATE (FIXED) ---------
+    // --------- ELEMENTS & STATE ---------
     const switchCameraBtn  = document.getElementById('switchCameraBtn');
     const loadingIndicator = document.getElementById('loadingIndicator');
     const trampolineNotice = document.getElementById('trampolineNotice');
@@ -197,6 +197,196 @@ Here is my full file. Tell me why my camera feed is not working:
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const calibrateBtn = document.getElementById('calibrateBtn');
+
+    // --------- FALLBACK: Draw video to canvas if Pose fails ---------
+    let poseLoaded = false;
+    let fallbackDrawInterval = null;
+
+    function drawVideoFallback() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (video.readyState === 4) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      }
+    }
+    function startFallbackDraw() {
+      if (!fallbackDrawInterval) fallbackDrawInterval = setInterval(drawVideoFallback, 33);
+    }
+    function stopFallbackDraw() {
+      if (fallbackDrawInterval) {
+        clearInterval(fallbackDrawInterval);
+        fallbackDrawInterval = null;
+      }
+    }
+
+    // --------- CAMERA & POSE SETUP ---------
+    let currentStream = null;
+    let useFrontCamera = false;
+    let animationFrameId = null;
+    let trampolineCorners = [];
+    let trampolinePolygon = null;
+    let trampolineCenter = null;
+    let baselineAnkleHeight = null;
+    let calibrationReady = false;
+    let jumpHeightHistory = [];
+    let poseLandmarksReady = false;
+
+    async function startCamera() {
+      loadingIndicator.style.display = 'block';
+      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      stopFallbackDraw();
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: useFrontCamera ? 'user' : 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        });
+        currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+        resizeCanvasToVideo();
+
+        loadingIndicator.style.display = 'none';
+
+        // Only start fallback draw if pose not loaded
+        if (!poseLoaded) startFallbackDraw();
+        animationFrameId = requestAnimationFrame(processVideoFrame);
+      } catch (err) {
+        loadingIndicator.style.display = 'none';
+        trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
+        trampolineNotice.style.color = '#f00';
+        console.error('Camera error:', err);
+      }
+    }
+
+    function resizeCanvasToVideo() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.width = "100vw";
+      canvas.style.height = "100vh";
+    }
+
+    async function processVideoFrame(now) {
+      if (poseLoaded && !video.paused && !video.ended && video.readyState === 4) {
+        await pose.send({ image: video });
+      }
+      animationFrameId = requestAnimationFrame(processVideoFrame);
+    }
+
+    // --------- POSE SETUP (ENSURE POSE IS INITIALIZED) ---------
+    let pose = null;
+    window.addEventListener('DOMContentLoaded', () => {
+      try {
+        pose = new Pose.Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+        });
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          smoothSegmentation: false,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+        pose.onResults(onResults);
+
+        poseLoaded = true;
+        stopFallbackDraw();
+        startCamera();
+      } catch (e) {
+        poseLoaded = false;
+        startFallbackDraw();
+        trampolineNotice.textContent = "Failed to initialize pose detection.";
+        trampolineNotice.style.color = "#f00";
+        console.error("Pose initialization error:", e);
+      }
+    });
+
+    // --------- MAIN RENDER ---------
+    function onResults(results) {
+      poseLoaded = true;
+      stopFallbackDraw();
+
+      resizeCanvasToVideo();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (results.image) {
+        ctx.drawImage(results.image,0,0,canvas.width,canvas.height);
+      } else {
+        drawVideoFallback();
+      }
+
+      if (trampolineCorners.length > 0 && !trampolinePolygon) {
+        drawTrampolineArea(ctx, trampolineCorners);
+      }
+      if (trampolinePolygon) {
+        drawTrampolineArea(ctx, trampolinePolygon);
+      }
+
+      // Enable calibrate button once corners set and pose arrives
+      if (results.poseLandmarks && trampolinePolygon && !calibrationReady) {
+        calibrateBtn.style.display = 'block';
+        calibrateBtn.disabled = false;
+        trampolineNotice.textContent = "Stand in center and press Calibrate";
+      } else if (!results.poseLandmarks && trampolinePolygon && !calibrationReady) {
+        calibrateBtn.disabled = true;
+        trampolineNotice.textContent = "Waiting for pose detection... Make sure you're visible.";
+      }
+
+      // Once calibrated, draw zones & compute jump
+      if (calibrationReady && window._JT_zonePaths) {
+        drawZone(ctx, trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#fff", 0.14);
+        drawZone(ctx, trampolinePolygon, 0.8, 0.4, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "red", 0.95);
+        drawZone(ctx, trampolinePolygon, 1.2, 0.6, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "orange", 0.75, [7,7]);
+        drawZone(ctx, trampolinePolygon, 1.6, 0.8, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#3498db", 0.65, [2,12]);
+
+        computeAndSendJump(results.poseLandmarks);
+      }
+    }
+
+    // --------- TRAMPOLINE GEOMETRY UTILS & OVERLAYS ---------
+    function getQuadrilateralCenter(corners) {
+      let cx=0, cy=0;
+      corners.forEach(([x,y]) => { cx += x; cy += y; });
+      return [cx/corners.length, cy/corners.length];
+    }
+
+    function drawTrampolineArea(ctx, corners) {
+      if (corners.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = '#ff0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(corners[0][0], corners[0][1]);
+      for (let i = 1; i < corners.length; ++i) {
+        ctx.lineTo(corners[i][0], corners[i][1]);
+      }
+      if (corners.length === 4) ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = '#ff0';
+      corners.forEach(([x,y]) => {
+        ctx.beginPath();
+        ctx.arc(x,y,7,0,2*Math.PI);
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    function pointInPolygon(pt, poly) {
+      let [x,y] = pt, inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        let [xi, yi] = poly[i], [xj, yj] = poly[j];
+        let intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
 
     // --------- PERSPECTIVE MAPPING HELPERS ---------
     function mapBedToPoly(u, v, poly) {
@@ -258,7 +448,6 @@ Here is my full file. Tell me why my camera feed is not working:
       ctx.restore();
     }
 
-    // --------- ROUTE ONE: 3D PLANE BACK‑PROJECTION ---------
     window._JT_intrinsics = null;
     window._JT_extrinsics = null;
     window._JT_plane      = null;
@@ -293,220 +482,6 @@ Here is my full file. Tell me why my camera feed is not working:
       p.closePath();
       return p;
     }
-
-    // --------- SETTINGS POPOVER LOGIC ---------
-    const settingsBtn  = document.getElementById('settingsBtn');
-    const settingsPopover = document.getElementById('settingsPopover');
-    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-    const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
-    settingsBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      settingsPopover.classList.toggle('open');
-    });
-    closeSettingsBtn.addEventListener('click', () => settingsPopover.classList.remove('open'));
-    document.addEventListener('mousedown', e => {
-      if (settingsPopover.classList.contains('open') &&
-          !settingsPopover.contains(e.target) &&
-          e.target !== settingsBtn) {
-        settingsPopover.classList.remove('open');
-      }
-    });
-
-    // --------- SAVE/LOAD SETTINGS ---------
-    const cameraDistanceInput = document.getElementById('cameraDistance');
-    const cameraHeightInput   = document.getElementById('cameraHeight');
-    const trampolineHeightInput = document.getElementById('trampolineHeight');
-    function saveSettingsToStorage() {
-      localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
-      localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
-      localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
-    }
-    function loadSettingsFromStorage() {
-      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight'].forEach(k => {
-        const v = localStorage.getItem(k);
-        if (v !== null) {
-          document.getElementById({
-            'jt_cameraDistance':'cameraDistance',
-            'jt_cameraHeight':'cameraHeight',
-            'jt_trampolineHeight':'trampolineHeight'
-          }[k]).value = v;
-        }
-      });
-      ['cameraDistance','cameraHeight','trampolineHeight'].forEach(id =>
-        document.getElementById(id).dispatchEvent(new Event('input'))
-      );
-    }
-    saveSettingsBtn.addEventListener('click', () => {
-      saveSettingsToStorage();
-      saveSettingsBtn.textContent = 'Saved!';
-      setTimeout(() => saveSettingsBtn.textContent = 'Save', 1200);
-    });
-    window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
-
-    // --------- CONFIGURABLE PARAMETERS ---------
-    let REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
-    let cameraDistanceMeters = 2.0;
-    let cameraHeightMeters   = 1.0;
-    const SMOOTHING_WINDOW   = 5;
-    const MIN_DELTA_METERS   = 0.002;
-
-    cameraDistanceInput.addEventListener('input', () => {
-      cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
-    });
-    cameraHeightInput.addEventListener('input', () => {
-      cameraHeightMeters = parseFloat(cameraHeightInput.value) || 1.0;
-    });
-    trampolineHeightInput.addEventListener('input', () => {
-      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
-    });
-
-    // --------- MORE ELEMENTS & STATE ---------
-    let currentStream = null;
-    let useFrontCamera = false;
-    let animationFrameId = null;
-    let trampolineCorners = [];
-    let trampolinePolygon = null;
-    let trampolineCenter = null;
-    let baselineAnkleHeight = null;
-    let calibrationReady = false;
-    let jumpHeightHistory = [];
-    let poseLandmarksReady = false;
-
-    // --------- TRAMPOLINE GEOMETRY UTILS ---------
-    function getQuadrilateralCenter(corners) {
-      let cx=0, cy=0;
-      corners.forEach(([x,y]) => { cx += x; cy += y; });
-      return [cx/corners.length, cy/corners.length];
-    }
-
-    function drawTrampolineArea(ctx, corners) {
-      if (corners.length < 2) return;
-      ctx.save();
-      ctx.strokeStyle = '#ff0';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(corners[0][0], corners[0][1]);
-      for (let i = 1; i < corners.length; ++i) {
-        ctx.lineTo(corners[i][0], corners[i][1]);
-      }
-      if (corners.length === 4) ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
-      ctx.save();
-      ctx.fillStyle = '#ff0';
-      corners.forEach(([x,y]) => {
-        ctx.beginPath();
-        ctx.arc(x,y,7,0,2*Math.PI);
-        ctx.fill();
-      });
-      ctx.restore();
-    }
-
-    function pointInPolygon(pt, poly) {
-      let [x,y] = pt, inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        let [xi, yi] = poly[i], [xj, yj] = poly[j];
-        let intersect = ((yi > y) !== (yj > y)) &&
-                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
-        if (intersect) inside = !inside;
-      }
-      return inside;
-    }
-
-    // --------- CAMERA & POSE SETUP ---------
-    async function startCamera() {
-      loadingIndicator.style.display = 'block';
-      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: useFrontCamera ? 'user' : 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-        currentStream = stream;
-        video.srcObject = stream;
-        await video.play();
-        resizeCanvasToVideo();
-        loadingIndicator.style.display = 'none';
-        animationFrameId = requestAnimationFrame(processVideoFrame);
-      } catch (err) {
-        loadingIndicator.style.display = 'none';
-        alert('Unable to access camera. Please check your device settings and permissions.');
-        console.error('Camera error:', err);
-      }
-    }
-
-    function resizeCanvasToVideo() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      canvas.style.width = "100vw";
-      canvas.style.height = "100vh";
-    }
-
-    async function processVideoFrame(now) {
-      if (!video.paused && !video.ended && video.readyState === 4) {
-        await pose.send({ image: video });
-      }
-      animationFrameId = requestAnimationFrame(processVideoFrame);
-    }
-
-    // --------- MAIN RENDER ---------
-    function onResults(results) {
-      resizeCanvasToVideo();
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(results.image,0,0,canvas.width,canvas.height);
-
-      if (trampolineCorners.length > 0 && !trampolinePolygon) {
-        drawTrampolineArea(ctx, trampolineCorners);
-      }
-      if (trampolinePolygon) {
-        drawTrampolineArea(ctx, trampolinePolygon);
-      }
-
-      // Enable calibrate button once corners set and pose arrives
-      if (results.poseLandmarks && trampolinePolygon && !calibrationReady) {
-        calibrateBtn.style.display = 'block';
-        calibrateBtn.disabled = false;
-        trampolineNotice.textContent = "Stand in center and press Calibrate";
-      } else if (!results.poseLandmarks && trampolinePolygon && !calibrationReady) {
-        calibrateBtn.disabled = true;
-        trampolineNotice.textContent = "Waiting for pose detection... Make sure you're visible.";
-      }
-
-      // Once calibrated, draw zones & compute jump
-      if (calibrationReady && window._JT_zonePaths) {
-        drawZone(ctx, trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#fff", 0.14);
-        drawZone(ctx, trampolinePolygon, 0.8, 0.4, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "red", 0.95);
-        drawZone(ctx, trampolinePolygon, 1.2, 0.6, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "orange", 0.75, [7,7]);
-        drawZone(ctx, trampolinePolygon, 1.6, 0.8, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#3498db", 0.65, [2,12]);
-
-        computeAndSendJump(results.poseLandmarks);
-      }
-    }
-
-    // --------- POSE SETUP (ENSURE POSE IS INITIALIZED) ---------
-    let pose = null;
-    window.addEventListener('DOMContentLoaded', () => {
-      // Setup pose object
-      pose = new Pose.Pose({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-      });
-      pose.setOptions({
-        modelComplexity: 1,
-        smoothLandmarks: true,
-        enableSegmentation: false,
-        smoothSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
-      pose.onResults(onResults);
-
-      startCamera();
-    });
 
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function(e) {
@@ -573,6 +548,72 @@ Here is my full file. Tell me why my camera feed is not working:
         zone2: buildZonePath(trampolinePolygon, 1.2, 0.6),
         zone3: buildZonePath(trampolinePolygon, 1.6, 0.8)
       };
+    });
+
+    // --------- SETTINGS POPOVER LOGIC ---------
+    const settingsBtn  = document.getElementById('settingsBtn');
+    const settingsPopover = document.getElementById('settingsPopover');
+    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+    const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
+    settingsBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      settingsPopover.classList.toggle('open');
+    });
+    closeSettingsBtn.addEventListener('click', () => settingsPopover.classList.remove('open'));
+    document.addEventListener('mousedown', e => {
+      if (settingsPopover.classList.contains('open') &&
+          !settingsPopover.contains(e.target) &&
+          e.target !== settingsBtn) {
+        settingsPopover.classList.remove('open');
+      }
+    });
+
+    // --------- SAVE/LOAD SETTINGS ---------
+    const cameraDistanceInput = document.getElementById('cameraDistance');
+    const cameraHeightInput   = document.getElementById('cameraHeight');
+    const trampolineHeightInput = document.getElementById('trampolineHeight');
+    function saveSettingsToStorage() {
+      localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
+      localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
+      localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
+    }
+    function loadSettingsFromStorage() {
+      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight'].forEach(k => {
+        const v = localStorage.getItem(k);
+        if (v !== null) {
+          document.getElementById({
+            'jt_cameraDistance':'cameraDistance',
+            'jt_cameraHeight':'cameraHeight',
+            'jt_trampolineHeight':'trampolineHeight'
+          }[k]).value = v;
+        }
+      });
+      ['cameraDistance','cameraHeight','trampolineHeight'].forEach(id =>
+        document.getElementById(id).dispatchEvent(new Event('input'))
+      );
+    }
+    saveSettingsBtn.addEventListener('click', () => {
+      saveSettingsToStorage();
+      saveSettingsBtn.textContent = 'Saved!';
+      setTimeout(() => saveSettingsBtn.textContent = 'Save', 1200);
+    });
+    window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
+
+    // --------- CONFIGURABLE PARAMETERS ---------
+    let REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
+    let cameraDistanceMeters = 2.0;
+    let cameraHeightMeters   = 1.0;
+    const SMOOTHING_WINDOW   = 5;
+    const MIN_DELTA_METERS   = 0.002;
+
+    cameraDistanceInput.addEventListener('input', () => {
+      cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
+    });
+    cameraHeightInput.addEventListener('input', () => {
+      cameraHeightMeters = parseFloat(cameraHeightInput.value) || 1.0;
+    });
+    trampolineHeightInput.addEventListener('input', () => {
+      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
     });
 
     // --------- CAMERA SWITCH & CLEANUP ---------
