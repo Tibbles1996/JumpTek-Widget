@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -147,7 +146,7 @@
   </style>
 
   <!-- MediaPipe & Camera Utils -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469246/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
 </head>
@@ -282,10 +281,10 @@
     let pose = null;
     window.addEventListener('DOMContentLoaded', () => {
       try {
-        if (typeof Pose === "undefined" || typeof Pose.Pose !== "function") {
+        if (typeof window.Pose === "undefined" || typeof window.Pose.Pose !== "function") {
           throw new Error("MediaPipe Pose not loaded. Check your internet connection or the CDN.");
         }
-        pose = new Pose.Pose({
+        pose = new window.Pose.Pose({
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
         pose.setOptions({
