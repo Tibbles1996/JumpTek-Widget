@@ -316,6 +316,7 @@
 
     // --------- MAIN RENDER ---------
     function onResults(results) {
+      pose.lastResults = results; // <-- This line is essential for calibration!
       poseLoaded = true;
       stopFallbackDraw();
 
@@ -327,7 +328,7 @@
         drawVideoFallback();
       }
 
-      // --- ADD: Draw pose skeleton overlay ---
+      // Draw pose skeleton overlay
       if (results.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 5});
         drawLandmarks(ctx, results.poseLandmarks, {color: '#ff0', lineWidth: 2});
