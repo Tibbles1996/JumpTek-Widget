@@ -167,84 +167,161 @@
   </div>
   <video id="video" autoplay playsinline></video>
   <script>
-    // --------- PERSPECTIVE MAPPING HELPERS ---------
-    function mapBedToPoly(u, v, poly) {
-      const [P0, P1, P2, P3] = poly;
-      const x = (1-u)*(1-v)*P0[0] + u*(1-v)*P1[0] + u*v*P2[0] + (1-u)*v*P3[0];
-      const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
-      return [x, y];
-    }
-    function getZoneUVs(zoneU0, zoneV0, zoneU1, zoneV1) {
-      return [
-        [zoneU0, zoneV0], [zoneU1, zoneV0], [zoneU1, zoneV1], [zoneU0, zoneV1],
-      ];
-    }
-    function drawZone(ctx, poly, zoneU0, zoneV0, zoneU1, zoneV1, color, alpha=1, dash=[]) {
-      const uvs = getZoneUVs(zoneU0, zoneV0, zoneU1, zoneV1);
-      const pts = uvs.map(([u, v]) => mapBedToPoly(u, v, poly));
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.3;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-    function drawInsetZone(ctx, poly, insetFrac, color, alpha=1, dash=[]) {
-      // insetFrac: 0 (edge) ... 0.5 (center point)
-      const u0 = 0 + insetFrac;
-      const v0 = 0 + insetFrac;
-      const u1 = 1 - insetFrac;
-      const v1 = 1 - insetFrac;
-      drawZone(ctx, poly, u0, v0, u1, v1, color, alpha, dash);
-    }
-    function drawFullZone(ctx, poly, color, alpha=1, dash=[]) {
-      drawInsetZone(ctx, poly, 0, color, alpha, dash);
-    }
-    // --------- CENTER PLUS WITH PERSPECTIVE ---------
-    function drawCenterPlus(ctx, poly) {
-      if (!poly || poly.length !== 4) return;
-      // Center in UV space is (0.5, 0.5)
-      const armLengthU = 0.16; // 16% of width
-      const armLengthV = 0.16; // 16% of height
-      const [leftX, leftY] = mapBedToPoly(0.5 - armLengthU/2, 0.5, poly);
-      const [rightX, rightY] = mapBedToPoly(0.5 + armLengthU/2, 0.5, poly);
-      const [topX, topY] = mapBedToPoly(0.5, 0.5 - armLengthV/2, poly);
-      const [botX, botY] = mapBedToPoly(0.5, 0.5 + armLengthV/2, poly);
-      ctx.save();
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 10;
-      ctx.beginPath();
-      ctx.moveTo(leftX, leftY); ctx.lineTo(rightX, rightY);
-      ctx.moveTo(topX, topY); ctx.lineTo(botX, botY);
-      ctx.stroke();
-      ctx.restore();
-    }
-    function getUVFromPoint(x, y, poly) {
-      let best = {u:0, v:0, d:1e9};
-      for (let u = 0; u <= 1; u += 0.02) {
-        for (let v = 0; v <= 1; v += 0.02) {
-          const [px, py] = mapBedToPoly(u, v, poly);
-          const d = Math.abs(px - x) + Math.abs(py - y);
-          if (d < best.d) best = {u, v, d};
+    // --- Minimal numeric.js matrix tools for 3x3 ---
+    const numeric = {
+      inv: function(m) {
+        var a=m[0][0],b=m[0][1],c=m[0][2],d=m[1][0],e=m[1][1],f=m[1][2],g=m[2][0],h=m[2][1],i=m[2][2];
+        var A=e*i-f*h, B=-(d*i-f*g), C=d*h-e*g, D=-(b*i-c*h), E=a*i-c*g, F=-(a*h-b*g), G=b*f-c*e, H=-(a*f-c*d), I=a*e-b*d;
+        var det=a*A+b*B+c*C;
+        return [
+          [A/det, D/det, G/det],
+          [B/det, E/det, H/det],
+          [C/det, F/det, I/det]
+        ];
+      },
+      dot: function(a, b) {
+        if(Array.isArray(a[0])) { // a is matrix
+          if(Array.isArray(b[0])) { // b is matrix
+            var r = [];
+            for(var i=0;i<a.length;i++) {
+              r[i]=[];
+              for(var j=0;j<b[0].length;j++) {
+                var sum=0;
+                for(var k=0;k<b.length;k++) sum+=a[i][k]*b[k][j];
+                r[i][j]=sum;
+              }
+            }
+            return r;
+          } else { // b is vector
+            var r=[];
+            for(var i=0;i<a.length;i++) {
+              var sum=0;
+              for(var k=0;k<a[0].length;k++) sum+=a[i][k]*b[k];
+              r[i]=sum;
+            }
+            return r;
+          }
+        } else { // a is vector
+          if(Array.isArray(b[0])) { // b is matrix
+            var r=[];
+            for(var j=0;j<b[0].length;j++) {
+              var sum=0;
+              for(var k=0;k<b.length;k++) sum+=a[k]*b[k][j];
+              r[j]=sum;
+            }
+            return r;
+          } else { // b is vector
+            var sum=0;
+            for(var k=0;k<a.length;k++) sum+=a[k]*b[k];
+            return sum;
+          }
         }
       }
-      return [best.u, best.v];
+    };
+
+    // --- Perspective transform function ---
+    function getPerspectiveTransform(src, dst) {
+      function basisToPoints(p1, p2, p3, p4) {
+        var m = [
+          [p1[0], p2[0], p3[0]],
+          [p1[1], p2[1], p3[1]],
+          [1, 1, 1]
+        ];
+        var v = [p4[0], p4[1], 1];
+        var mInv = numeric.inv(m);
+        var a = numeric.dot(mInv, v);
+        return numeric.dot([a[0], a[1], a[2]], m);
+      }
+      var m1 = basisToPoints(src[0], src[1], src[2], src[3]);
+      var m2 = basisToPoints(dst[0], dst[1], dst[2], dst[3]);
+      var m = numeric.dot(m2, numeric.inv(m1));
+      return function([x, y]) {
+        var X = m[0][0]*x + m[0][1]*y + m[0][2];
+        var Y = m[1][0]*x + m[1][1]*y + m[1][2];
+        var Z = m[2][0]*x + m[2][1]*y + m[2][2];
+        return [X/Z, Y/Z];
+      }
     }
+
+    // --- Perspective-correct trampoline zones drawing ---
+    function drawTrampolineZones(ctx, trampolinePolygon) {
+      // Real trampoline dimensions (meters)
+      const BED_WIDTH = 2.0;   // horizontal axis (short edge)
+      const BED_HEIGHT = 4.0;  // vertical axis (long edge)
+
+      // Polygon order: [top-left, top-right, bottom-right, bottom-left]
+      const dst = trampolinePolygon;
+
+      // Reference rectangle in "trampoline coordinates" (centered at 0,0)
+      const src = [
+        [-BED_WIDTH/2, -BED_HEIGHT/2],
+        [ BED_WIDTH/2, -BED_HEIGHT/2],
+        [ BED_WIDTH/2,  BED_HEIGHT/2],
+        [-BED_WIDTH/2,  BED_HEIGHT/2]
+      ];
+
+      // Get mapping function
+      const map = getPerspectiveTransform(src, dst);
+
+      // 1. Draw yellow outline (full bed)
+      ctx.save();
+      ctx.strokeStyle = 'yellow';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      dst.forEach(([x, y], i) => {
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+
+      // 2. Draw red 'plus' lines (centered)
+      ctx.save();
+      ctx.strokeStyle = 'red';
+      ctx.lineWidth = 2;
+      // Vertical line (x=0, from y=-2m to y=+2m)
+      let [vx1, vy1] = map([0, -BED_HEIGHT/2]);
+      let [vx2, vy2] = map([0,  BED_HEIGHT/2]);
+      ctx.beginPath();
+      ctx.moveTo(vx1, vy1);
+      ctx.lineTo(vx2, vy2);
+      ctx.stroke();
+      // Horizontal line (y=0, from x=-1m to x=+1m)
+      let [hx1, hy1] = map([-BED_WIDTH/2, 0]);
+      let [hx2, hy2] = map([ BED_WIDTH/2, 0]);
+      ctx.beginPath();
+      ctx.moveTo(hx1, hy1);
+      ctx.lineTo(hx2, hy2);
+      ctx.stroke();
+      ctx.restore();
+
+      // 3. Draw inner rectangles (zones)
+      function drawZoneRect(width, height) {
+        ctx.save();
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        [
+          [-width/2, -height/2],
+          [ width/2, -height/2],
+          [ width/2,  height/2],
+          [-width/2,  height/2]
+        ].forEach(([x, y], i) => {
+          const [mx, my] = map([x, y]);
+          if (i === 0) ctx.moveTo(mx, my);
+          else ctx.lineTo(mx, my);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+      // Middle rectangle (2.0m x 1.0m, centered)
+      drawZoneRect(2.0, 1.0);
+      // Center rectangle (0.5m x 0.5m, centered)
+      drawZoneRect(0.5, 0.5);
+    }
+
     // --------- SETTINGS POPOVER LOGIC ---------
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsPopover = document.getElementById('settingsPopover');
@@ -429,49 +506,12 @@
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
+
       // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
-      // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
-if (trampolinePolygon && trampolinePolygon.length === 4) {
-  // Draw main trampoline outline (yellow, as before)
-  drawTrampolineArea(ctx, trampolinePolygon);
+      if (trampolinePolygon && trampolinePolygon.length === 4) {
+        drawTrampolineZones(ctx, trampolinePolygon);
+      }
 
-  // Draw central vertical and horizontal red lines (the "plus")
-  drawCenterPlus(ctx, trampolinePolygon);
-
-  // Draw zone rectangles (red lines), matching the reference image:
-  // 1. Central rectangle (smallest)
-  // 2. Middle rectangle (around the central one)
-  // 3. Main trampoline outline (already drawn)
-
-  ctx.save();
-  ctx.strokeStyle = "red";
-  ctx.lineWidth = 4;
-
-  // Central (small) rectangle: ~1/4th inset
-  drawZoneRectangle(ctx, trampolinePolygon, 0.25);
-
-  // Middle rectangle: ~1/8th inset
-  drawZoneRectangle(ctx, trampolinePolygon, 0.125);
-
-  ctx.restore();
-}
-
-// Helper function to draw a rectangle inset by a fraction from each edge
-function drawZoneRectangle(ctx, poly, frac) {
-  // frac: 0 = edge, 0.5 = center point
-  const u0 = frac, v0 = frac, u1 = 1 - frac, v1 = 1 - frac;
-  const pts = [
-    mapBedToPoly(u0, v0, poly), // top-left
-    mapBedToPoly(u1, v0, poly), // top-right
-    mapBedToPoly(u1, v1, poly), // bottom-right
-    mapBedToPoly(u0, v1, poly)  // bottom-left
-  ];
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
-  ctx.stroke();
-}
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
@@ -569,6 +609,21 @@ function drawZoneRectangle(ctx, poly, frac) {
           ctx.restore();
         }
       }
+    }
+    // --------- UV MAPPING FOR MEASUREMENTS ---------
+    function getUVFromPoint(x, y, poly) {
+      let best = {u:0, v:0, d:1e9};
+      for (let u = 0; u <= 1; u += 0.02) {
+        for (let v = 0; v <= 1; v += 0.02) {
+          const [px, py] = [
+            poly[0][0]*(1-u)*(1-v) + poly[1][0]*u*(1-v) + poly[2][0]*u*v + poly[3][0]*(1-u)*v,
+            poly[0][1]*(1-u)*(1-v) + poly[1][1]*u*(1-v) + poly[2][1]*u*v + poly[3][1]*(1-u)*v
+          ];
+          const d = Math.abs(px - x) + Math.abs(py - y);
+          if (d < best.d) best = {u, v, d};
+        }
+      }
+      return [best.u, best.v];
     }
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function (e) {
