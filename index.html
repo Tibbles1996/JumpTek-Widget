@@ -281,10 +281,11 @@
     let pose = null;
     window.addEventListener('DOMContentLoaded', () => {
       try {
-        if (typeof window.Pose === "undefined" || typeof window.Pose.Pose !== "function") {
+        // FIX: MediaPipe Pose is a class on window.Pose, not window.Pose.Pose
+        if (typeof window.Pose !== "function") {
           throw new Error("MediaPipe Pose not loaded. Check your internet connection or the CDN.");
         }
-        pose = new window.Pose.Pose({
+        pose = new window.Pose({
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
         pose.setOptions({
