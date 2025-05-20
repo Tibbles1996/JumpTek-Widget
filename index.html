@@ -54,10 +54,8 @@
     }
     #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover { background: #219150; }
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img {
-      margin-right: 0;
       width: 28px;
       height: 28px;
-      vertical-align: middle;
       display: block;
     }
     #loadingIndicator {
@@ -141,11 +139,13 @@
       align-self: flex-end;
     }
     #saveSettingsBtn:active,
-    #saveSettingsBtn:focus {
-      background: #219150;
-    }
+    #saveSettingsBtn:focus { background: #219150; }
+    #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
   </style>
+
+  <!-- MediaPipe & Camera Utils -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 </head>
 <body>
@@ -155,7 +155,7 @@
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
         <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
       </button>
-      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: none;">
+      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: none;" disabled>
         <img src="https://icon-library.com/images/wrench-icon-png/wrench-icon-png-11.jpg" alt="Calibrate" style="width:28px;height:28px;" />
       </button>
       <button class="settings-btn" id="settingsBtn" aria-label="Open settings" tabindex="0" role="button">
@@ -185,6 +185,7 @@
     <div id="loadingIndicator">Loading...</div>
   </div>
   <video id="video" autoplay playsinline></video>
+
   <script>
     // --------- PERSPECTIVE MAPPING HELPERS ---------
     function mapBedToPoly(u, v, poly) {
@@ -196,16 +197,16 @@
     function getZoneUVs(zoneW, zoneH, bedW, bedH) {
       const u0 = 0.5 - zoneW/2/bedW, u1 = 0.5 + zoneW/2/bedW;
       const v0 = 0.5 - zoneH/2/bedH, v1 = 0.5 + zoneH/2/bedH;
-      return [[u0,v0],[u1,v0],[u1,v1],[u0,v1]];
+      return [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
     }
     function drawZone(ctx, poly, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
-      const pts = getZoneUVs(zoneW,zoneH,bedW,bedH).map(([u,v])=>mapBedToPoly(u,v,poly));
+      const pts = getZoneUVs(zoneW, zoneH, bedW, bedH).map(([u,v]) => mapBedToPoly(u, v, poly));
       ctx.save();
       ctx.globalAlpha = alpha * 0.3;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
-      pts.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
+      pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -216,7 +217,7 @@
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
-      pts.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
+      pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -228,7 +229,7 @@
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.moveTo(poly[0][0], poly[0][1]);
-      poly.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
+      poly.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -239,7 +240,7 @@
       ctx.lineWidth = 5;
       ctx.beginPath();
       ctx.moveTo(poly[0][0], poly[0][1]);
-      poly.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
+      poly.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
       ctx.closePath();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -254,34 +255,34 @@
     window._JT_zonePaths  = null;
 
     function normalize(v) {
-      const m = Math.hypot(v[0],v[1],v[2]);
-      return v.map(x=>x/m);
+      const m = Math.hypot(v[0], v[1], v[2]);
+      return v.map(x => x / m);
     }
-    function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
-    function subtract(a,b) { return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
-    function scale(v,s) { return [v[0]*s,v[1]*s,v[2]*s]; }
-    function add(a,b) { return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]; }
+    function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+    function subtract(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+    function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
+    function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 
-    function pixelToWorld(u,v) {
-      const {fx,fy,cx,cy} = window._JT_intrinsics;
-      const {C,R} = window._JT_extrinsics;
+    function pixelToWorld(u, v) {
+      const {fx, fy, cx, cy} = window._JT_intrinsics;
+      const {C} = window._JT_extrinsics;
       const N = window._JT_plane.normal, P0 = window._JT_plane.point;
       // 1) Ray in camera space
-      const xCam=(u-cx)/fx, yCam=(v-cy)/fy, zCam=1;
-      const rayCam=normalize([xCam,yCam,zCam]);
-      // 2) Assume R=I, so ray=rayCam
-      const ray=rayCam;
-      // 3) t = -N·(C-P0)/N·ray
-      const t = -dot(N, subtract(C,P0)) / dot(N,ray);
-      return add(C, scale(ray,t));
+      const xCam = (u - cx) / fx, yCam = (v - cy) / fy, zCam = 1;
+      const rayCam = normalize([xCam, yCam, zCam]);
+      // 2) R = I, so ray = rayCam
+      const ray = rayCam;
+      // 3) t = -N·(C-P0) / N·ray
+      const t = -dot(N, subtract(C, P0)) / dot(N, ray);
+      return add(C, scale(ray, t));
     }
 
     function buildZonePath(poly, w, h) {
-      const p=new Path2D();
-      const pts=getZoneUVs(w,h,TRAMPOLINE_BED_WIDTH,TRAMPOLINE_BED_HEIGHT)
-                  .map(([u,v])=>mapBedToPoly(u,v,poly));
-      p.moveTo(pts[0][0],pts[0][1]);
-      pts.slice(1).forEach(pt=>p.lineTo(pt[0],pt[1]));
+      const p = new Path2D();
+      const pts = getZoneUVs(w, h, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT)
+        .map(([u,v]) => mapBedToPoly(u, v, poly));
+      p.moveTo(pts[0][0], pts[0][1]);
+      pts.slice(1).forEach(pt => p.lineTo(pt[0], pt[1]));
       p.closePath();
       return p;
     }
@@ -291,15 +292,15 @@
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
     const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
-    settingsBtn.addEventListener('click',e=>{
+    settingsBtn.addEventListener('click', e => {
       e.stopPropagation();
       settingsPopover.classList.toggle('open');
     });
-    closeSettingsBtn.addEventListener('click',()=>settingsPopover.classList.remove('open'));
-    document.addEventListener('mousedown',e=>{
-      if(settingsPopover.classList.contains('open') &&
-         !settingsPopover.contains(e.target) &&
-         e.target !== settingsBtn) {
+    closeSettingsBtn.addEventListener('click', () => settingsPopover.classList.remove('open'));
+    document.addEventListener('mousedown', e => {
+      if (settingsPopover.classList.contains('open') &&
+          !settingsPopover.contains(e.target) &&
+          e.target !== settingsBtn) {
         settingsPopover.classList.remove('open');
       }
     });
@@ -314,26 +315,26 @@
       localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
     }
     function loadSettingsFromStorage() {
-      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight'].forEach(k=>{
-        const v=localStorage.getItem(k);
-        if(v!==null){
+      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight'].forEach(k => {
+        const v = localStorage.getItem(k);
+        if (v !== null) {
           document.getElementById({
             'jt_cameraDistance':'cameraDistance',
             'jt_cameraHeight':'cameraHeight',
             'jt_trampolineHeight':'trampolineHeight'
-          }[k]).value=v;
+          }[k]).value = v;
         }
       });
-      ['cameraDistance','cameraHeight','trampolineHeight'].forEach(id=>
+      ['cameraDistance','cameraHeight','trampolineHeight'].forEach(id =>
         document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
-    saveSettingsBtn.addEventListener('click',()=>{
+    saveSettingsBtn.addEventListener('click', () => {
       saveSettingsToStorage();
-      saveSettingsBtn.textContent='Saved!';
-      setTimeout(()=>saveSettingsBtn.textContent='Save',1200);
+      saveSettingsBtn.textContent = 'Saved!';
+      setTimeout(() => saveSettingsBtn.textContent = 'Save', 1200);
     });
-    window.addEventListener('DOMContentLoaded',loadSettingsFromStorage);
+    window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
 
     // --------- CONFIGURABLE PARAMETERS ---------
     let REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
@@ -342,215 +343,254 @@
     const SMOOTHING_WINDOW   = 5;
     const MIN_DELTA_METERS   = 0.002;
 
-    cameraDistanceInput.addEventListener('input',()=>{
-      cameraDistanceMeters=parseFloat(cameraDistanceInput.value)||2.0;
+    cameraDistanceInput.addEventListener('input', () => {
+      cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
     });
-    cameraHeightInput.addEventListener('input',()=>{
-      cameraHeightMeters=parseFloat(cameraHeightInput.value)||1.0;
+    cameraHeightInput.addEventListener('input', () => {
+      cameraHeightMeters = parseFloat(cameraHeightInput.value) || 1.0;
     });
-    trampolineHeightInput.addEventListener('input',()=>{
-      REAL_TRAMPOLINE_HEIGHT_METERS=parseFloat(trampolineHeightInput.value)||0.6;
+    trampolineHeightInput.addEventListener('input', () => {
+      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
     });
 
     // --------- ELEMENTS & STATE ---------
-    const video = document.getElementById('video');
-    const canvas= document.getElementById('canvas');
-    const ctx   = canvas.getContext('2d');
-    const switchCameraBtn = document.getElementById('switchCameraBtn');
-    const loadingIndicator= document.getElementById('loadingIndicator');
-    const trampolineNotice= document.getElementById('trampolineNotice');
-    const calibrateBtn    = document.getElementById('calibrateBtn');
-
-    let currentStream=null, useFrontCamera=false, animationFrameId=null;
-    let trampolineCorners=[], trampolinePolygon=null, trampolineCenter=null;
-    let baselineAnkleHeight=null, calibrationReady=false;
-    let jumpHeightHistory=[];
+    const switchCameraBtn  = document.getElementById('switchCameraBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const trampolineNotice = document.getElementById('trampolineNotice');
+    let currentStream = null;
+    let useFrontCamera = false;
+    let animationFrameId = null;
+    let trampolineCorners = [];
+    let trampolinePolygon = null;
+    let trampolineCenter = null;
+    let baselineAnkleHeight = null;
+    let calibrationReady = false;
+    let jumpHeightHistory = [];
+    let poseLandmarksReady = false;
 
     // --------- TRAMPOLINE GEOMETRY UTILS ---------
-    function getQuadrilateralCenter(corners){
-      let cx=0,cy=0;
-      corners.forEach(([x,y])=>{cx+=x;cy+=y;});
-      return [cx/corners.length,cy/corners.length];
+    function getQuadrilateralCenter(corners) {
+      let cx=0, cy=0;
+      corners.forEach(([x,y]) => { cx += x; cy += y; });
+      return [cx/corners.length, cy/corners.length];
     }
-    function drawTrampolineArea(ctx,corners){
-      if(corners.length<2) return;
+
+    function drawTrampolineArea(ctx, corners) {
+      if (corners.length < 2) return;
       ctx.save();
-      ctx.strokeStyle='#ff0';ctx.lineWidth=3;
+      ctx.strokeStyle = '#ff0';
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(corners[0][0],corners[0][1]);
-      corners.slice(1).forEach(p=>ctx.lineTo(p[0],p[1]));
-      if(corners.length===4) ctx.closePath();
-      ctx.stroke();ctx.restore();
-      ctx.save();ctx.fillStyle='#ff0';
-      corners.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,7,0,2*Math.PI);ctx.fill();});
+      ctx.moveTo(corners[0][0], corners[0][1]);
+      for (let i = 1; i < corners.length; ++i) {
+        ctx.lineTo(corners[i][0], corners[i][1]);
+      }
+      if (corners.length === 4) ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = '#ff0';
+      corners.forEach(([x,y]) => {
+        ctx.beginPath();
+        ctx.arc(x,y,7,0,2*Math.PI);
+        ctx.fill();
+      });
       ctx.restore();
     }
-    function pointInPolygon(pt, poly){
-      let [x,y]=pt, inside=false;
-      for(let i=0,j=poly.length-1;i<poly.length;j=i++){
-        const [xi,yi]=poly[i], [xj,yj]=poly[j];
-        const intersect = ((yi>y)!==(yj>y)) &&
-          (x < (xj-xi)*(y-yi)/(yj-yi+1e-8)+xi);
-        if(intersect) inside=!inside;
+
+    function pointInPolygon(pt, poly) {
+      let [x,y] = pt, inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        let [xi, yi] = poly[i], [xj, yj] = poly[j];
+        let intersect = ((yi > y) !== (yj > y)) &&
+                        (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
+        if (intersect) inside = !inside;
       }
       return inside;
     }
 
     // --------- CAMERA & POSE SETUP ---------
-    const pose = new Pose({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}` });
-    pose.setOptions({ modelComplexity:0, smoothLandmarks:true, enableSegmentation:false });
-    pose.onResults(onResults);
-
-    async function startCamera(){
-      loadingIndicator.style.display='block';
-      if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
-      if(animationFrameId) cancelAnimationFrame(animationFrameId);
-      try{
+    async function startCamera() {
+      loadingIndicator.style.display = 'block';
+      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio:false,
-          video:{ facingMode:useFrontCamera?'user':'environment', width:{ideal:1280}, height:{ideal:720} }
+          audio: false,
+          video: {
+            facingMode: useFrontCamera ? 'user' : 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
         });
-        currentStream=stream; video.srcObject=stream;
+        currentStream = stream;
+        video.srcObject = stream;
         await video.play();
         resizeCanvasToVideo();
-        loadingIndicator.style.display='none';
-        animationFrameId=requestAnimationFrame(processVideoFrame);
-      }catch(e){
-        loadingIndicator.style.display='none';
-        alert('Unable to access camera.');
-        console.error(e);
+        loadingIndicator.style.display = 'none';
+        animationFrameId = requestAnimationFrame(processVideoFrame);
+      } catch (err) {
+        loadingIndicator.style.display = 'none';
+        alert('Unable to access camera. Please check your device settings and permissions.');
+        console.error('Camera error:', err);
       }
     }
-    function resizeCanvasToVideo(){
-      canvas.width=window.innerWidth; canvas.height=window.innerHeight;
-      canvas.style.width='100vw'; canvas.style.height='100vh';
-      // Intrinsics only updated at calibration
+
+    function resizeCanvasToVideo() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.width = "100vw";
+      canvas.style.height = "100vh";
     }
-    async function processVideoFrame(now){
-      if(video.readyState===4) await pose.send({image:video});
-      animationFrameId=requestAnimationFrame(processVideoFrame);
+
+    async function processVideoFrame(now) {
+      if (!video.paused && !video.ended && video.readyState === 4) {
+        await pose.send({ image: video });
+      }
+      animationFrameId = requestAnimationFrame(processVideoFrame);
     }
 
     // --------- MAIN RENDER ---------
-    function onResults(results){
+    function onResults(results) {
       resizeCanvasToVideo();
       ctx.clearRect(0,0,canvas.width,canvas.height);
       ctx.drawImage(results.image,0,0,canvas.width,canvas.height);
-      if(trampolineCorners.length>0) drawTrampolineArea(ctx,trampolineCorners);
-      if(trampolinePolygon) drawTrampolineArea(ctx,trampolinePolygon);
 
-      // Draw prebuilt zones if calibrated
-      if(window._JT_zonePaths){
-        ctx.save();
-        ctx.strokeStyle='#fff'; ctx.globalAlpha=0.14;
-        ctx.fill(window._JT_zonePaths.full); ctx.stroke(window._JT_zonePaths.full);
-        ctx.strokeStyle='red'; ctx.globalAlpha=0.95;
-        ctx.fill(window._JT_zonePaths.zone1); ctx.stroke(window._JT_zonePaths.zone1);
-        ctx.globalAlpha=0.75;
-        ctx.fill(window._JT_zonePaths.zone2); ctx.stroke(window._JT_zonePaths.zone2);
-        ctx.globalAlpha=0.65;
-        ctx.fill(window._JT_zonePaths.zone3); ctx.stroke(window._JT_zonePaths.zone3);
-        ctx.restore();
+      if (trampolineCorners.length > 0 && !trampolinePolygon) {
+        drawTrampolineArea(ctx, trampolineCorners);
+      }
+      if (trampolinePolygon) {
+        drawTrampolineArea(ctx, trampolinePolygon);
       }
 
-      // Draw landmarks
-      if(results.poseLandmarks){
-        drawConnectors(ctx,results.poseLandmarks,POSE_CONNECTIONS,{color:'#0FF',lineWidth:3});
-        drawLandmarks(ctx,results.poseLandmarks,{color:'#FF0',radius:4});
+      // Enable calibrate button once corners set and pose arrives
+      if (results.poseLandmarks && trampolinePolygon && !calibrationReady) {
+        calibrateBtn.style.display = 'block';
+        calibrateBtn.disabled = false;
+        trampolineNotice.textContent = "Stand in center and press Calibrate";
+      } else if (!results.poseLandmarks && trampolinePolygon && !calibrationReady) {
+        calibrateBtn.disabled = true;
+        trampolineNotice.textContent = "Waiting for pose detection... Make sure you're visible.";
       }
 
-      // Compute and send jump height once per frame if calibrated
-      if(results.poseLandmarks && calibrationReady && window._JT_intrinsics){
-        const left=results.poseLandmarks[27], right=results.poseLandmarks[28];
-        if(left && right){
-          const L=[left.x*canvas.width,left.y*canvas.height];
-          const R=[right.x*canvas.width,right.y*canvas.height];
-          if(pointInPolygon(L,trampolinePolygon) && pointInPolygon(R,trampolinePolygon)){
-            const midX=(L[0]+R[0])/2, midY=(L[1]+R[1])/2;
-            const worldPt = pixelToWorld(midX,midY);
-            // worldPt[2] is vertical height above trampoline plane
-            const heightMeters = worldPt[2];
-            jumpHeightHistory.push(heightMeters);
-            if(jumpHeightHistory.length>SMOOTHING_WINDOW) jumpHeightHistory.shift();
-            const avgHeight = jumpHeightHistory.reduce((a,b)=>a+b,0)/jumpHeightHistory.length;
-            if(typeof onResults.lastSent==='undefined' ||
-               Math.abs(avgHeight-onResults.lastSent)>MIN_DELTA_METERS){
-              onResults.lastSent=avgHeight;
-              window.parent.postMessage(
-                { type:'jump_height', height:avgHeight, calibrated:true, hd_deduction:0 },
-                '*'
-              );
-            }
-          }
-        }
+      // Once calibrated, draw zones & compute jump
+      if (calibrationReady && window._JT_zonePaths) {
+        drawZone(ctx, trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#fff", 0.14);
+        drawZone(ctx, trampolinePolygon, 0.8, 0.4, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "red", 0.95);
+        drawZone(ctx, trampolinePolygon, 1.2, 0.6, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "orange", 0.75, [7,7]);
+        drawZone(ctx, trampolinePolygon, 1.6, 0.8, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#3498db", 0.65, [2,12]);
+
+        computeAndSendJump(results.poseLandmarks);
       }
     }
 
     // --------- CALIBRATION FLOW ---------
-    canvas.addEventListener('click',e=>{
-      if(trampolinePolygon) return;
-      const rect=canvas.getBoundingClientRect();
-      const x=(e.clientX-rect.left)*(canvas.width/rect.width);
-      const y=(e.clientY-rect.top)*(canvas.height/rect.height);
-      trampolineCorners.push([x,y]);
-      if(trampolineCorners.length===4){
-        // Set polygon & center
+    canvas.addEventListener('click', function(e) {
+      if (trampolinePolygon) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      trampolineCorners.push([x, y]);
+      if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
         trampolineCorners = [];
-        trampolineNotice.textContent="Trampoline area set! Stand in center and press the wrench.";
-        calibrateBtn.style.display='block';
+        trampolineNotice.textContent = "Trampoline area set! Stand in the center and press Calibrate.";
+        calibrateBtn.style.display = "block";
+        calibrateBtn.disabled = true;
       }
     });
 
-    calibrateBtn.addEventListener('click',()=>{
-      if(!pose.lastResults) return;
-      const left=pose.lastResults.poseLandmarks[27], right=pose.lastResults.poseLandmarks[28];
-      if(!left||!right) return;
-      const L=[left.x*canvas.width,left.y*canvas.height];
-      const R=[right.x*canvas.width,right.y*canvas.height];
-      if(pointInPolygon(L,trampolinePolygon) && pointInPolygon(R,trampolinePolygon)){
-        baselineAnkleHeight=(L[1]+R[1])/2;
-        calibrationReady=true;
-        trampolineNotice.textContent="Calibrated! Zones mapped and 3D simulation ready.";
-        calibrateBtn.style.display='none';
-
-        // ** Build intrinsics / extrinsics / plane once **
-        window._JT_intrinsics = {
-          fx: Math.min(canvas.width,canvas.height)*0.8,
-          fy: Math.min(canvas.width,canvas.height)*0.8,
-          cx: canvas.width/2,
-          cy: canvas.height/2
-        };
-        window._JT_extrinsics = {
-          C: [0, -cameraDistanceMeters, cameraHeightMeters],
-          R: [[1,0,0],[0,1,0],[0,0,1]]
-        };
-        window._JT_plane = {
-          normal: [0,0,1],
-          point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
-        };
-
-        // ** Prebuild Path2D for each zone **
-        window._JT_zonePaths = {
-          full:  buildZonePath(trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT),
-          zone1: buildZonePath(trampolinePolygon, 0.8, 0.4),
-          zone2: buildZonePath(trampolinePolygon, 1.2, 0.6),
-          zone3: buildZonePath(trampolinePolygon, 1.6, 0.8)
-        };
+    calibrateBtn.addEventListener('click', function() {
+      if (!pose.lastResults || !pose.lastResults.poseLandmarks) {
+        trampolineNotice.style.color = '#f00';
+        trampolineNotice.textContent = "Pose data not ready. Wait until you are visible and try again.";
+        return;
       }
+      const left = pose.lastResults.poseLandmarks[27];
+      const right = pose.lastResults.poseLandmarks[28];
+      if (!left || !right) {
+        trampolineNotice.style.color = '#f00';
+        trampolineNotice.textContent = "Ankles not detected. Make sure your feet are visible to the camera.";
+        return;
+      }
+      const L = [left.x * canvas.width, left.y * canvas.height];
+      const R = [right.x * canvas.width, right.y * canvas.height];
+      if (!pointInPolygon(L, trampolinePolygon) || !pointInPolygon(R, trampolinePolygon)) {
+        trampolineNotice.style.color = '#f00';
+        trampolineNotice.textContent = "Stand fully inside the marked trampoline area for calibration.";
+        return;
+      }
+
+      baselineAnkleHeight = (L[1] + R[1]) / 2;
+      calibrationReady = true;
+      trampolineNotice.style.color = '#0f0';
+      trampolineNotice.textContent = "Calibrated! Zones mapped and 3D simulation ready.";
+      calibrateBtn.style.display = "none";
+
+      // ** Build intrinsics / extrinsics / plane once **
+      window._JT_intrinsics = {
+        fx: Math.min(canvas.width, canvas.height) * 0.8,
+        fy: Math.min(canvas.width, canvas.height) * 0.8,
+        cx: canvas.width / 2,
+        cy: canvas.height / 2
+      };
+      window._JT_extrinsics = {
+        C: [0, -cameraDistanceMeters, cameraHeightMeters],
+        R: [[1,0,0],[0,1,0],[0,0,1]]
+      };
+      window._JT_plane = {
+        normal: [0,0,1],
+        point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
+      };
+
+      // ** Prebuild Path2D for each zone **
+      window._JT_zonePaths = {
+        full:  buildZonePath(trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT),
+        zone1: buildZonePath(trampolinePolygon, 0.8, 0.4),
+        zone2: buildZonePath(trampolinePolygon, 1.2, 0.6),
+        zone3: buildZonePath(trampolinePolygon, 1.6, 0.8)
+      };
     });
 
     // --------- CAMERA SWITCH & CLEANUP ---------
-    switchCameraBtn.addEventListener('click',async()=>{
+    switchCameraBtn.addEventListener('click', async () => {
       useFrontCamera = !useFrontCamera;
       await startCamera();
     });
-    window.addEventListener('resize',resizeCanvasToVideo);
-    window.addEventListener('DOMContentLoaded',startCamera);
-    window.addEventListener('beforeunload',()=>{
-      if(currentStream) currentStream.getTracks().forEach(t=>t.stop());
+    window.addEventListener('resize', resizeCanvasToVideo);
+    window.addEventListener('DOMContentLoaded', startCamera);
+    window.addEventListener('beforeunload', () => {
+      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     });
+
+    // --------- COMPUTE & SEND JUMP HEIGHT ---------
+    function computeAndSendJump(landmarks) {
+      const left = landmarks[27], right = landmarks[28];
+      if (!left || !right) return;
+      const L = [left.x * canvas.width, left.y * canvas.height];
+      const R = [right.x * canvas.width, right.y * canvas.height];
+      if (!pointInPolygon(L,trampolinePolygon) || !pointInPolygon(R,trampolinePolygon)) return;
+
+      const midX = (L[0] + R[0]) / 2, midY = (L[1] + R[1]) / 2;
+      const worldPt = pixelToWorld(midX, midY);
+      const heightMeters = worldPt[2];
+
+      jumpHeightHistory.push(heightMeters);
+      if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
+      const avgHeight = jumpHeightHistory.reduce((a,b) => a + b, 0) / jumpHeightHistory.length;
+
+      if (typeof onResults.lastSent === "undefined" ||
+          Math.abs(avgHeight - onResults.lastSent) > MIN_DELTA_METERS) {
+        onResults.lastSent = avgHeight;
+        window.parent.postMessage({
+          type: 'jump_height',
+          height: avgHeight,
+          calibrated: true,
+          hd_deduction: 0
+        }, '*');
+      }
+    }
 
     // --------- CONSTANTS ---------
     const TRAMPOLINE_BED_WIDTH  = 2.0;
