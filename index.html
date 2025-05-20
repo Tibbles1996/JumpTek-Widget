@@ -169,27 +169,19 @@
   <script>
     // --------- PERSPECTIVE MAPPING HELPERS ---------
     function mapBedToPoly(u, v, poly) {
-      // Bilinear mapping from UV (0-1) to polygon in image
       const [P0, P1, P2, P3] = poly;
       const x = (1-u)*(1-v)*P0[0] + u*(1-v)*P1[0] + u*v*P2[0] + (1-u)*v*P3[0];
       const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
       return [x, y];
     }
-
     function getZoneUVs(zoneU0, zoneV0, zoneU1, zoneV1) {
       return [
-        [zoneU0, zoneV0], // top-left
-        [zoneU1, zoneV0], // top-right
-        [zoneU1, zoneV1], // bottom-right
-        [zoneU0, zoneV1], // bottom-left
+        [zoneU0, zoneV0], [zoneU1, zoneV0], [zoneU1, zoneV1], [zoneU0, zoneV1],
       ];
     }
-
-    // Draw a zone over the trampoline polygon, with the zone's normalized UV bounds [u0,v0] to [u1,v1]
     function drawZone(ctx, poly, zoneU0, zoneV0, zoneU1, zoneV1, color, alpha=1, dash=[]) {
       const uvs = getZoneUVs(zoneU0, zoneV0, zoneU1, zoneV1);
       const pts = uvs.map(([u, v]) => mapBedToPoly(u, v, poly));
-      // fill inner zone
       ctx.save();
       ctx.globalAlpha = alpha * 0.3;
       ctx.fillStyle = color;
@@ -199,7 +191,6 @@
       ctx.closePath();
       ctx.fill();
       ctx.restore();
-      // stroke border
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.setLineDash(dash);
@@ -213,28 +204,27 @@
       ctx.setLineDash([]);
       ctx.restore();
     }
-
-    // For filling the entire trampoline polygon (u,v=0..1)
-    function drawFullZone(ctx, poly, color, alpha=1, dash=[]) {
-      drawZone(ctx, poly, 0, 0, 1, 1, color, alpha, dash);
+    function drawInsetZone(ctx, poly, insetFrac, color, alpha=1, dash=[]) {
+      // insetFrac: 0 (edge) ... 0.5 (center point)
+      const u0 = 0 + insetFrac;
+      const v0 = 0 + insetFrac;
+      const u1 = 1 - insetFrac;
+      const v1 = 1 - insetFrac;
+      drawZone(ctx, poly, u0, v0, u1, v1, color, alpha, dash);
     }
-
+    function drawFullZone(ctx, poly, color, alpha=1, dash=[]) {
+      drawInsetZone(ctx, poly, 0, color, alpha, dash);
+    }
     // --------- CENTER PLUS WITH PERSPECTIVE ---------
     function drawCenterPlus(ctx, poly) {
       if (!poly || poly.length !== 4) return;
       // Center in UV space is (0.5, 0.5)
-      // Plus arms: 0.5m horizontal, 0.24m vertical (adjust as needed)
-      const bedW = 4.28, bedH = 2.14;
-      const armLengthU = 0.5 / bedW; // 0.5m wide, relative to bed width
-      const armLengthV = 0.24 / bedH; // 0.24m tall, relative to bed height
-
-      // Horizontal
+      const armLengthU = 0.16; // 16% of width
+      const armLengthV = 0.16; // 16% of height
       const [leftX, leftY] = mapBedToPoly(0.5 - armLengthU/2, 0.5, poly);
       const [rightX, rightY] = mapBedToPoly(0.5 + armLengthU/2, 0.5, poly);
-      // Vertical
       const [topX, topY] = mapBedToPoly(0.5, 0.5 - armLengthV/2, poly);
       const [botX, botY] = mapBedToPoly(0.5, 0.5 + armLengthV/2, poly);
-
       ctx.save();
       ctx.strokeStyle = "red";
       ctx.lineWidth = 10;
@@ -244,8 +234,6 @@
       ctx.stroke();
       ctx.restore();
     }
-
-    // --------- UTILS ---------
     function getUVFromPoint(x, y, poly) {
       let best = {u:0, v:0, d:1e9};
       for (let u = 0; u <= 1; u += 0.02) {
@@ -257,7 +245,6 @@
       }
       return [best.u, best.v];
     }
-
     // --------- SETTINGS POPOVER LOGIC ---------
     const settingsBtn = document.getElementById('settingsBtn');
     const settingsPopover = document.getElementById('settingsPopover');
@@ -275,14 +262,12 @@
           !settingsPopover.contains(e.target) &&
           e.target !== settingsBtn) closeSettings();
     });
-
     // --------- CONFIGURABLE PARAMETERS ---------
     let REAL_TRAMPOLINE_HEIGHT_METERS = 0.6;
     const SMOOTHING_WINDOW = 5;
     const MIN_DELTA_METERS = 0.002;
     let cameraDistanceMeters = 2.0;
     let cameraHeightMeters = 1.0;
-
     // --------- ELEMENTS AND STATE ---------
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
@@ -291,7 +276,6 @@
     const loadingIndicator = document.getElementById('loadingIndicator');
     const trampolineNotice = document.getElementById('trampolineNotice');
     const calibrateBtn = document.getElementById('calibrateBtn');
-    // Settings fields
     const cameraDistanceInput = document.getElementById('cameraDistance');
     const cameraHeightInput = document.getElementById('cameraHeight');
     const trampolineHeightInput = document.getElementById('trampolineHeight');
@@ -304,7 +288,6 @@
     trampolineHeightInput.addEventListener('input', function() {
       REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
     });
-
     let currentStream = null;
     let useFrontCamera = false;
     let animationFrameId = null;
@@ -316,7 +299,6 @@
     let jumpHeightHistory = [];
     let baselineAnkleHeight = null;
     let calibrationReady = false;
-
     // --------- CAMERA & SETUP ---------
     const poseOptions = {
       modelComplexity: 0,
@@ -328,7 +310,6 @@
     });
     pose.setOptions(poseOptions);
     pose.onResults(onResults);
-
     async function startCamera() {
       showLoading(true);
       try {
@@ -372,7 +353,6 @@
     function showLoading(show) {
       loadingIndicator.style.display = show ? 'block' : 'none';
     }
-
     // --------- FRAME LOOP ---------
     let lastFrameTime = 0;
     const TARGET_FPS = 32;
@@ -395,7 +375,6 @@
       }
       animationFrameId = requestAnimationFrame(processVideoFrame);
     }
-
     // --------- TRAMPOLINE GEOMETRY ---------
     function getQuadrilateralCenter(corners) {
       let cx = 0, cy = 0;
@@ -436,13 +415,11 @@
       }
       return inside;
     }
-
     function computeCameraAngleCorrection() {
       const hypotenuse = Math.sqrt(cameraDistanceMeters ** 2 + cameraHeightMeters ** 2);
       if (hypotenuse === 0) return 1.0;
       return cameraDistanceMeters / hypotenuse;
     }
-
     // --------- MAIN RENDER ---------
     function onResults(results) {
       if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
@@ -450,34 +427,31 @@
       }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
-
       // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
-        // Full trampoline overlay (zone covers the entire mapped polygon, always perspective-correct)
-        drawFullZone(ctx, trampolinePolygon, "#fff", 0.14, []);
-        // Inner colored zones (using UV fractions for perspective-correct overlays)
-        drawZone(ctx, trampolinePolygon, 0.5-0.8/2/4.28, 0.5-0.4/2/2.14, 0.5+0.8/2/4.28, 0.5+0.4/2/2.14, "red", 0.95, []);
-        drawZone(ctx, trampolinePolygon, 0.5-1.2/2/4.28, 0.5-0.6/2/2.14, 0.5+1.2/2/4.28, 0.5+0.6/2/2.14, "orange", 0.75, [7,7]);
-        drawZone(ctx, trampolinePolygon, 0.5-1.6/2/4.28, 0.5-0.8/2/2.14, 0.5+1.6/2/4.28, 0.5+0.8/2/2.14, "#3498db", 0.65, [2,12]);
-        // Large perspective-correct plus sign
+        // Each insetFrac is an even step inwards - tweak for more/fewer zones.
+        const insets = [
+          { inset: 0.00, color: "#fff",  alpha: 0.10, dash: [] },        // Outermost (trampoline bed)
+          { inset: 0.08, color: "#3498db", alpha: 0.65, dash: [2,12] },  // Next (blue)
+          { inset: 0.16, color: "orange", alpha: 0.75, dash: [7,7] },    // Next (orange)
+          { inset: 0.24, color: "red",    alpha: 0.95, dash: [] },       // Center (red)
+        ];
+        for (const zone of insets) {
+          drawInsetZone(ctx, trampolinePolygon, zone.inset, zone.color, zone.alpha, zone.dash);
+        }
         drawCenterPlus(ctx, trampolinePolygon);
       }
-
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
-
         const leftAnkle = results.poseLandmarks[27];
         const rightAnkle = results.poseLandmarks[28];
         if (!leftAnkle || !rightAnkle || !trampolinePolygon || !trampolinePlane) return;
-
         function mapToCanvas(pt) { return [pt.x * canvas.width, pt.y * canvas.height]; }
         const left = mapToCanvas(leftAnkle);
         const right = mapToCanvas(rightAnkle);
-
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
           let currentAnkleY = (left[1] + right[1]) / 2;
           let currentAnkleX = (left[0] + right[0]) / 2;
@@ -490,22 +464,16 @@
             trampolinePixelHeight > 0
               ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction)
               : 0;
-
           jumpHeightHistory.push(jumpHeightMeters);
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
-
-          const bedW = 4.28, bedH = 2.14;
           const [ankleU, ankleV] = getUVFromPoint(currentAnkleX, currentAnkleY, trampolinePolygon);
-          const xMeters = (ankleU - 0.5) * bedW;
-          const yMeters = (ankleV - 0.5) * bedH;
-          const absX = Math.abs(xMeters), absY = Math.abs(yMeters);
-
+          const absX = Math.abs((ankleU - 0.5));
+          const absY = Math.abs((ankleV - 0.5));
           let hdDeduction = 0.3;
-          if (absX <= 0.2 && absY <= 0.1) hdDeduction = 0.0;
-          else if (absX <= 0.4 && absY <= 0.2) hdDeduction = 0.1;
-          else if (absX <= 0.6 && absY <= 0.3) hdDeduction = 0.2;
-
+          if (absX <= 0.05 && absY <= 0.025) hdDeduction = 0.0;
+          else if (absX <= 0.10 && absY <= 0.05) hdDeduction = 0.1;
+          else if (absX <= 0.15 && absY <= 0.075) hdDeduction = 0.2;
           if (
             typeof onResults.lastSent === "undefined" ||
             Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
@@ -521,7 +489,6 @@
               parentOrigin
             );
           }
-
           if (!calibrationReady) {
             trampolineNotice.style.color = '#ff0';
             trampolineNotice.textContent = "Uncalibrated: Press 'Calibrate' for accurate jump height";
@@ -530,7 +497,6 @@
             trampolineNotice.textContent = `Calibration set! Jump height is accurate.`;
           }
         }
-
         // --- Measuring line ---
         if (trampolineCenter) {
           const ankleMid = [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2];
@@ -575,7 +541,6 @@
         }
       }
     }
-
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function (e) {
       if (trampolinePolygon) return;
@@ -610,7 +575,6 @@
       }
       const left = mapToCanvas(leftAnkle);
       const right = mapToCanvas(rightAnkle);
-
       if (!(pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon))) {
         trampolineNotice.style.color = '#f00';
         trampolineNotice.textContent = "Calibration failed: Stand inside trampoline area!";
@@ -622,7 +586,6 @@
       trampolineNotice.textContent = "Calibration set! Jump height will now be accurate.";
       calibrateBtn.style.display = "none";
     });
-
     // --------- CAMERA SWITCH & EVENTS ---------
     async function handleSwitchCamera() {
       useFrontCamera = !useFrontCamera;
@@ -643,13 +606,11 @@
       stopFrameLoop();
     }
     window.addEventListener('beforeunload', cleanupResources);
-
     pose.lastResults = null;
     pose.onResults(function (results) {
       pose.lastResults = results;
       onResults(results);
     });
-
     (async () => { await startCamera(); })();
     window.addEventListener('resize', resizeCanvasToVideo);
     document.addEventListener('visibilitychange', () => {
