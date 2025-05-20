@@ -264,25 +264,16 @@
 
     // --- Perspective-correct trampoline zones drawing ---
     function drawTrampolineZones(ctx, trampolinePolygon) {
-      // Real trampoline dimensions (meters)
-      const BED_WIDTH = 2.0;   // horizontal axis (short edge)
-      const BED_HEIGHT = 4.0;  // vertical axis (long edge)
-
-      // Polygon order: [top-left, top-right, bottom-right, bottom-left]
+      const BED_WIDTH = 2.0;
+      const BED_HEIGHT = 4.0;
       const dst = trampolinePolygon;
-
-      // Reference rectangle in "trampoline coordinates" (centered at 0,0)
       const src = [
         [-BED_WIDTH/2, -BED_HEIGHT/2],
         [ BED_WIDTH/2, -BED_HEIGHT/2],
         [ BED_WIDTH/2,  BED_HEIGHT/2],
         [-BED_WIDTH/2,  BED_HEIGHT/2]
       ];
-
-      // Get mapping function
       const map = getPerspectiveTransform(src, dst);
-
-      // 1. Draw yellow outline (full bed)
       ctx.save();
       ctx.strokeStyle = 'yellow';
       ctx.lineWidth = 3;
@@ -294,19 +285,15 @@
       ctx.closePath();
       ctx.stroke();
       ctx.restore();
-
-      // 2. Draw red 'plus' lines (centered)
       ctx.save();
       ctx.strokeStyle = 'red';
       ctx.lineWidth = 2;
-      // Vertical line (x=0, from y=-2m to y=+2m)
       let [vx1, vy1] = map([0, -BED_HEIGHT/2]);
       let [vx2, vy2] = map([0,  BED_HEIGHT/2]);
       ctx.beginPath();
       ctx.moveTo(vx1, vy1);
       ctx.lineTo(vx2, vy2);
       ctx.stroke();
-      // Horizontal line (y=0, from x=-1m to x=+1m)
       let [hx1, hy1] = map([-BED_WIDTH/2, 0]);
       let [hx2, hy2] = map([ BED_WIDTH/2, 0]);
       ctx.beginPath();
@@ -314,8 +301,6 @@
       ctx.lineTo(hx2, hy2);
       ctx.stroke();
       ctx.restore();
-
-      // 3. Draw inner rectangles (zones)
       function drawZoneRect(width, height) {
         ctx.save();
         ctx.strokeStyle = 'red';
@@ -335,10 +320,35 @@
         ctx.stroke();
         ctx.restore();
       }
-      // Middle rectangle (2.0m x 1.0m, centered)
       drawZoneRect(2.0, 1.0);
-      // Center rectangle (0.5m x 0.5m, centered)
       drawZoneRect(0.5, 0.5);
+    }
+
+    // --- 3D Trampoline Plane Geometry ---
+    const TRAMPOLINE_BED_WIDTH = 2.0;
+    const TRAMPOLINE_BED_HEIGHT = 4.0;
+    function getTrampoline3DWorldCorners() {
+      return [
+        [-TRAMPOLINE_BED_WIDTH/2, -TRAMPOLINE_BED_HEIGHT/2, 0],
+        [ TRAMPOLINE_BED_WIDTH/2, -TRAMPOLINE_BED_HEIGHT/2, 0],
+        [ TRAMPOLINE_BED_WIDTH/2,  TRAMPOLINE_BED_HEIGHT/2, 0],
+        [-TRAMPOLINE_BED_WIDTH/2,  TRAMPOLINE_BED_HEIGHT/2, 0]
+      ];
+    }
+    function imageToTrampoline3D(x, y, trampolinePolygon) {
+      if (!trampolinePolygon || trampolinePolygon.length !== 4) return [0,0,0];
+      const world2D = getTrampoline3DWorldCorners().map(([X, Y]) => [X, Y]);
+      const image2D = trampolinePolygon;
+      const worldToImage = getPerspectiveTransform(world2D, image2D);
+      let best = {X:0, Y:0, d:1e9};
+      for (let X = -TRAMPOLINE_BED_WIDTH/2; X <= TRAMPOLINE_BED_WIDTH/2; X += 0.025) {
+        for (let Y = -TRAMPOLINE_BED_HEIGHT/2; Y <= TRAMPOLINE_BED_HEIGHT/2; Y += 0.025) {
+          const [ix, iy] = worldToImage([X, Y]);
+          const d = Math.abs(ix - x) + Math.abs(iy - y);
+          if (d < best.d) best = {X, Y, d};
+        }
+      }
+      return [best.X, best.Y, 0];
     }
 
     // --------- SETTINGS POPOVER LOGIC ---------
@@ -376,7 +386,6 @@
       if (d !== null) cameraDistanceInput.value = d;
       if (h !== null) cameraHeightInput.value = h;
       if (t !== null) trampolineHeightInput.value = t;
-      // Update JS variables:
       cameraDistanceInput.dispatchEvent(new Event('input'));
       cameraHeightInput.dispatchEvent(new Event('input'));
       trampolineHeightInput.dispatchEvent(new Event('input'));
@@ -554,12 +563,9 @@
       ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
-
-      // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
       if (trampolinePolygon && trampolinePolygon.length === 4) {
         drawTrampolineZones(ctx, trampolinePolygon);
       }
-
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
@@ -572,25 +578,23 @@
         if (pointInPolygon(left, trampolinePolygon) && pointInPolygon(right, trampolinePolygon)) {
           let currentAnkleY = (left[1] + right[1]) / 2;
           let currentAnkleX = (left[0] + right[0]) / 2;
+          const currentXYZ = imageToTrampoline3D(currentAnkleX, currentAnkleY, trampolinePolygon);
           let jumpHeightPixels = baselineAnkleHeight !== null ? baselineAnkleHeight - currentAnkleY : 0;
           let minCornerY = Math.min(...trampolinePolygon.map(([_, y]) => y));
           let maxCornerY = Math.max(...trampolinePolygon.map(([_, y]) => y));
           let trampolinePixelHeight = maxCornerY - minCornerY;
-          let correction = 1 / computeCameraAngleCorrection();
           let jumpHeightMeters =
             trampolinePixelHeight > 0
-              ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction)
+              ? Math.max(0, jumpHeightPixels / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS)
               : 0;
           jumpHeightHistory.push(jumpHeightMeters);
           if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
           let smoothedJumpHeight = jumpHeightHistory.reduce((a, b) => a + b, 0) / jumpHeightHistory.length;
-          const [ankleU, ankleV] = getUVFromPoint(currentAnkleX, currentAnkleY, trampolinePolygon);
-          const absX = Math.abs((ankleU - 0.5));
-          const absY = Math.abs((ankleV - 0.5));
-          let hdDeduction = 0.3;
-          if (absX <= 0.05 && absY <= 0.025) hdDeduction = 0.0;
-          else if (absX <= 0.10 && absY <= 0.05) hdDeduction = 0.1;
-          else if (absX <= 0.15 && absY <= 0.075) hdDeduction = 0.2;
+          const lateralR = Math.sqrt(currentXYZ[0]*currentXYZ[0] + currentXYZ[1]*currentXYZ[1]);
+          const maxLateral = Math.min(TRAMPOLINE_BED_WIDTH/2, TRAMPOLINE_BED_HEIGHT/2) * 0.98;
+          if (lateralR > maxLateral) return;
+          const jumpThreshold = 0.04;
+          const isJump = smoothedJumpHeight > jumpThreshold;
           if (
             typeof onResults.lastSent === "undefined" ||
             Math.abs(smoothedJumpHeight - onResults.lastSent) > MIN_DELTA_METERS
@@ -601,7 +605,7 @@
                 type: 'jump_height',
                 height: smoothedJumpHeight,
                 calibrated: calibrationReady,
-                hd_deduction: hdDeduction
+                hd_deduction: 0
               },
               parentOrigin
             );
@@ -614,7 +618,6 @@
             trampolineNotice.textContent = `Calibration set! Jump height is accurate.`;
           }
         }
-        // --- Measuring line ---
         if (trampolineCenter) {
           const ankleMid = [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2];
           ctx.save();
@@ -624,56 +627,10 @@
           ctx.moveTo(trampolineCenter[0], trampolineCenter[1]);
           ctx.lineTo(ankleMid[0], ankleMid[1]);
           ctx.stroke();
-          const dx = ankleMid[0] - trampolineCenter[0];
-          const dy = ankleMid[1] - trampolineCenter[1];
-          const pixelDist = Math.sqrt(dx*dx + dy*dy);
-          let metersDist = null;
-          if (trampolinePolygon && trampolinePolygon.length === 4) {
-            let minY = Math.min(...trampolinePolygon.map(([_, y]) => y));
-            let maxY = Math.max(...trampolinePolygon.map(([_, y]) => y));
-            let trampolinePixelHeight = maxY - minY;
-            let correction = 1 / computeCameraAngleCorrection();
-            metersDist = trampolinePixelHeight > 0
-              ? pixelDist / trampolinePixelHeight * REAL_TRAMPOLINE_HEIGHT_METERS * correction
-              : null;
-          }
-          const bubbleX = (trampolineCenter[0] + ankleMid[0]) / 2;
-          const bubbleY = (trampolineCenter[1] + ankleMid[1]) / 2;
-          ctx.beginPath();
-          ctx.arc(bubbleX, bubbleY, 32, 0, 2 * Math.PI);
-          ctx.fillStyle = '#fff';
-          ctx.globalAlpha = 0.85;
-          ctx.fill();
-          ctx.globalAlpha = 1.0;
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = '#3cf';
-          ctx.stroke();
-          ctx.fillStyle = '#222';
-          ctx.font = 'bold 1.25rem Arial';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          let label = metersDist !== null ? metersDist.toFixed(2) + ' m' : pixelDist.toFixed(0) + ' px';
-          ctx.fillText(label, bubbleX, bubbleY);
           ctx.restore();
         }
       }
     }
-    // --------- UV MAPPING FOR MEASUREMENTS ---------
-    function getUVFromPoint(x, y, poly) {
-      let best = {u:0, v:0, d:1e9};
-      for (let u = 0; u <= 1; u += 0.02) {
-        for (let v = 0; v <= 1; v += 0.02) {
-          const [px, py] = [
-            poly[0][0]*(1-u)*(1-v) + poly[1][0]*u*(1-v) + poly[2][0]*u*v + poly[3][0]*(1-u)*v,
-            poly[0][1]*(1-u)*(1-v) + poly[1][1]*u*(1-v) + poly[2][1]*u*v + poly[3][1]*(1-u)*v
-          ];
-          const d = Math.abs(px - x) + Math.abs(py - y);
-          if (d < best.d) best = {u, v, d};
-        }
-      }
-      return [best.u, best.v];
-    }
-    // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function (e) {
       if (trampolinePolygon) return;
       const rect = canvas.getBoundingClientRect();
@@ -718,7 +675,6 @@
       trampolineNotice.textContent = "Calibration set! Jump height will now be accurate.";
       calibrateBtn.style.display = "none";
     });
-    // --------- CAMERA SWITCH & EVENTS ---------
     async function handleSwitchCamera() {
       useFrontCamera = !useFrontCamera;
       await startCamera();
