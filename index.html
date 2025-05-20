@@ -430,19 +430,48 @@
       if (trampolineCorners.length > 0) drawTrampolineArea(ctx, trampolineCorners);
       if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
       // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
-      if (trampolinePolygon && trampolinePolygon.length === 4) {
-        // Each insetFrac is an even step inwards - tweak for more/fewer zones.
-        const insets = [
-          { inset: 0.00, color: "#fff",  alpha: 0.10, dash: [] },        // Outermost (trampoline bed)
-          { inset: 0.08, color: "#3498db", alpha: 0.65, dash: [2,12] },  // Next (blue)
-          { inset: 0.16, color: "orange", alpha: 0.75, dash: [7,7] },    // Next (orange)
-          { inset: 0.24, color: "red",    alpha: 0.95, dash: [] },       // Center (red)
-        ];
-        for (const zone of insets) {
-          drawInsetZone(ctx, trampolinePolygon, zone.inset, zone.color, zone.alpha, zone.dash);
-        }
-        drawCenterPlus(ctx, trampolinePolygon);
-      }
+      // --------- DRAW ZONE DIAGRAM & CENTER PLUS (IN PERSPECTIVE) ---------
+if (trampolinePolygon && trampolinePolygon.length === 4) {
+  // Draw main trampoline outline (yellow, as before)
+  drawTrampolineArea(ctx, trampolinePolygon);
+
+  // Draw central vertical and horizontal red lines (the "plus")
+  drawCenterPlus(ctx, trampolinePolygon);
+
+  // Draw zone rectangles (red lines), matching the reference image:
+  // 1. Central rectangle (smallest)
+  // 2. Middle rectangle (around the central one)
+  // 3. Main trampoline outline (already drawn)
+
+  ctx.save();
+  ctx.strokeStyle = "red";
+  ctx.lineWidth = 4;
+
+  // Central (small) rectangle: ~1/4th inset
+  drawZoneRectangle(ctx, trampolinePolygon, 0.25);
+
+  // Middle rectangle: ~1/8th inset
+  drawZoneRectangle(ctx, trampolinePolygon, 0.125);
+
+  ctx.restore();
+}
+
+// Helper function to draw a rectangle inset by a fraction from each edge
+function drawZoneRectangle(ctx, poly, frac) {
+  // frac: 0 = edge, 0.5 = center point
+  const u0 = frac, v0 = frac, u1 = 1 - frac, v1 = 1 - frac;
+  const pts = [
+    mapBedToPoly(u0, v0, poly), // top-left
+    mapBedToPoly(u1, v0, poly), // top-right
+    mapBedToPoly(u1, v1, poly), // bottom-right
+    mapBedToPoly(u0, v1, poly)  // bottom-left
+  ];
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; ++i) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.stroke();
+}
       if (results.poseLandmarks) {
         drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#0FF', lineWidth: 3 });
         drawLandmarks(ctx, results.poseLandmarks, { color: '#FF0', radius: 4 });
