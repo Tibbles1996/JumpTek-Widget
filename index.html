@@ -202,63 +202,37 @@
     const ctx = canvas.getContext('2d');
     const calibrateBtn = document.getElementById('calibrateBtn');
 
-    // --------- FALLBACK: Draw video to canvas if Pose fails ---------
+    // --------- STATE ---------
     let poseLoaded = false;
-    let fallbackDrawInterval = null;
-
-    function drawVideoFallback() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (video.readyState === 4) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      }
-    }
-    function startFallbackDraw() {
-      if (!fallbackDrawInterval) fallbackDrawInterval = setInterval(drawVideoFallback, 33);
-    }
-    function stopFallbackDraw() {
-      if (fallbackDrawInterval) {
-        clearInterval(fallbackDrawInterval);
-        fallbackDrawInterval = null;
-      }
-    }
-
-    // --------- CAMERA & POSE SETUP ---------
     let currentStream = null;
     let useFrontCamera = false;
-    let animationFrameId = null;
     let trampolineCorners = [];
     let trampolinePolygon = null;
     let trampolineCenter = null;
     let baselineAnkleHeight = null;
     let calibrationReady = false;
     let jumpHeightHistory = [];
-    let poseLandmarksReady = false;
+    let lastPoseResults = null;
+    let animationFrameId = null;
 
+    // --------- CAMERA SETUP ---------
     async function startCamera() {
       loadingIndicator.style.display = 'block';
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      stopFallbackDraw();
-
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
             facingMode: useFrontCamera ? 'user' : 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            width: { ideal: 640 },
+            height: { ideal: 480 }
           }
         });
         currentStream = stream;
         video.srcObject = stream;
         await video.play();
-        resizeCanvasToVideo();
-
         loadingIndicator.style.display = 'none';
-
-        // Only start fallback draw if pose not loaded
-        if (!poseLoaded) startFallbackDraw();
-        animationFrameId = requestAnimationFrame(processVideoFrame);
+        resizeCanvasToVideo();
       } catch (err) {
         loadingIndicator.style.display = 'none';
         trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
@@ -273,15 +247,9 @@
       canvas.style.width = "100vw";
       canvas.style.height = "100vh";
     }
+    window.addEventListener('resize', resizeCanvasToVideo);
 
-    async function processVideoFrame(now) {
-      if (poseLoaded && !video.paused && !video.ended && video.readyState === 4) {
-        await pose.send({ image: video });
-      }
-      animationFrameId = requestAnimationFrame(processVideoFrame);
-    }
-
-    // --------- POSE SETUP (ENSURE POSE IS INITIALIZED) ---------
+    // --------- POSE SETUP ---------
     let pose = null;
     window.addEventListener('DOMContentLoaded', () => {
       try {
@@ -299,40 +267,36 @@
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5
         });
-        pose.onResults(onResults);
-
+        pose.onResults(results => {
+          lastPoseResults = results;
+        });
         poseLoaded = true;
-        stopFallbackDraw();
-        startCamera();
+        startCamera().then(() => {
+          drawLoop();
+          poseLoop();
+        });
       } catch (e) {
         poseLoaded = false;
-        startFallbackDraw();
         trampolineNotice.textContent = "Failed to initialize pose detection.";
         trampolineNotice.style.color = "#f00";
         console.error("Pose initialization error:", e);
       }
     });
 
-    // --------- MAIN RENDER ---------
-    function onResults(results) {
-      pose.lastResults = results;
-      poseLoaded = true;
-      stopFallbackDraw();
-
-      resizeCanvasToVideo();
+    // --------- DRAW LOOP: Runs at display frame rate ---------
+    function drawLoop() {
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      if (results.image) {
-        ctx.drawImage(results.image,0,0,canvas.width,canvas.height);
-      } else {
-        drawVideoFallback();
-      }
+      // Draw video feed
+      if (video.readyState === 4)
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
       // Draw pose skeleton overlay
-      if (results.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
-        drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 5});
-        drawLandmarks(ctx, results.poseLandmarks, {color: '#ff0', lineWidth: 2});
+      if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
+        drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 5});
+        drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 2});
       }
 
+      // Draw trampoline corners/area
       if (trampolineCorners.length > 0 && !trampolinePolygon) {
         drawTrampolineArea(ctx, trampolineCorners);
       }
@@ -341,18 +305,25 @@
       }
 
       // Enable calibrate button once corners set and pose arrives
-      if (results.poseLandmarks && trampolinePolygon && !calibrationReady) {
+      if (lastPoseResults && lastPoseResults.poseLandmarks && trampolinePolygon && !calibrationReady) {
         calibrateBtn.style.display = 'block';
         calibrateBtn.disabled = false;
         trampolineNotice.textContent = "Stand in center and press Calibrate";
-      } else if (!results.poseLandmarks && trampolinePolygon && !calibrationReady) {
+      } else if ((!lastPoseResults || !lastPoseResults.poseLandmarks) && trampolinePolygon && !calibrationReady) {
         calibrateBtn.disabled = true;
         trampolineNotice.textContent = "Waiting for pose detection... Make sure you're visible.";
       }
 
-      // Once calibrated, compute jump (zone overlays removed)
-      if (calibrationReady) {
-        computeAndSendJump(results.poseLandmarks);
+      animationFrameId = requestAnimationFrame(drawLoop);
+    }
+
+    // --------- POSE LOOP: Runs as fast as pose can process ---------
+    async function poseLoop() {
+      while (poseLoaded) {
+        if (video.readyState === 4) {
+          await pose.send({ image: video });
+        }
+        // No need to throttle, pose.send is blocking per frame
       }
     }
 
@@ -440,13 +411,13 @@
     });
 
     calibrateBtn.addEventListener('click', function() {
-      if (!pose.lastResults || !pose.lastResults.poseLandmarks) {
+      if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
         trampolineNotice.style.color = '#f00';
         trampolineNotice.textContent = "Pose data not ready. Wait until you are visible and try again.";
         return;
       }
-      const left = pose.lastResults.poseLandmarks[27];
-      const right = pose.lastResults.poseLandmarks[28];
+      const left = lastPoseResults.poseLandmarks[27];
+      const right = lastPoseResults.poseLandmarks[28];
       if (!left || !right) {
         trampolineNotice.style.color = '#f00';
         trampolineNotice.textContent = "Ankles not detected. Make sure your feet are visible to the camera.";
@@ -553,7 +524,6 @@
       useFrontCamera = !useFrontCamera;
       await startCamera();
     });
-    window.addEventListener('resize', resizeCanvasToVideo);
     window.addEventListener('beforeunload', () => {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     });
@@ -574,9 +544,9 @@
       if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
       const avgHeight = jumpHeightHistory.reduce((a,b) => a + b, 0) / jumpHeightHistory.length;
 
-      if (typeof onResults.lastSent === "undefined" ||
-          Math.abs(avgHeight - onResults.lastSent) > MIN_DELTA_METERS) {
-        onResults.lastSent = avgHeight;
+      if (typeof computeAndSendJump.lastSent === "undefined" ||
+          Math.abs(avgHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
+        computeAndSendJump.lastSent = avgHeight;
         window.parent.postMessage({
           type: 'jump_height',
           height: avgHeight,
@@ -585,6 +555,13 @@
         }, '*');
       }
     }
+
+    // --------- CONTINUOUS JUMP HEIGHT SENDING ---------
+    setInterval(() => {
+      if (calibrationReady && lastPoseResults && lastPoseResults.poseLandmarks) {
+        computeAndSendJump(lastPoseResults.poseLandmarks);
+      }
+    }, 33); // ~30Hz
 
     // --------- CONSTANTS ---------
     const TRAMPOLINE_BED_WIDTH  = 2.0;
