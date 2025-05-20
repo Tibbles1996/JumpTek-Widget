@@ -187,6 +187,15 @@
   <video id="video" autoplay playsinline></video>
 
   <script>
+    // --------- ELEMENTS & STATE (FIXED) ---------
+    const switchCameraBtn  = document.getElementById('switchCameraBtn');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+    const trampolineNotice = document.getElementById('trampolineNotice');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const calibrateBtn = document.getElementById('calibrateBtn');
+
     // --------- PERSPECTIVE MAPPING HELPERS ---------
     function mapBedToPoly(u, v, poly) {
       const [P0, P1, P2, P3] = poly;
@@ -248,7 +257,6 @@
     }
 
     // --------- ROUTE ONE: 3D PLANE BACK‑PROJECTION ---------
-    // Precomputed at calibration:
     window._JT_intrinsics = null;
     window._JT_extrinsics = null;
     window._JT_plane      = null;
@@ -267,12 +275,9 @@
       const {fx, fy, cx, cy} = window._JT_intrinsics;
       const {C} = window._JT_extrinsics;
       const N = window._JT_plane.normal, P0 = window._JT_plane.point;
-      // 1) Ray in camera space
       const xCam = (u - cx) / fx, yCam = (v - cy) / fy, zCam = 1;
       const rayCam = normalize([xCam, yCam, zCam]);
-      // 2) R = I, so ray = rayCam
       const ray = rayCam;
-      // 3) t = -N·(C-P0) / N·ray
       const t = -dot(N, subtract(C, P0)) / dot(N, ray);
       return add(C, scale(ray, t));
     }
@@ -353,10 +358,7 @@
       REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
     });
 
-    // --------- ELEMENTS & STATE ---------
-    const switchCameraBtn  = document.getElementById('switchCameraBtn');
-    const loadingIndicator = document.getElementById('loadingIndicator');
-    const trampolineNotice = document.getElementById('trampolineNotice');
+    // --------- MORE ELEMENTS & STATE ---------
     let currentStream = null;
     let useFrontCamera = false;
     let animationFrameId = null;
@@ -484,6 +486,26 @@
       }
     }
 
+    // --------- POSE SETUP (ENSURE POSE IS INITIALIZED) ---------
+    let pose = null;
+    window.addEventListener('DOMContentLoaded', () => {
+      // Setup pose object
+      pose = new Pose.Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+      });
+      pose.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      pose.onResults(onResults);
+
+      startCamera();
+    });
+
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function(e) {
       if (trampolinePolygon) return;
@@ -528,7 +550,6 @@
       trampolineNotice.textContent = "Calibrated! Zones mapped and 3D simulation ready.";
       calibrateBtn.style.display = "none";
 
-      // ** Build intrinsics / extrinsics / plane once **
       window._JT_intrinsics = {
         fx: Math.min(canvas.width, canvas.height) * 0.8,
         fy: Math.min(canvas.width, canvas.height) * 0.8,
@@ -544,7 +565,6 @@
         point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
       };
 
-      // ** Prebuild Path2D for each zone **
       window._JT_zonePaths = {
         full:  buildZonePath(trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT),
         zone1: buildZonePath(trampolinePolygon, 0.8, 0.4),
@@ -559,7 +579,6 @@
       await startCamera();
     });
     window.addEventListener('resize', resizeCanvasToVideo);
-    window.addEventListener('DOMContentLoaded', startCamera);
     window.addEventListener('beforeunload', () => {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     });
