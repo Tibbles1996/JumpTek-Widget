@@ -189,7 +189,7 @@
   <video id="video" autoplay playsinline></video>
 
   <script>
-    // --- ADD: drawing utils for pose skeleton ---
+    // --- Pose drawing utils ---
     const { drawConnectors, drawLandmarks } = window;
     const POSE_CONNECTIONS = window.POSE_CONNECTIONS || (window.Pose && window.Pose.POSE_CONNECTIONS);
 
@@ -285,7 +285,6 @@
     let pose = null;
     window.addEventListener('DOMContentLoaded', () => {
       try {
-        // FIX: MediaPipe Pose is a class on window.Pose, not window.Pose.Pose
         if (typeof window.Pose !== "function") {
           throw new Error("MediaPipe Pose not loaded. Check your internet connection or the CDN.");
         }
@@ -316,7 +315,7 @@
 
     // --------- MAIN RENDER ---------
     function onResults(results) {
-      pose.lastResults = results; // <-- This line is essential for calibration!
+      pose.lastResults = results;
       poseLoaded = true;
       stopFallbackDraw();
 
@@ -351,13 +350,8 @@
         trampolineNotice.textContent = "Waiting for pose detection... Make sure you're visible.";
       }
 
-      // Once calibrated, draw zones & compute jump
-      if (calibrationReady && window._JT_zonePaths) {
-        drawZone(ctx, trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#fff", 0.14);
-        drawZone(ctx, trampolinePolygon, 0.8, 0.4, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "red", 0.95);
-        drawZone(ctx, trampolinePolygon, 1.2, 0.6, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "orange", 0.75, [7,7]);
-        drawZone(ctx, trampolinePolygon, 1.6, 0.8, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT, "#3498db", 0.65, [2,12]);
-
+      // Once calibrated, compute jump (zone overlays removed)
+      if (calibrationReady) {
         computeAndSendJump(results.poseLandmarks);
       }
     }
@@ -403,70 +397,10 @@
       return inside;
     }
 
-    // --------- PERSPECTIVE MAPPING HELPERS ---------
-    function mapBedToPoly(u, v, poly) {
-      const [P0, P1, P2, P3] = poly;
-      const x = (1-u)*(1-v)*P0[0] + u*(1-v)*P1[0] + u*v*P2[0] + (1-u)*v*P3[0];
-      const y = (1-u)*(1-v)*P0[1] + u*(1-v)*P1[1] + u*v*P2[1] + (1-u)*v*P3[1];
-      return [x, y];
-    }
-    function getZoneUVs(zoneW, zoneH, bedW, bedH) {
-      const u0 = 0.5 - zoneW/2/bedW, u1 = 0.5 + zoneW/2/bedW;
-      const v0 = 0.5 - zoneH/2/bedH, v1 = 0.5 + zoneH/2/bedH;
-      return [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-    }
-    function drawZone(ctx, poly, zoneW, zoneH, bedW, bedH, color, alpha=1, dash=[]) {
-      const pts = getZoneUVs(zoneW, zoneH, bedW, bedH).map(([u,v]) => mapBedToPoly(u, v, poly));
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.3;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-    function drawFullZone(ctx, poly, bedW, bedH, color, alpha=1, dash=[]) {
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.2;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(poly[0][0], poly[0][1]);
-      poly.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.setLineDash(dash);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(poly[0][0], poly[0][1]);
-      poly.slice(1).forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.closePath();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-
+    // --------- SIMPLE CAMERA CALIBRATION MATH ---------
     window._JT_intrinsics = null;
     window._JT_extrinsics = null;
     window._JT_plane      = null;
-    window._JT_zonePaths  = null;
 
     function normalize(v) {
       const m = Math.hypot(v[0], v[1], v[2]);
@@ -486,16 +420,6 @@
       const ray = rayCam;
       const t = -dot(N, subtract(C, P0)) / dot(N, ray);
       return add(C, scale(ray, t));
-    }
-
-    function buildZonePath(poly, w, h) {
-      const p = new Path2D();
-      const pts = getZoneUVs(w, h, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT)
-        .map(([u,v]) => mapBedToPoly(u, v, poly));
-      p.moveTo(pts[0][0], pts[0][1]);
-      pts.slice(1).forEach(pt => p.lineTo(pt[0], pt[1]));
-      p.closePath();
-      return p;
     }
 
     // --------- CALIBRATION FLOW ---------
@@ -539,7 +463,7 @@
       baselineAnkleHeight = (L[1] + R[1]) / 2;
       calibrationReady = true;
       trampolineNotice.style.color = '#0f0';
-      trampolineNotice.textContent = "Calibrated! Zones mapped and 3D simulation ready.";
+      trampolineNotice.textContent = "Calibrated! 3D simulation ready.";
       calibrateBtn.style.display = "none";
 
       window._JT_intrinsics = {
@@ -555,13 +479,6 @@
       window._JT_plane = {
         normal: [0,0,1],
         point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
-      };
-
-      window._JT_zonePaths = {
-        full:  buildZonePath(trampolinePolygon, TRAMPOLINE_BED_WIDTH, TRAMPOLINE_BED_HEIGHT),
-        zone1: buildZonePath(trampolinePolygon, 0.8, 0.4),
-        zone2: buildZonePath(trampolinePolygon, 1.2, 0.6),
-        zone3: buildZonePath(trampolinePolygon, 1.6, 0.8)
       };
     });
 
