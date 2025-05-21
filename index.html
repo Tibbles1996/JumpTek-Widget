@@ -667,32 +667,27 @@
       debugValuesDisplay.innerHTML += `RHip: ${rightHip ? `(${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, ${getVal(rightHip, 'z')}) sc:${getVal(rightHip, 'score')}` : 'N/A'}<br><br>`;
 
 
-      // Logic to find the lowest landmark, checking for score > 0.5
-      if (leftAnkle && leftAnkle.score > 0.5 && rightAnkle && rightAnkle.score > 0.5) {
-          lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
-          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
-      } else if (leftAnkle && leftAnkle.score > 0.5) {
+      // Logic to find the lowest landmark - **REMOVED SCORE CHECK FOR DEBUGGING**
+      if (leftAnkle) { // Only check if landmark exists
           lowestLandmark = leftAnkle;
-          debugValuesDisplay.innerHTML += `Selected: LAnkle Only<br>`;
-      } else if (rightAnkle && rightAnkle.score > 0.5) {
+          debugValuesDisplay.innerHTML += `Selected: LAnkle (Forced for debug)<br>`;
+      } else if (rightAnkle) { // Only check if landmark exists
           lowestLandmark = rightAnkle;
-          debugValuesDisplay.innerHTML += `Selected: RAnkle Only<br>`;
-      } else if (leftHip && leftHip.score > 0.5 && rightHip && rightHip.score > 0.5) {
-          lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
-          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (Ankles low/missing)<br>`;
-      } else if (leftHip && leftHip.score > 0.5) {
+          debugValuesDisplay.innerHTML += `Selected: RAnkle (Forced for debug)<br>`;
+      } else if (leftHip) { // Only check if landmark exists
           lowestLandmark = leftHip;
-          debugValuesDisplay.innerHTML += `Selected: LHip Only (Ankles low/missing)<br>`;
-      } else if (rightHip && rightHip.score > 0.5) {
+          debugValuesDisplay.innerHTML += `Selected: LHip (Forced for debug)<br>`;
+      } else if (rightHip) { // Only check if landmark exists
           lowestLandmark = rightHip;
-          debugValuesDisplay.innerHTML += `Selected: RHip Only (Ankles low/missing)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: RHip (Forced for debug)<br>`;
       }
+
 
       if (!lowestLandmark) {
           widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)';
           rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
           rawHeightDebugDisplay.classList.remove('positive');
-          debugValuesDisplay.innerHTML += 'No suitable low landmark found.'; // More specific message
+          debugValuesDisplay.innerHTML += 'No suitable low landmark found (even with forced selection).'; // More specific message
           return;
       }
 
