@@ -462,7 +462,7 @@
 
       let t;
       if (Math.abs(denominator) < 1e-8) {
-          t = 0; // Avoid division by zero, set t to 0
+          t = 0;
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`;
           debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
       } else {
@@ -635,6 +635,11 @@
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     });
 
+    // Helper to safely get value or 'N/A'
+    function getVal(landmark, prop) {
+        return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(2) : 'N/A';
+    }
+
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
       // Clear debug display each frame
@@ -655,13 +660,14 @@
 
       let lowestLandmark = null;
 
-      // Debugging landmark scores and availability
-      debugValuesDisplay.innerHTML += `LAnkle: ${leftAnkle ? `(${leftAnkle.x.toFixed(2)}, ${leftAnkle.y.toFixed(2)}, ${leftAnkle.z.toFixed(2)}) sc:${leftAnkle.score.toFixed(2)}` : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `RAnkle: ${rightAnkle ? `(${rightAnkle.x.toFixed(2)}, ${rightAnkle.y.toFixed(2)}, ${rightAnkle.z.toFixed(2)}) sc:${rightAnkle.score.toFixed(2)}` : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `LHip: ${leftHip ? `(${leftHip.x.toFixed(2)}, ${leftHip.y.toFixed(2)}, ${leftHip.z.toFixed(2)}) sc:${leftHip.score.toFixed(2)}` : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `RHip: ${rightHip ? `(${rightHip.x.toFixed(2)}, ${rightHip.y.toFixed(2)}, ${rightHip.z.toFixed(2)}) sc:${rightHip.score.toFixed(2)}` : 'N/A'}<br><br>`;
+      // Debugging landmark scores and availability - NOW SAFER WITH getVal()
+      debugValuesDisplay.innerHTML += `LAnkle: ${leftAnkle ? `(${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, ${getVal(leftAnkle, 'z')}) sc:${getVal(leftAnkle, 'score')}` : 'N/A'}<br>`;
+      debugValuesDisplay.innerHTML += `RAnkle: ${rightAnkle ? `(${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, ${getVal(rightAnkle, 'z')}) sc:${getVal(rightAnkle, 'score')}` : 'N/A'}<br>`;
+      debugValuesDisplay.innerHTML += `LHip: ${leftHip ? `(${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, ${getVal(leftHip, 'z')}) sc:${getVal(leftHip, 'score')}` : 'N/A'}<br>`;
+      debugValuesDisplay.innerHTML += `RHip: ${rightHip ? `(${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, ${getVal(rightHip, 'z')}) sc:${getVal(rightHip, 'score')}` : 'N/A'}<br><br>`;
 
 
+      // Logic to find the lowest landmark, checking for score > 0.5
       if (leftAnkle && leftAnkle.score > 0.5 && rightAnkle && rightAnkle.score > 0.5) {
           lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
           debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
