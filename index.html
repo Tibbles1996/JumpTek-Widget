@@ -235,7 +235,8 @@
     <div id="loadingIndicator">Loading...</div>
     <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
     <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div>
-    <div id="debugValuesDisplay"></div> </div>
+    <div id="debugValuesDisplay"></div>
+  </div>
   <video id="video" autoplay playsinline></video>
 
   <script>
@@ -253,7 +254,7 @@
     const calibrateBtn = document.getElementById('calibrateBtn');
     const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
     const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
-    const debugValuesDisplay = document.getElementById('debugValuesDisplay'); // Get the new debugging display
+    const debugValuesDisplay = document.getElementById('debugValuesDisplay');
 
     // --------- STATE ---------
     let poseLoaded = false;
@@ -347,6 +348,7 @@
       if (video.readyState === 4)
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
+      // This part draws the landmarks based on lastPoseResults directly
       if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
         drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
         drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
@@ -444,7 +446,6 @@
     function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
     function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 
-    // MODIFIED: pixelToWorld to output debug info
     function pixelToWorld(u, v) {
       const {fx, fy, cx, cy} = window._JT_intrinsics;
       const {C} = window._JT_extrinsics;
@@ -456,31 +457,32 @@
       const rayCam = normalize([xCam, yCam, zCam]);
       const ray = rayCam;
 
-      // Calculate t (distance along the ray)
       const numerator = -dot(N, subtract(C, P0));
       const denominator = dot(N, ray);
 
       let t;
-      if (Math.abs(denominator) < 1e-8) { // Check for near-zero denominator to avoid division by zero
-          t = 0; // Or a very large number, but 0 is safer for debugging if the plane is parallel to ray
-          debugValuesDisplay.innerHTML = `denom: ${denominator.toFixed(3)} (near zero)<br>t: N/A (parallel)`;
+      if (Math.abs(denominator) < 1e-8) {
+          t = 0; // Avoid division by zero, set t to 0
+          debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`;
+          debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
       } else {
           t = numerator / denominator;
-          debugValuesDisplay.innerHTML = `num: ${numerator.toFixed(3)}<br>denom: ${denominator.toFixed(3)}<br>t: ${t.toFixed(3)}`;
+          debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
+          debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
+          debugValuesDisplay.innerHTML += `<br>t: ${t.toFixed(3)}`;
       }
       
       const worldPt = add(C, scale(ray, t));
-      debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},${C[2].toFixed(2)}]` +
-                                     `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},${ray[2].toFixed(2)}]` +
-                                     `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`; // Highlight Z
-
+      debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},<span style="color:cyan;">${C[2].toFixed(2)}</span>]` +
+                                     `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},<span style="color:cyan;">${ray[2].toFixed(2)}</span>]` +
+                                     `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
       return worldPt;
     }
 
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function(e) {
-      if (trampolinePolygon) return; // If polygon is already set, ignore clicks
-      if (calibrationReady) return; // If already calibrated, ignore clicks
+      if (trampolinePolygon) return;
+      if (calibrationReady) return;
 
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -489,10 +491,10 @@
       if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
-        trampolineCorners = []; // Clear for next time if reset
+        trampolineCorners = [];
         trampolineNotice.textContent = "Trampoline area set! Adjust camera settings if needed, then press Calibrate.";
         calibrateBtn.style.display = "block";
-        calibrateBtn.disabled = true; // Disabled until pose is detected
+        calibrateBtn.disabled = true;
       }
     });
 
@@ -520,7 +522,7 @@
       if (rightHip && pointInPolygon([rightHip.x * canvas.width, rightHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
 
       if (!anyLandmarkInPolygon) {
-          trampolineNotice.style.color = '#ff9900'; // Orange warning
+          trampolineNotice.style.color = '#ff9900';
           trampolineNotice.textContent = "Warning: Main pose landmarks not within marked trampoline area during calibration. Adjust position or mark area again for best accuracy. (Calibration proceeding)";
       }
 
@@ -635,11 +637,14 @@
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
+      // Clear debug display each frame
+      debugValuesDisplay.innerHTML = '';
+
       if (!calibrationReady || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane) {
         widgetJumpHeightDisplay.textContent = 'Jump: N/A (Calibrate)';
         rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
         rawHeightDebugDisplay.classList.remove('positive');
-        debugValuesDisplay.innerHTML = 'Calibration Not Ready'; // Update debug display
+        debugValuesDisplay.innerHTML = 'Calibration Not Ready';
         return;
       }
 
@@ -650,32 +655,45 @@
 
       let lowestLandmark = null;
 
+      // Debugging landmark scores and availability
+      debugValuesDisplay.innerHTML += `LAnkle: ${leftAnkle ? `(${leftAnkle.x.toFixed(2)}, ${leftAnkle.y.toFixed(2)}, ${leftAnkle.z.toFixed(2)}) sc:${leftAnkle.score.toFixed(2)}` : 'N/A'}<br>`;
+      debugValuesDisplay.innerHTML += `RAnkle: ${rightAnkle ? `(${rightAnkle.x.toFixed(2)}, ${rightAnkle.y.toFixed(2)}, ${rightAnkle.z.toFixed(2)}) sc:${rightAnkle.score.toFixed(2)}` : 'N/A'}<br>`;
+      debugValuesDisplay.innerHTML += `LHip: ${leftHip ? `(${leftHip.x.toFixed(2)}, ${leftHip.y.toFixed(2)}, ${leftHip.z.toFixed(2)}) sc:${leftHip.score.toFixed(2)}` : 'N/A'}<br>`;
+      debugValuesDisplay.innerHTML += `RHip: ${rightHip ? `(${rightHip.x.toFixed(2)}, ${rightHip.y.toFixed(2)}, ${rightHip.z.toFixed(2)}) sc:${rightHip.score.toFixed(2)}` : 'N/A'}<br><br>`;
+
+
       if (leftAnkle && leftAnkle.score > 0.5 && rightAnkle && rightAnkle.score > 0.5) {
           lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
+          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
       } else if (leftAnkle && leftAnkle.score > 0.5) {
           lowestLandmark = leftAnkle;
+          debugValuesDisplay.innerHTML += `Selected: LAnkle Only<br>`;
       } else if (rightAnkle && rightAnkle.score > 0.5) {
           lowestLandmark = rightAnkle;
+          debugValuesDisplay.innerHTML += `Selected: RAnkle Only<br>`;
       } else if (leftHip && leftHip.score > 0.5 && rightHip && rightHip.score > 0.5) {
           lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
+          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (Ankles low/missing)<br>`;
       } else if (leftHip && leftHip.score > 0.5) {
           lowestLandmark = leftHip;
+          debugValuesDisplay.innerHTML += `Selected: LHip Only (Ankles low/missing)<br>`;
       } else if (rightHip && rightHip.score > 0.5) {
           lowestLandmark = rightHip;
+          debugValuesDisplay.innerHTML += `Selected: RHip Only (Ankles low/missing)<br>`;
       }
 
       if (!lowestLandmark) {
           widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)';
           rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
           rawHeightDebugDisplay.classList.remove('positive');
-          debugValuesDisplay.innerHTML = 'No Pose Landmark'; // Update debug display
+          debugValuesDisplay.innerHTML += 'No suitable low landmark found.'; // More specific message
           return;
       }
 
       const lx = lowestLandmark.x * canvas.width;
       const ly = lowestLandmark.y * canvas.height;
 
-      // The `pixelToWorld` function will now output its internal debug values to debugValuesDisplay
+      // The `pixelToWorld` function will now append its internal debug values to debugValuesDisplay
       const worldPt = pixelToWorld(lx, ly);
       const rawHeightAboveTrampoline = worldPt[2] - REAL_TRAMPOLINE_HEIGHT_METERS;
 
