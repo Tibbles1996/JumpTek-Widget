@@ -201,7 +201,8 @@
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
-    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div> </div>
+    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
+  </div>
   <video id="video" autoplay playsinline></video>
 
   <script>
@@ -249,6 +250,7 @@
         await video.play();
         loadingIndicator.style.display = 'none';
         resizeCanvasToVideo();
+        console.log("Camera started successfully.");
       } catch (err) {
         loadingIndicator.style.display = 'none';
         trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
@@ -289,6 +291,13 @@
         pose.onResults(results => {
           lastPoseResults = results;
           poseSerial++;
+          // Uncomment below to debug raw pose landmarks if needed
+          // if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+          //     console.log('Pose landmarks detected. Ankles (27, 28):', results.poseLandmarks[27], results.poseLandmarks[28]);
+          //     console.log('Hips (23, 24):', results.poseLandmarks[23], results.poseLandmarks[24]);
+          // } else {
+          //     console.log('No pose landmarks detected.');
+          // }
         });
         poseLoaded = true;
         startCamera().then(() => {
@@ -420,7 +429,9 @@
 
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function(e) {
-      if (trampolinePolygon) return;
+      if (trampolinePolygon) return; // If polygon is already set, ignore clicks
+      if (calibrationReady) return; // If already calibrated, ignore clicks
+
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (canvas.width / rect.width);
       const y = (e.clientY - rect.top) * (canvas.height / rect.height);
@@ -428,10 +439,10 @@
       if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
-        trampolineCorners = [];
+        trampolineCorners = []; // Clear for next time if reset
         trampolineNotice.textContent = "Trampoline area set! Adjust camera settings if needed, then press Calibrate.";
         calibrateBtn.style.display = "block";
-        calibrateBtn.disabled = true;
+        calibrateBtn.disabled = true; // Disabled until pose is detected
       }
     });
 
@@ -439,33 +450,77 @@
       if (!trampolinePolygon) {
           trampolineNotice.style.color = '#f00';
           trampolineNotice.textContent = "Please mark the 4 corners of the trampoline first.";
+          console.error("Calibration failed: Trampoline polygon not set.");
           return;
       }
       if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
           trampolineNotice.style.color = '#f00';
           trampolineNotice.textContent = "Pose data not ready. Make sure you are visible to the camera.";
+          console.error("Calibration failed: No pose detected during calibration.");
           return;
       }
 
+      // Soft check: Warn if user is not somewhat in the marked trampoline area during calibration.
+      // This is not a blocking error, just a guidance.
+      const leftAnkle = lastPoseResults.poseLandmarks[27];
+      const rightAnkle = lastPoseResults.poseLandmarks[28];
+      const leftHip = lastPoseResults.poseLandmarks[23];
+      const rightHip = lastPoseResults.poseLandmarks[24];
+
+      let anyLandmarkInPolygon = false;
+      if (leftAnkle && pointInPolygon([leftAnkle.x * canvas.width, leftAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+      if (rightAnkle && pointInPolygon([rightAnkle.x * canvas.width, rightAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+      if (leftHip && pointInPolygon([leftHip.x * canvas.width, leftHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+      if (rightHip && pointInPolygon([rightHip.x * canvas.width, rightHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+
+      if (!anyLandmarkInPolygon) {
+          trampolineNotice.style.color = '#ff9900'; // Orange warning
+          trampolineNotice.textContent = "Warning: Main pose landmarks not within marked trampoline area during calibration. Adjust position or mark area again for best accuracy. (Calibration proceeding)";
+          console.warn("Calibration: Main pose landmarks not within marked trampoline area. Proceeding anyway.");
+      }
+
+      // --- Calibration logic starts here ---
+      // These intrinsic and extrinsic parameters are simplified.
+      // For highly accurate 3D, a more robust calibration (e.g., using a chessboard pattern)
+      // and camera model would be needed. This approximation works reasonably well
+      // for a fixed camera setup and a flat trampoline surface.
+
+      // Intrinsic parameters (internal camera properties)
+      // fx, fy: focal lengths in pixels. Estimated as a fraction of canvas min dimension.
+      // cx, cy: principal point (center of image)
       window._JT_intrinsics = {
-        fx: Math.min(canvas.width, canvas.height) * 0.8,
-        fy: Math.min(canvas.width, canvas.height) * 0.8,
+        fx: Math.min(canvas.width, canvas.height) * 0.8, // Example approximation
+        fy: Math.min(canvas.width, canvas.height) * 0.8, // Example approximation
         cx: canvas.width / 2,
         cy: canvas.height / 2
       };
+
+      // Extrinsic parameters (camera's position and orientation in world space)
+      // C: Camera position in world coordinates [X, Y, Z]
+      // R: Rotation matrix (simplified to identity for aligned camera, might need adjustment)
       window._JT_extrinsics = {
-        C: [0, -cameraDistanceMeters, cameraHeightMeters],
-        R: [[1,0,0],[0,1,0],[0,0,1]]
+        C: [0, -cameraDistanceMeters, cameraHeightMeters], // X=0, Y=behind trampoline, Z=height
+        R: [[1,0,0],[0,1,0],[0,0,1]] // Identity matrix (no rotation relative to world axes)
       };
+
+      // Trampoline plane definition
+      // Normal: [0,0,1] means the plane is horizontal (parallel to XY plane in world coords)
+      // Point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS] means the plane is at Z=REAL_TRAMPOLINE_HEIGHT_METERS
       window._JT_plane = {
         normal: [0,0,1],
         point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
       };
 
       calibrationReady = true;
-      trampolineNotice.style.color = '#0f0';
-      trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
+      if (trampolineNotice.style.color !== '#ff9900') { // Don't override warning if already set
+        trampolineNotice.style.color = '#0f0';
+        trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
+      }
       calibrateBtn.style.display = "none";
+      console.log("Calibration successful! intrinsics/extrinsics/plane set.");
+      console.log("_JT_intrinsics:", window._JT_intrinsics);
+      console.log("_JT_extrinsics:", window._JT_extrinsics);
+      console.log("_JT_plane:", window._JT_plane);
     });
 
     // --------- SETTINGS POPOVER LOGIC ---------
@@ -506,14 +561,16 @@
           }[k]).value = v;
         }
       });
+      // Trigger input event to update the global variables from loaded values
       ['cameraDistance','cameraHeight','trampolineHeight'].forEach(id =>
         document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
     saveSettingsBtn.addEventListener('click', () => {
       saveSettingsToStorage();
+      // Re-run calibration with new settings if a polygon is already defined
       if (trampolinePolygon) {
-          calibrateBtn.click();
+          calibrateBtn.click(); // This will use the new settings for calibration
       }
       saveSettingsBtn.textContent = 'Saved!';
       setTimeout(() => saveSettingsBtn.textContent = 'Save', 1200);
@@ -548,9 +605,12 @@
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
+      // DEBUG: Log status at the start of the function
+      console.log("computeAndSendJump called. Calibration Ready:", calibrationReady);
+
       if (!calibrationReady || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane) {
-        // console.warn('ComputeJump: Calibration not complete or 3D projection parameters missing.');
-        widgetJumpHeightDisplay.textContent = 'Jump: N/A'; // Update internal display
+        widgetJumpHeightDisplay.textContent = 'Jump: N/A (Calibrate)';
+        console.warn('Jump Height: Not calibrated or missing projection parameters. Returning N/A.');
         return;
       }
 
@@ -561,13 +621,14 @@
 
       let lowestLandmark = null;
 
+      // Prioritize ankles for height, fall back to hips if ankles aren't detected
       if (leftAnkle && rightAnkle) {
           lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
       } else if (leftAnkle) {
           lowestLandmark = leftAnkle;
       } else if (rightAnkle) {
           lowestLandmark = rightAnkle;
-      } else if (leftHip && rightHip) {
+      } else if (leftHip && rightHip) { // Fallback
           lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
       } else if (leftHip) {
           lowestLandmark = leftHip;
@@ -575,35 +636,43 @@
           lowestLandmark = rightHip;
       }
 
+      // DEBUG: Log which landmarks were available
+      // console.log(`Landmarks: LAnkle=${!!leftAnkle}, RAnkle=${!!rightAnkle}, LHip=${!!leftHip}, RHip=${!!rightHip}`);
+      // console.log("Lowest Landmark found:", lowestLandmark ? `(${lowestLandmark.x.toFixed(2)}, ${lowestLandmark.y.toFixed(2)})` : "None");
+
+
       if (!lowestLandmark) {
-          // console.log('ComputeJump: No suitable lower body landmarks detected for height calculation.');
-          widgetJumpHeightDisplay.textContent = 'Jump: N/A'; // Update internal display
+          widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)';
+          console.warn('Jump Height: No suitable lower body landmarks detected. Returning N/A.');
           return;
       }
 
       const lx = lowestLandmark.x * canvas.width;
       const ly = lowestLandmark.y * canvas.height;
 
-      if (!pointInPolygon([lx, ly], trampolinePolygon)) {
-          // console.log('ComputeJump: Lowest detected point is outside trampoline polygon.');
-          widgetJumpHeightDisplay.textContent = 'Jump: N/A'; // Update internal display
-          return;
-      }
+      // *** IMPORTANT: The `pointInPolygon` check for jump height calculation was removed here. ***
+      // This allows the athlete to jump above the trampoline bed without being restricted by the 2D polygon.
 
       const worldPt = pixelToWorld(lx, ly);
+      // worldPt[2] is the Z-coordinate (height) of the lowest landmark in world space.
+      // We subtract REAL_TRAMPOLINE_HEIGHT_METERS to get height *above* the trampoline bed.
       const heightAboveTrampoline = worldPt[2] - REAL_TRAMPOLINE_HEIGHT_METERS;
 
+      // Ensure height is never negative (e.g., if the person is below the mat level)
       const currentHeight = Math.max(0, heightAboveTrampoline);
 
+      // Smoothing: Apply a simple moving average to reduce noise in height readings.
       jumpHeightHistory.push(currentHeight);
       if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
       const avgHeight = jumpHeightHistory.reduce((a,b) => a + b, 0) / jumpHeightHistory.length;
 
+      // Final reported height, always non-negative.
       const reportedHeight = Math.max(0, avgHeight);
 
       // Update the internal display first
       widgetJumpHeightDisplay.textContent = `Jump: ${reportedHeight.toFixed(2)} m`;
 
+      // Only send message if there's a significant change to reduce overhead
       if (typeof computeAndSendJump.lastSent === "undefined" ||
           Math.abs(reportedHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
         computeAndSendJump.lastSent = reportedHeight;
@@ -615,16 +684,29 @@
         }, '*');
         console.log('Sending jump_height:', reportedHeight.toFixed(2), 'm (above trampoline)');
       }
+      // DEBUG: Log the calculated height each time it runs
+      // console.log(`Calculated Height (raw): ${heightAboveTrampoline.toFixed(3)}m, Smoothed: ${reportedHeight.toFixed(3)}m`);
     }
 
     // --------- CONTINUOUS JUMP HEIGHT SENDING ---------
+    // This interval will call computeAndSendJump roughly 30 times per second (1000ms / 33ms).
     setInterval(() => {
+      // Only attempt to compute jump height if calibration is ready and we have pose data
       if (calibrationReady && lastPoseResults && lastPoseResults.poseLandmarks) {
         computeAndSendJump(lastPoseResults.poseLandmarks);
+      } else {
+        // DEBUG: Indicate when it's not trying to calculate jump height
+        // if (!calibrationReady) {
+        //     console.log("Jump Height calculation skipped: Calibration not ready.");
+        // } else if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
+        //     console.log("Jump Height calculation skipped: No pose results available.");
+        // }
       }
     }, 33);
 
     // --------- CONSTANTS (can be removed if unused) ---------
+    // These constants are present in the original code but not used in the provided logic.
+    // Keeping them for completeness if they are part of a larger project.
     const TRAMPOLINE_BED_WIDTH  = 9.5;
     const TRAMPOLINE_BED_LENGTH = 16.5;
     const TRAMPOLINE_BED_HEIGHT = 4.0;
