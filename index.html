@@ -209,7 +209,7 @@
     let trampolineCorners = [];
     let trampolinePolygon = null;
     let trampolineCenter = null;
-    let baselineAnkleHeight = null;
+    let baselineAnkleHeight = null; // Will now be in meters (world Z)
     let calibrationReady = false;
     let jumpHeightHistory = [];
     let lastPoseResults = null;
@@ -398,6 +398,7 @@
     function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
     function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 
+    // Projects a pixel (u,v) to a world coordinate [x, y, z] on the trampoline plane
     function pixelToWorld(u, v) {
       const {fx, fy, cx, cy} = window._JT_intrinsics;
       const {C} = window._JT_extrinsics;
@@ -447,12 +448,10 @@
         return;
       }
 
-      baselineAnkleHeight = (L[1] + R[1]) / 2;
-      calibrationReady = true;
-      trampolineNotice.style.color = '#0f0';
-      trampolineNotice.textContent = "Calibrated! 3D simulation ready.";
-      calibrateBtn.style.display = "none";
-
+      // --------- FIX: Baseline in world coordinates ---------
+      const midX = (L[0] + R[0]) / 2;
+      const midY = (L[1] + R[1]) / 2;
+      // Set camera calibration config
       window._JT_intrinsics = {
         fx: Math.min(canvas.width, canvas.height) * 0.8,
         fy: Math.min(canvas.width, canvas.height) * 0.8,
@@ -460,6 +459,7 @@
         cy: canvas.height / 2
       };
       window._JT_extrinsics = {
+        // Camera location: [X, Y, Z] (meters), camera at (0, -distance, height)
         C: [0, -cameraDistanceMeters, cameraHeightMeters],
         R: [[1,0,0],[0,1,0],[0,0,1]]
       };
@@ -467,6 +467,14 @@
         normal: [0,0,1],
         point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
       };
+      // Now project the user's standing ankle (midpoint) to 3D world
+      const baselineWorld = pixelToWorld(midX, midY);
+      baselineAnkleHeight = baselineWorld[2]; // meters above ground
+
+      calibrationReady = true;
+      trampolineNotice.style.color = '#0f0';
+      trampolineNotice.textContent = "Calibrated! 3D simulation ready.";
+      calibrateBtn.style.display = "none";
     });
 
     // --------- SETTINGS POPOVER LOGIC ---------
@@ -546,6 +554,8 @@
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
+      if (!baselineAnkleHeight || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane) return;
+
       const left = landmarks[27], right = landmarks[28];
       if (!left || !right) return;
       const L = [left.x * canvas.width, left.y * canvas.height];
@@ -554,18 +564,21 @@
 
       const midX = (L[0] + R[0]) / 2, midY = (L[1] + R[1]) / 2;
       const worldPt = pixelToWorld(midX, midY);
-      const heightMeters = worldPt[2];
+      const heightMeters = worldPt[2] - baselineAnkleHeight; // FIX: relative jump height
 
       jumpHeightHistory.push(heightMeters);
       if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
       const avgHeight = jumpHeightHistory.reduce((a,b) => a + b, 0) / jumpHeightHistory.length;
 
+      // Don't report negative jump heights (standing or squatting)
+      const reportedHeight = Math.max(0, avgHeight);
+
       if (typeof computeAndSendJump.lastSent === "undefined" ||
-          Math.abs(avgHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
-        computeAndSendJump.lastSent = avgHeight;
+          Math.abs(reportedHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
+        computeAndSendJump.lastSent = reportedHeight;
         window.parent.postMessage({
           type: 'jump_height',
-          height: avgHeight,
+          height: reportedHeight,
           calibrated: true,
           hd_deduction: 0
         }, '*');
