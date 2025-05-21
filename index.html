@@ -143,6 +143,23 @@
     #saveSettingsBtn:active,
     #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
+
+    /* Style for the internal jump height display */
+    #widgetJumpHeightDisplay {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: #0f0;
+        padding: 8px 15px;
+        border-radius: 12px;
+        font-size: 1.5rem;
+        font-weight: bold;
+        z-index: 20;
+        pointer-events: none; /* Allows clicks to pass through to canvas if needed */
+        min-width: 180px; /* Ensure it's wide enough for text */
+        text-align: center;
+    }
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
@@ -184,7 +201,7 @@
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
-  </div>
+    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div> </div>
   <video id="video" autoplay playsinline></video>
 
   <script>
@@ -200,6 +217,7 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const calibrateBtn = document.getElementById('calibrateBtn');
+    const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay'); // Get the new display element
 
     // --------- STATE ---------
     let poseLoaded = false;
@@ -532,6 +550,7 @@
     function computeAndSendJump(landmarks) {
       if (!calibrationReady || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane) {
         // console.warn('ComputeJump: Calibration not complete or 3D projection parameters missing.');
+        widgetJumpHeightDisplay.textContent = 'Jump: N/A'; // Update internal display
         return;
       }
 
@@ -558,6 +577,7 @@
 
       if (!lowestLandmark) {
           // console.log('ComputeJump: No suitable lower body landmarks detected for height calculation.');
+          widgetJumpHeightDisplay.textContent = 'Jump: N/A'; // Update internal display
           return;
       }
 
@@ -566,19 +586,23 @@
 
       if (!pointInPolygon([lx, ly], trampolinePolygon)) {
           // console.log('ComputeJump: Lowest detected point is outside trampoline polygon.');
+          widgetJumpHeightDisplay.textContent = 'Jump: N/A'; // Update internal display
           return;
       }
 
       const worldPt = pixelToWorld(lx, ly);
       const heightAboveTrampoline = worldPt[2] - REAL_TRAMPOLINE_HEIGHT_METERS;
 
-      const currentHeight = Math.max(0, heightAboveTrampoline); // Ensure height is not negative
+      const currentHeight = Math.max(0, heightAboveTrampoline);
 
       jumpHeightHistory.push(currentHeight);
       if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
       const avgHeight = jumpHeightHistory.reduce((a,b) => a + b, 0) / jumpHeightHistory.length;
 
       const reportedHeight = Math.max(0, avgHeight);
+
+      // Update the internal display first
+      widgetJumpHeightDisplay.textContent = `Jump: ${reportedHeight.toFixed(2)} m`;
 
       if (typeof computeAndSendJump.lastSent === "undefined" ||
           Math.abs(reportedHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
