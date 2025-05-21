@@ -251,6 +251,13 @@
 
     // --------- POSE SETUP ---------
     let pose = null;
+    // Store last pose timestamp for throttling
+    let lastPoseTime = 0;
+    // Store last pose result for conditional drawing
+    let lastDrawnPoseId = 0;
+    // Pose results get a unique id/serial for change detection
+    let poseSerial = 0;
+
     window.addEventListener('DOMContentLoaded', () => {
       try {
         if (typeof window.Pose !== "function") {
@@ -260,15 +267,16 @@
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
         pose.setOptions({
-          modelComplexity: 1,
+          modelComplexity: 0, // Lower complexity for speed
           smoothLandmarks: true,
           enableSegmentation: false,
           smoothSegmentation: false,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5
+          minDetectionConfidence: 0.6,
+          minTrackingConfidence: 0.6
         });
         pose.onResults(results => {
           lastPoseResults = results;
+          poseSerial++;
         });
         poseLoaded = true;
         startCamera().then(() => {
@@ -283,17 +291,22 @@
       }
     });
 
-    // --------- DRAW LOOP: Runs at display frame rate ---------
+    // --------- DRAW LOOP: Only draws new frames if pose or state changed ---------
     function drawLoop() {
       ctx.clearRect(0,0,canvas.width,canvas.height);
+
       // Draw video feed
       if (video.readyState === 4)
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-      // Draw pose skeleton overlay
+      // Draw pose skeleton overlay if new pose arrived since last draw
       if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
-        drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 5});
-        drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 2});
+        if (lastDrawnPoseId !== poseSerial) {
+          // Thinner lines for less GPU load
+          drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
+          drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
+          lastDrawnPoseId = poseSerial;
+        }
       }
 
       // Draw trampoline corners/area
@@ -317,13 +330,22 @@
       animationFrameId = requestAnimationFrame(drawLoop);
     }
 
-    // --------- POSE LOOP: Runs as fast as pose can process ---------
+    // --------- POSE LOOP: Throttled to ~15 FPS ---------
     async function poseLoop() {
+      const minPoseInterval = 1000 / 15; // ~15Hz
       while (poseLoaded) {
         if (video.readyState === 4) {
-          await pose.send({ image: video });
+          const now = performance.now();
+          if (now - lastPoseTime >= minPoseInterval) {
+            await pose.send({ image: video });
+            lastPoseTime = now;
+          } else {
+            // Wait until next frame should be processed
+            await new Promise(r => setTimeout(r, minPoseInterval - (now - lastPoseTime)));
+          }
+        } else {
+          await new Promise(r => setTimeout(r, 100));
         }
-        // No need to throttle, pose.send is blocking per frame
       }
     }
 
@@ -338,7 +360,7 @@
       if (corners.length < 2) return;
       ctx.save();
       ctx.strokeStyle = '#ff0';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2; // Slightly thinner
       ctx.beginPath();
       ctx.moveTo(corners[0][0], corners[0][1]);
       for (let i = 1; i < corners.length; ++i) {
@@ -351,7 +373,7 @@
       ctx.fillStyle = '#ff0';
       corners.forEach(([x,y]) => {
         ctx.beginPath();
-        ctx.arc(x,y,7,0,2*Math.PI);
+        ctx.arc(x,y,5,0,2*Math.PI); // Smaller dot radius
         ctx.fill();
       });
       ctx.restore();
