@@ -291,13 +291,6 @@
         pose.onResults(results => {
           lastPoseResults = results;
           poseSerial++;
-          // Uncomment below to debug raw pose landmarks if needed
-          // if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-          //     console.log('Pose landmarks detected. Ankles (27, 28):', results.poseLandmarks[27], results.poseLandmarks[28]);
-          //     console.log('Hips (23, 24):', results.poseLandmarks[23], results.poseLandmarks[24]);
-          // } else {
-          //     console.log('No pose landmarks detected.');
-          // }
         });
         poseLoaded = true;
         startCamera().then(() => {
@@ -461,7 +454,6 @@
       }
 
       // Soft check: Warn if user is not somewhat in the marked trampoline area during calibration.
-      // This is not a blocking error, just a guidance.
       const leftAnkle = lastPoseResults.poseLandmarks[27];
       const rightAnkle = lastPoseResults.poseLandmarks[28];
       const leftHip = lastPoseResults.poseLandmarks[23];
@@ -479,15 +471,15 @@
           console.warn("Calibration: Main pose landmarks not within marked trampoline area. Proceeding anyway.");
       }
 
-      // --- Calibration logic starts here ---
-      // These intrinsic and extrinsic parameters are simplified.
-      // For highly accurate 3D, a more robust calibration (e.g., using a chessboard pattern)
-      // and camera model would be needed. This approximation works reasonably well
-      // for a fixed camera setup and a flat trampoline surface.
+      // --- CRITICAL: Update global variables with current input values right before calibration ---
+      // This ensures the calibration uses the latest values from the settings popover.
+      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.6;
+      cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
+      cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
+      console.log("REAL_TRAMPOLINE_HEIGHT_METERS used in calibration:", REAL_TRAMPOLINE_HEIGHT_METERS);
+
 
       // Intrinsic parameters (internal camera properties)
-      // fx, fy: focal lengths in pixels. Estimated as a fraction of canvas min dimension.
-      // cx, cy: principal point (center of image)
       window._JT_intrinsics = {
         fx: Math.min(canvas.width, canvas.height) * 0.8, // Example approximation
         fy: Math.min(canvas.width, canvas.height) * 0.8, // Example approximation
@@ -496,16 +488,12 @@
       };
 
       // Extrinsic parameters (camera's position and orientation in world space)
-      // C: Camera position in world coordinates [X, Y, Z]
-      // R: Rotation matrix (simplified to identity for aligned camera, might need adjustment)
       window._JT_extrinsics = {
         C: [0, -cameraDistanceMeters, cameraHeightMeters], // X=0, Y=behind trampoline, Z=height
         R: [[1,0,0],[0,1,0],[0,0,1]] // Identity matrix (no rotation relative to world axes)
       };
 
       // Trampoline plane definition
-      // Normal: [0,0,1] means the plane is horizontal (parallel to XY plane in world coords)
-      // Point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS] means the plane is at Z=REAL_TRAMPOLINE_HEIGHT_METERS
       window._JT_plane = {
         normal: [0,0,1],
         point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
@@ -582,7 +570,7 @@
     let cameraDistanceMeters = parseFloat(localStorage.getItem('jt_cameraDistance')) || 2.0;
     let cameraHeightMeters   = parseFloat(localStorage.getItem('jt_cameraHeight')) || 1.0;
     const SMOOTHING_WINDOW   = 5;
-    const MIN_DELTA_METERS   = 0.002;
+    const MIN_DELTA_METERS   = 0.0001; // CHANGED FOR DEBUGGING - set to a small value to see updates more easily
 
     cameraDistanceInput.addEventListener('input', () => {
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
@@ -637,8 +625,8 @@
       }
 
       // DEBUG: Log which landmarks were available
-      // console.log(`Landmarks: LAnkle=${!!leftAnkle}, RAnkle=${!!rightAnkle}, LHip=${!!leftHip}, RHip=${!!rightHip}`);
-      // console.log("Lowest Landmark found:", lowestLandmark ? `(${lowestLandmark.x.toFixed(2)}, ${lowestLandmark.y.toFixed(2)})` : "None");
+      console.log(`Landmarks: LAnkle=${!!leftAnkle}, RAnkle=${!!rightAnkle}, LHip=${!!leftHip}, RHip=${!!rightHip}`);
+      console.log("Lowest Landmark chosen:", lowestLandmark ? `(${lowestLandmark.x.toFixed(2)}, ${lowestLandmark.y.toFixed(2)})` : "None (problem!)");
 
 
       if (!lowestLandmark) {
@@ -649,13 +637,12 @@
 
       const lx = lowestLandmark.x * canvas.width;
       const ly = lowestLandmark.y * canvas.height;
-
-      // *** IMPORTANT: The `pointInPolygon` check for jump height calculation was removed here. ***
-      // This allows the athlete to jump above the trampoline bed without being restricted by the 2D polygon.
+      console.log(`Lowest Landmark pixel Y: ${ly.toFixed(2)}`); // Added for visual debugging
 
       const worldPt = pixelToWorld(lx, ly);
       // worldPt[2] is the Z-coordinate (height) of the lowest landmark in world space.
       // We subtract REAL_TRAMPOLINE_HEIGHT_METERS to get height *above* the trampoline bed.
+      console.log("World Point (X,Y,Z):", worldPt[0].toFixed(3), worldPt[1].toFixed(3), worldPt[2].toFixed(3)); // Added for 3D coordinate debugging
       const heightAboveTrampoline = worldPt[2] - REAL_TRAMPOLINE_HEIGHT_METERS;
 
       // Ensure height is never negative (e.g., if the person is below the mat level)
@@ -672,6 +659,10 @@
       // Update the internal display first
       widgetJumpHeightDisplay.textContent = `Jump: ${reportedHeight.toFixed(2)} m`;
 
+      // DEBUG: Log the calculated height each time it runs
+      console.log(`Calculated Height (raw): ${heightAboveTrampoline.toFixed(3)}m, Smoothed: ${reportedHeight.toFixed(3)}m`);
+
+
       // Only send message if there's a significant change to reduce overhead
       if (typeof computeAndSendJump.lastSent === "undefined" ||
           Math.abs(reportedHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
@@ -684,8 +675,6 @@
         }, '*');
         console.log('Sending jump_height:', reportedHeight.toFixed(2), 'm (above trampoline)');
       }
-      // DEBUG: Log the calculated height each time it runs
-      // console.log(`Calculated Height (raw): ${heightAboveTrampoline.toFixed(3)}m, Smoothed: ${reportedHeight.toFixed(3)}m`);
     }
 
     // --------- CONTINUOUS JUMP HEIGHT SENDING ---------
@@ -695,7 +684,7 @@
       if (calibrationReady && lastPoseResults && lastPoseResults.poseLandmarks) {
         computeAndSendJump(lastPoseResults.poseLandmarks);
       } else {
-        // DEBUG: Indicate when it's not trying to calculate jump height
+        // These can be uncommented for initial debugging but might be too chatty during normal operation
         // if (!calibrationReady) {
         //     console.log("Jump Height calculation skipped: Calibration not ready.");
         // } else if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
@@ -705,8 +694,6 @@
     }, 33);
 
     // --------- CONSTANTS (can be removed if unused) ---------
-    // These constants are present in the original code but not used in the provided logic.
-    // Keeping them for completeness if they are part of a larger project.
     const TRAMPOLINE_BED_WIDTH  = 9.5;
     const TRAMPOLINE_BED_LENGTH = 16.5;
     const TRAMPOLINE_BED_HEIGHT = 4.0;
