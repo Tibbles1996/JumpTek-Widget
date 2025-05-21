@@ -253,8 +253,6 @@
     let pose = null;
     // Store last pose timestamp for throttling
     let lastPoseTime = 0;
-    // Store last pose result for conditional drawing
-    let lastDrawnPoseId = 0;
     // Pose results get a unique id/serial for change detection
     let poseSerial = 0;
 
@@ -291,7 +289,7 @@
       }
     });
 
-    // --------- DRAW LOOP: Only draws new frames if pose or state changed ---------
+    // --------- DRAW LOOP: Draws every frame ---------
     function drawLoop() {
       ctx.clearRect(0,0,canvas.width,canvas.height);
 
@@ -299,14 +297,10 @@
       if (video.readyState === 4)
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-      // Draw pose skeleton overlay if new pose arrived since last draw
+      // Draw pose skeleton overlay EVERY frame if pose data exists (fixes flicker)
       if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
-        if (lastDrawnPoseId !== poseSerial) {
-          // Thinner lines for less GPU load
-          drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
-          drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
-          lastDrawnPoseId = poseSerial;
-        }
+        drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
+        drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
       }
 
       // Draw trampoline corners/area
@@ -586,7 +580,8 @@
     }, 33); // ~30Hz
 
     // --------- CONSTANTS ---------
-    const TRAMPOLINE_BED_WIDTH  = 2.0;
+    const TRAMPOLINE_BED_WIDTH  = 9.5;
+    const TRAMPOLINE_BED_LENGTH = 16.5;
     const TRAMPOLINE_BED_HEIGHT = 4.0;
   </script>
 </body>
