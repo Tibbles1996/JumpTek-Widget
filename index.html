@@ -453,20 +453,21 @@
 
       const xCam = (u - cx) / fx;
       const yCam = (v - cy) / fy;
-      const zCam = 1;
+      const zCam = 1; // Assuming a perspective projection where Z is depth
       const rayCam = normalize([xCam, yCam, zCam]);
-      const ray = rayCam;
+      const ray = rayCam; // Assuming no camera rotation R in extrinsics for ray
 
       const numerator = -dot(N, subtract(C, P0));
       const denominator = dot(N, ray);
 
       let t;
       if (Math.abs(denominator) < 1e-8) {
-          t = 0;
+          t = 0; // Or handle as a ray parallel to plane
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`;
           debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
       } else {
-          t = numerator / denominator;
+          // *** THE KEY CHANGE IS HERE: FLIP SIGN OF DENOMINATOR OR NUMERATOR ***
+          t = numerator / -denominator; // Changed from numerator / denominator
           debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
           debugValuesDisplay.innerHTML += `<br>t: ${t.toFixed(3)}`;
@@ -668,18 +669,25 @@
 
 
       // Logic to find the lowest landmark - **REMOVED SCORE CHECK FOR DEBUGGING**
-      if (leftAnkle) { // Only check if landmark exists
+      // Now prioritizes ankles if they exist, then hips.
+      if (leftAnkle && rightAnkle) {
+          lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
+          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'} (Forced for debug)<br>`;
+      } else if (leftAnkle) {
           lowestLandmark = leftAnkle;
           debugValuesDisplay.innerHTML += `Selected: LAnkle (Forced for debug)<br>`;
-      } else if (rightAnkle) { // Only check if landmark exists
+      } else if (rightAnkle) {
           lowestLandmark = rightAnkle;
           debugValuesDisplay.innerHTML += `Selected: RAnkle (Forced for debug)<br>`;
-      } else if (leftHip) { // Only check if landmark exists
+      } else if (leftHip && rightHip) {
+          lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
+          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (Forced for debug, ankles missing)<br>`;
+      } else if (leftHip) {
           lowestLandmark = leftHip;
-          debugValuesDisplay.innerHTML += `Selected: LHip (Forced for debug)<br>`;
-      } else if (rightHip) { // Only check if landmark exists
+          debugValuesDisplay.innerHTML += `Selected: LHip (Forced for debug, ankles missing)<br>`;
+      } else if (rightHip) {
           lowestLandmark = rightHip;
-          debugValuesDisplay.innerHTML += `Selected: RHip (Forced for debug)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: RHip (Forced for debug, ankles missing)<br>`;
       }
 
 
