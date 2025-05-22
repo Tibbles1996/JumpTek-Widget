@@ -567,6 +567,7 @@
       cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
       depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0; // Retrieve new setting
 
+      // IMPORTANT: These intrinsics are approximations. Zoom changes them.
       window._JT_intrinsics = {
         fx: Math.min(canvas.width, canvas.height) * 0.8, // Approximation for focal length
         fy: Math.min(canvas.width, canvas.height) * 0.8,
@@ -755,7 +756,7 @@
 
       // Trigger input event to update the global variables from loaded values
       ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id =>
-        document.getElementById(id).dispatchEvent(new Event('input'))
+        document.getElementById(id).id === 'cameraDistance' && document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
 
@@ -797,26 +798,52 @@
     switchCameraBtn.addEventListener('click', async () => {
       useFrontCamera = !useFrontCamera;
       await startCamera();
+      // Reset calibration on camera switch
+      calibrationReady = false;
+      baselineZ = null;
+      trampolineNotice.textContent = "Camera switched. Please re-mark trampoline corners and re-calibrate.";
+      calibrateBtn.style.display = "block"; // Ensure calibrate button is visible
+      calibrateBtn.disabled = true;
+      trampolineCorners = []; // Clear marked corners
+      trampolinePolygon = null; // Clear polygon
     });
     window.addEventListener('beforeunload', () => {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     });
 
     // --------- ZOOM CONTROLS ---------
-    zoomInBtn.addEventListener('click', () => {
+    const resetCalibrationForZoom = () => {
+        calibrationReady = false;
+        baselineZ = null;
+        trampolineNotice.textContent = "Zoom changed. Please re-calibrate for accurate jump height.";
+        calibrateBtn.style.display = "block"; // Ensure calibrate button is visible
+        calibrateBtn.disabled = true;
+        // Do NOT clear trampolineCorners or trampolinePolygon here, as zoom doesn't affect pixel positions relative to the canvas
+        // Only the interpretation of Z-depth changes.
+    };
+
+    zoomInBtn.addEventListener('click', async () => {
         if (!videoTrack || !zoomCapabilities) return;
         const currentZoom = videoTrack.getSettings().zoom || zoomCapabilities.min;
         const newZoom = Math.min(zoomCapabilities.max, currentZoom + zoomCapabilities.step);
-        videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] })
-            .catch(e => console.error("Failed to set zoom:", e));
+        try {
+            await videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] });
+            resetCalibrationForZoom(); // Reset calibration after successful zoom
+        } catch (e) {
+            console.error("Failed to set zoom:", e);
+        }
     });
 
-    zoomOutBtn.addEventListener('click', () => {
+    zoomOutBtn.addEventListener('click', async () => {
         if (!videoTrack || !zoomCapabilities) return;
         const currentZoom = videoTrack.getSettings().zoom || zoomCapabilities.min;
         const newZoom = Math.max(zoomCapabilities.min, currentZoom - zoomCapabilities.step);
-        videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] })
-            .catch(e => console.error("Failed to set zoom:", e));
+        try {
+            await videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] });
+            resetCalibrationForZoom(); // Reset calibration after successful zoom
+        } catch (e) {
+            console.error("Failed to set zoom:", e);
+        }
     });
 
     // Initial state for zoom buttons
