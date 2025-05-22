@@ -173,23 +173,11 @@
     #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
 
-    /* Style for the internal jump height display */
+    /* Hide jump height display from the screen */
     #widgetJumpHeightDisplay {
-        position: absolute;
-        top: 20px;
-        right: 20px;
-        background: rgba(0, 0, 0, 0.7);
-        color: #0f0;
-        padding: 8px 15px;
-        border-radius: 12px;
-        font-size: 1.5rem;
-        font-weight: bold;
-        z-index: 20;
-        pointer-events: none; /* Allows clicks to pass through to canvas if needed */
-        min-width: 180px; /* Ensure it's wide enough for text */
-        text-align: center;
+        display: none;
     }
-    /* Hide debugging displays by default */
+    /* Hide debugging displays */
     #rawHeightDebugDisplay, #debugValuesDisplay {
         display: none;
     }
@@ -235,19 +223,11 @@
         <input type="number" step="0.1" min="0.1" max="50" value="5.0" id="depthScaleFactor">
         <div class="desc">Adjusts how much MediaPipe's Z-coordinate (depth) influences the calculated world Z. Higher values mean more sensitivity to MediaPipe's Z.</div>
       </div>
-      <div class="checkbox-container">
-        <label for="debugMode">Enable Debug Mode (show landmarks/data):</label>
-        <input type="checkbox" id="debugMode">
-      </div>
       <button id="saveSettingsBtn">Save</button>
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
-    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
-    <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div>
-    <div id="debugValuesDisplay"></div>
-
-    <div id="zoomControls">
+    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div> <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div> <div id="debugValuesDisplay"></div> <div id="zoomControls">
       <button id="zoomInBtn">+</button>
       <button id="zoomOutBtn">-</button>
     </div>
@@ -267,9 +247,9 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const calibrateBtn = document.getElementById('calibrateBtn');
-    const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
-    const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
-    const debugValuesDisplay = document.getElementById('debugValuesDisplay');
+    const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay'); // Still referenced but hidden
+    const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay'); // Still referenced but hidden
+    const debugValuesDisplay = document.getElementById('debugValuesDisplay'); // Still referenced but hidden
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
 
@@ -287,7 +267,7 @@
     let baselineZ = null; // Stores the Z-coordinate of the lowest point at calibration
     let isCalibratingNow = false; // New flag for calibration in progress
     let calibrationZValues = []; // New array to store Z values during calibration
-    let debugMode = false; // New: Toggles debug info visibility
+    // let debugMode = false; // Removed - skeletal drawing is always on
     let videoTrack = null; // To store the current video track for zoom
     let zoomCapabilities = null; // To store zoom min/max/step
 
@@ -365,7 +345,7 @@
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
         pose.setOptions({
-          modelComplexity: 0,
+          modelComplexity: 0, // IMPORTANT: Set to 0 for reduced load and faster performance
           smoothLandmarks: true,
           enableSegmentation: false,
           smoothSegmentation: false,
@@ -396,8 +376,8 @@
       if (video.readyState === 4)
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-      // Only draw landmarks if debugMode is enabled
-      if (debugMode && lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
+      // ALWAYS draw landmarks to confirm athlete tracking
+      if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
         drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
         drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
       }
@@ -697,7 +677,7 @@
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
     const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
-    const debugModeCheckbox = document.getElementById('debugMode');
+    // const debugModeCheckbox = document.getElementById('debugMode'); // Removed as skeletal drawing is always on
 
     settingsBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -718,22 +698,22 @@
     const trampolineHeightInput = document.getElementById('trampolineHeight');
     const depthScaleFactorInput = document.getElementById('depthScaleFactor');
 
-    function applyDebugMode() {
-        if (debugMode) {
-            rawHeightDebugDisplay.style.display = 'block';
-            debugValuesDisplay.style.display = 'block';
-        } else {
-            rawHeightDebugDisplay.style.display = 'none';
-            debugValuesDisplay.style.display = 'none';
-        }
-    }
+    // function applyDebugMode() { // This function is no longer needed since debug displays are always hidden
+    //     if (debugMode) {
+    //         rawHeightDebugDisplay.style.display = 'block';
+    //         debugValuesDisplay.style.display = 'block';
+    //     } else {
+    //         rawHeightDebugDisplay.style.display = 'none';
+    //         debugValuesDisplay.style.display = 'none';
+    //     }
+    // }
 
     function saveSettingsToStorage() {
       localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
       localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
       localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
       localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value);
-      localStorage.setItem('jt_debugMode', debugModeCheckbox.checked ? 'true' : 'false');
+      // localStorage.setItem('jt_debugMode', debugModeCheckbox.checked ? 'true' : 'false'); // Removed
     }
     function loadSettingsFromStorage() {
       ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight', 'jt_depthScaleFactor'].forEach(k => {
@@ -748,22 +728,18 @@
         }
       });
 
-      // Load debug mode setting
-      const loadedDebugMode = localStorage.getItem('jt_debugMode');
-      debugMode = (loadedDebugMode === 'true');
-      debugModeCheckbox.checked = debugMode;
-      applyDebugMode(); // Apply immediately on load
+      // No debug mode to load or apply
 
       // Trigger input event to update the global variables from loaded values
       ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id =>
-        document.getElementById(id).id === 'cameraDistance' && document.getElementById(id).dispatchEvent(new Event('input'))
+        document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
 
     saveSettingsBtn.addEventListener('click', () => {
       saveSettingsToStorage();
-      debugMode = debugModeCheckbox.checked; // Update global debugMode
-      applyDebugMode(); // Re-apply visibility
+      // debugMode = debugModeCheckbox.checked; // Removed
+      // applyDebugMode(); // Removed
       if (trampolinePolygon && !isCalibratingNow) { // Only auto-recalibrate if not already calibrating
           calibrateBtn.click(); // Recalibrate if area is set
       }
@@ -779,7 +755,7 @@
     let depthScaleFactor = parseFloat(localStorage.getItem('jt_depthScaleFactor')) || 5.0;
     const SMOOTHING_WINDOW   = 5;
     const MIN_DELTA_METERS   = 0.002;
-    const MIN_JUMP_DISPLAY_THRESHOLD = 0.05; // New: Jumps below this will display as 0.00m
+    const MIN_JUMP_DISPLAY_THRESHOLD = 0.05; // Jumps below this will display as 0.00m
 
     cameraDistanceInput.addEventListener('input', () => {
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
@@ -857,20 +833,15 @@
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
-      // Clear debug display each frame if in debug mode
-      if (debugMode) {
-        debugValuesDisplay.innerHTML = '';
-        debugValuesDisplay.innerHTML += `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
-      }
+      // debugValuesDisplay.innerHTML = ''; // This was for debug, now always hidden
+      // debugValuesDisplay.innerHTML += `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`; // This was for debug, now always hidden
 
 
       if (!calibrationReady || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane || baselineZ === null) {
-        widgetJumpHeightDisplay.textContent = 'Jump: N/A (Calibrate)';
-        if (debugMode) {
-            rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
-            rawHeightDebugDisplay.classList.remove('positive');
-            debugValuesDisplay.innerHTML += 'Calibration Not Ready / Baseline Missing';
-        }
+        // widgetJumpHeightDisplay.textContent = 'Jump: N/A (Calibrate)'; // Hidden now
+        // rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A'; // Hidden now
+        // rawHeightDebugDisplay.classList.remove('positive'); // Hidden now
+        // debugValuesDisplay.innerHTML += 'Calibration Not Ready / Baseline Missing'; // Hidden now
         return;
       }
 
@@ -881,28 +852,27 @@
 
       let lowestLandmark = null;
 
-      // Debugging landmark scores and availability (only if debugMode)
-      if (debugMode) {
-        debugValuesDisplay.innerHTML += `LAnkle: (${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, <span style="color:yellow;">${getVal(leftAnkle, 'z')}</span>) sc:${getVal(leftAnkle, 'score')}<br>`;
-        debugValuesDisplay.innerHTML += `RAnkle: (${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, <span style="color:yellow;">${getVal(rightAnkle, 'z')}</span>) sc:${getVal(rightAnkle, 'score')}<br>`;
-        debugValuesDisplay.innerHTML += `LHip: (${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, <span style="color:yellow;">${getVal(leftHip, 'z')}</span>) sc:${getVal(leftHip, 'score')}<br>`;
-        debugValuesDisplay.innerHTML += `RHip: (${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, <span style="color:yellow;">${getVal(rightHip, 'z')}</span>) sc:${getVal(rightHip, 'score')}<br><br>`;
-      }
+      // Debugging landmark scores and availability (now always hidden by CSS)
+      // debugValuesDisplay.innerHTML += `LAnkle: (${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, <span style="color:yellow;">${getVal(leftAnkle, 'z')}</span>) sc:${getVal(leftAnkle, 'score')}<br>`;
+      // debugValuesDisplay.innerHTML += `RAnkle: (${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, <span style="color:yellow;">${getVal(rightAnkle, 'z')}</span>) sc:${getVal(rightAnkle, 'score')}<br>`;
+      // debugValuesDisplay.innerHTML += `LHip: (${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, <span style="color:yellow;">${getVal(leftHip, 'z')}</span>) sc:${getVal(leftHip, 'score')}<br>`;
+      // debugValuesDisplay.innerHTML += `RHip: (${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, <span style="color:yellow;">${getVal(rightHip, 'z')}</span>) sc:${getVal(rightHip, 'score')}<br><br>`;
+
 
       // Logic to find the lowest landmark - Prioritize ankles, then hips.
       // Still forced selection, as scores are N/A.
       if (leftAnkle && rightAnkle) {
           lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
-          if (debugMode) debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
+          // if (debugMode) debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`; // Hidden now
       } else if (leftAnkle) {
           lowestLandmark = leftAnkle;
-          if (debugMode) debugValuesDisplay.innerHTML += `Selected: LAnkle<br>`;
+          // if (debugMode) debugValuesDisplay.innerHTML += `Selected: LAnkle<br>`; // Hidden now
       } else if (rightAnkle) {
           lowestLandmark = rightAnkle;
-          if (debugMode) debugValuesDisplay.innerHTML += `Selected: RAnkle<br>`;
+          // if (debugMode) debugValuesDisplay.innerHTML += `Selected: RAnkle<br>`; // Hidden now
       } else if (leftHip && rightHip) {
           lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
-          if (debugMode) debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (ankles missing)<br>`;
+          // if (debugMode) debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (ankles missing)<br>`; // Hidden now
       } else if (leftHip) {
           lowestLandmark = leftHip;
       } else if (rightHip) {
@@ -911,12 +881,10 @@
 
 
       if (!lowestLandmark) {
-          widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)';
-          if (debugMode) {
-              rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
-              rawHeightDebugDisplay.classList.remove('positive');
-              debugValuesDisplay.innerHTML += 'No suitable low landmark found.';
-          }
+          // widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)'; // Hidden now
+          // rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk'; // Hidden now
+          // rawHeightDebugDisplay.classList.remove('positive'); // Hidden now
+          // debugValuesDisplay.innerHTML += 'No suitable low landmark found.'; // Hidden now
           return;
       }
 
@@ -927,14 +895,12 @@
       
       let rawHeightAboveTrampoline = worldPt[2] - baselineZ;
 
-      if (debugMode) {
-          rawHeightDebugDisplay.textContent = `Raw Z-Delta: ${rawHeightAboveTrampoline.toFixed(3)}m`;
-          if (rawHeightAboveTrampoline > 0.005) { // Small threshold for visual feedback color
-            rawHeightDebugDisplay.classList.add('positive');
-          } else {
-            rawHeightDebugDisplay.classList.remove('positive');
-          }
-      }
+      // rawHeightDebugDisplay.textContent = `Raw Z-Delta: ${rawHeightAboveTrampoline.toFixed(3)}m`; // Hidden now
+      // if (rawHeightAboveTrampoline > 0.005) { // Small threshold for visual feedback color // Hidden now
+      //   rawHeightDebugDisplay.classList.add('positive'); // Hidden now
+      // } else {
+      //   rawHeightDebugDisplay.classList.remove('positive'); // Hidden now
+      // }
 
       jumpHeightHistory.push(rawHeightAboveTrampoline);
       if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
@@ -944,7 +910,7 @@
       // NEW: Clamp jump height to 0 if it's below a threshold
       const reportedHeight = Math.max(0, avgRawHeight < MIN_JUMP_DISPLAY_THRESHOLD ? 0 : avgRawHeight);
 
-      widgetJumpHeightDisplay.textContent = `Jump: ${reportedHeight.toFixed(2)} m`;
+      // widgetJumpHeightDisplay.textContent = `Jump: ${reportedHeight.toFixed(2)} m`; // Hidden now
 
       if (typeof computeAndSendJump.lastSent === "undefined" ||
           Math.abs(reportedHeight - computeAndSendJump.lastSent) > MIN_DELTA_METERS) {
