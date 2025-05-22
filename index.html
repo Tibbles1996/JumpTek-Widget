@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <title>JumpTek MediaPipe AI Tracker Widget</title>
   <style>
+    /* --- CSS Styles (No changes here from previous version, keeping for completeness) --- */
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body {
       width: 100vw; height: 100vh; background: #222; color: #fff;
@@ -178,7 +179,7 @@
         display: none;
     }
     /* Debugging displays - hidden by default, shown by JS */
-    #rawHeightDebugDisplay, #debugValuesDisplay {
+    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay {
         position: absolute;
         top: 20px;
         left: 20px;
@@ -194,6 +195,9 @@
     }
     #rawHeightDebugDisplay.positive {
         color: #0f0;
+    }
+    #frameRateDisplay {
+        top: 80px; /* Position below other debug info */
     }
   </style>
 
@@ -240,7 +244,7 @@
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
-    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div> <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div> <div id="debugValuesDisplay"></div> <div id="zoomControls">
+    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div> <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div> <div id="debugValuesDisplay"></div> <div id="frameRateDisplay">FPS: 0</div> <div id="zoomControls">
       <button id="zoomInBtn">+</button>
       <button id="zoomOutBtn">-</button>
     </div>
@@ -263,6 +267,7 @@
     const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
     const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
     const debugValuesDisplay = document.getElementById('debugValuesDisplay');
+    const frameRateDisplay = document.getElementById('frameRateDisplay'); // New element
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
     const debugModeCheckbox = document.getElementById('debugMode');
@@ -291,8 +296,14 @@
     let takeOffTime = 0;
     let flightTime = 0;
     let highestPointZ = -Infinity; // Track the highest point reached during a jump (for current Z)
-    let lastZPos = null; // Track last Z position for velocity estimation
+    let lastZPos = null; // Track last Z position for velocity estimation (raw)
     let lastZTime = null; // Track last Z time for velocity estimation
+
+    // Smoothing history
+    let zHistory = []; // For exponential smoothing of Z
+    let velocityHistory = []; // For exponential smoothing of velocity
+    let currentZSmoothed = null; // Smoothed current Z
+    let verticalVelocitySmoothed = null; // Smoothed vertical velocity
 
     // Calibration Phases
     const CALIBRATION_PHASE_MARK_CORNERS = 'mark_corners';
@@ -303,6 +314,11 @@
 
     let calibrationJumpsData = []; // Stores { h3d: ..., hflight: ... } for calibration jumps
     const REQUIRED_CALIBRATION_JUMPS = 3; // Number of jumps needed to auto-tune depthScaleFactor
+
+    // FPS calculation
+    let frameCount = 0;
+    let lastFpsUpdateTime = 0;
+    const FPS_UPDATE_INTERVAL = 1000; // Update FPS every 1 second
 
     // --------- CAMERA SETUP ---------
     async function startCamera() {
@@ -319,6 +335,8 @@
             facingMode: useFrontCamera ? 'user' : 'environment',
             width: { ideal: 640 },
             height: { ideal: 480 }
+            // Consider adding a preferred frameRate for higher performance, but respect browser limits
+            // frameRate: { ideal: 60, min: 30 }
           }
         });
         currentStream = stream;
@@ -340,6 +358,15 @@
                 console.log("Zoom not supported by this camera.");
                 zoomInBtn.disabled = true;
                 zoomOutBtn.disabled = true;
+            }
+            // Check frame rate and warn if low
+            const settings = videoTrack.getSettings();
+            if (settings.frameRate < 30) {
+                trampolineNotice.style.color = '#ff0';
+                trampolineNotice.textContent = `Warning: Low camera frame rate (${settings.frameRate.toFixed(0)} FPS). For best accuracy, use a device with 30+ FPS.`;
+            } else if (settings.frameRate < 60 && debugMode) { // Only show this if higher FPS is ideal but not critical
+                trampolineNotice.style.color = '#fff'; // White is less urgent
+                trampolineNotice.textContent = `Camera FPS: ${settings.frameRate.toFixed(0)}. Higher FPS (e.g., 60) can improve jump detection.`;
             }
         } else {
             zoomInBtn.disabled = true;
@@ -367,7 +394,7 @@
     // --------- POSE SETUP ---------
     let pose = null;
     let lastPoseTime = 0;
-    let poseSerial = 0;
+    let poseSerial = 0; // To track if new results arrived
 
     window.addEventListener('DOMContentLoaded', () => {
       try {
@@ -379,7 +406,7 @@
         });
         pose.setOptions({
           modelComplexity: 0, // IMPORTANT: Set to 0 for reduced load and faster performance
-          smoothLandmarks: true,
+          smoothLandmarks: true, // Crucial for reducing jitter
           enableSegmentation: false,
           smoothSegmentation: false,
           minDetectionConfidence: 0.6,
@@ -387,7 +414,7 @@
         });
         pose.onResults(results => {
           lastPoseResults = results;
-          poseSerial++;
+          poseSerial++; // Increment serial to indicate new results
         });
         poseLoaded = true;
         startCamera().then(() => {
@@ -396,7 +423,7 @@
         });
       } catch (e) {
         poseLoaded = false;
-        trampolineNotice.textContent = "Failed to initialize pose detection.";
+        trampolineNotice.textContent = "Failed to initialize pose detection. Ensure your browser supports MediaPipe.";
         trampolineNotice.style.color = "#f00";
         console.error("Pose initialization error:", e);
       }
@@ -434,27 +461,42 @@
       // Update trampoline notice based on calibration phase
       if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
         trampolineNotice.textContent = "Tap the four corners of the trampoline to mark its boundaries.";
+        trampolineNotice.style.color = '#0f0';
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-        // If the button is disabled here, it means no pose is ready
         if (calibrateBtn.disabled) {
-            trampolineNotice.textContent = "Trampoline area set! Stand on the trampoline and ensure your body is fully visible, then press Calibrate.";
-            trampolineNotice.style.color = '#ff0'; // Warning color
+            trampolineNotice.textContent = "Trampoline area set. Stand on the trampoline and ensure your body is fully visible, then press Calibrate.";
+            trampolineNotice.style.color = '#ff0'; // Warning color if pose not ready
         } else {
             trampolineNotice.textContent = "Trampoline area set! Stand still on the trampoline and press Calibrate.";
             trampolineNotice.style.color = '#0f0'; // Ready color
         }
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
-        trampolineNotice.textContent = `Perform ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more jumps for best accuracy.`;
+        trampolineNotice.textContent = `Perform ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more jump${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length === 1 ? '' : 's'} for Z-scale calibration.`;
+        trampolineNotice.style.color = '#0f0';
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
         trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
+        trampolineNotice.style.color = '#0f0';
       }
+
+      // Update FPS display
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsUpdateTime >= FPS_UPDATE_INTERVAL) {
+          const fps = (frameCount / (now - lastFpsUpdateTime)) * 1000;
+          frameRateDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
+          frameCount = 0;
+          lastFpsUpdateTime = now;
+      }
+
 
       animationFrameId = requestAnimationFrame(drawLoop);
     }
 
     // --------- POSE LOOP: Throttled to ~15 FPS ---------
+    // Changed to use setInterval to ensure consistent processing rate for jump logic
+    // rather than tying directly to requestAnimationFrame
     async function poseLoop() {
-      const minPoseInterval = 1000 / 15;
+      const minPoseInterval = 1000 / 15; // Target ~15 FPS for sending to MediaPipe
       while (poseLoaded) {
         if (video.readyState === 4) {
           const now = performance.now();
@@ -465,7 +507,7 @@
             await new Promise(r => setTimeout(r, minPoseInterval - (now - lastPoseTime)));
           }
         } else {
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise(r => setTimeout(r, 100)); // Wait if video not ready
         }
       }
     }
@@ -502,11 +544,12 @@
 
     function pointInPolygon(pt, poly) {
       let [x,y] = pt, inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      for (let i = 0, j = poly.length - 1; i < poly.length; i++) {
         let [xi, yi] = poly[i], [xj, yj] = poly[j];
         let intersect = ((yi > y) !== (yj > y)) &&
                         (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
         if (intersect) inside = !inside;
+        j = i; // Update j for the next iteration
       }
       return inside;
     }
@@ -555,7 +598,7 @@
       const worldPt = [
         worldPtBase[0],
         worldPtBase[1],
-        worldPtBase[2] + (1 - mpZ) * depthScaleFactor
+        worldPtBase[2] + (1 - mpZ) * depthScaleFactor // Applying Z-factor correction
       ];
 
       return worldPt;
@@ -583,12 +626,10 @@
       if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
         if (!trampolinePolygon) {
             trampolineNotice.style.color = '#f00';
-            trampolineNotice.textContent = "Please mark the 4 corners of the trampoline first.";
+            trampolineNotice.textContent = "Error: Please mark the 4 corners of the trampoline first.";
             return;
         }
 
-        // --- NEW IMPROVEMENT: Robust Pose Check for Stand-Still Calibration ---
-        // This will try a few times to get a valid pose before failing.
         let attempts = 0;
         const maxAttempts = 5;
         const poseCheckInterval = 200; // ms
@@ -598,7 +639,7 @@
                 attempts++;
                 if (attempts < maxAttempts) {
                     trampolineNotice.style.color = '#ff0';
-                    trampolineNotice.textContent = `Waiting for pose data... (${attempts}/${maxAttempts}). Ensure your body is visible.`;
+                    trampolineNotice.textContent = `Waiting for pose data to stabilize... (${attempts}/${maxAttempts}). Ensure your body is fully visible.`;
                     setTimeout(checkPoseAndStartCalibration, poseCheckInterval);
                 } else {
                     trampolineNotice.style.color = '#f00';
@@ -647,13 +688,13 @@
                 
                 if (lowestLandmark) {
                   const lx = lowestLandmark.x * canvas.width;
-                  const ly = lowestLandland.y * canvas.height; // Fix: typo from lowestLandmark to lowestLandland
+                  const ly = lowestLandmark.y * canvas.height; 
                   const worldPtBaselineSample = pixelToWorld(lx, ly, lowestLandmark.z);
                   calibrationZValues.push(worldPtBaselineSample[2]);
                   calibrationSamples++;
-                  trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)} seconds.`;
+                  trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s.`;
                 } else {
-                    trampolineNotice.textContent = `CALIBRATING... (Pose lost) Please ensure ankles/hips are visible. ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s remaining.`;
+                    trampolineNotice.textContent = `CALIBRATING... (Pose lost or not detected) Please ensure ankles/hips are visible. ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s remaining.`;
                     trampolineNotice.style.color = '#ff0'; // Change to warning color
                 }
               } else {
@@ -665,17 +706,36 @@
                 clearInterval(calibrationLoop);
                 
                 if (calibrationZValues.length > 0) {
-                    const sumZ = calibrationZValues.reduce((a, b) => a + b, 0);
-                    baselineZ = sumZ / calibrationZValues.length;
-                    console.log(`Calibrated trampoline Z baseline (averaged): ${baselineZ.toFixed(3)}m`);
+                    // Filter outliers from calibrationZValues using IQR method
+                    const sortedZ = [...calibrationZValues].sort((a,b) => a - b);
+                    const q1 = sortedZ[Math.floor(sortedZ.length * 0.25)];
+                    const q3 = sortedZ[Math.ceil(sortedZ.length * 0.75) -1];
+                    const iqr = q3 - q1;
+                    const lowerBound = q1 - 1.5 * iqr;
+                    const upperBound = q3 + 1.5 * iqr;
+
+                    const filteredZValues = calibrationZValues.filter(z => z >= lowerBound && z <= upperBound);
                     
-                    // Transition to jump calibration phase
-                    currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
-                    calibrationJumpsData = []; // Clear previous jump data
-                    trampolineNotice.style.color = '#0f0';
-                    trampolineNotice.textContent = `Baseline set! Now perform ${REQUIRED_CALIBRATION_JUMPS} jumps for Z-scale calibration.`;
-                    calibrateBtn.style.display = "none"; // Hide calibrate button during jump calibration
-                    jumpState = JUMP_STATE_ON_TRAMPOLINE; // Reset jump state for new phase
+                    if (filteredZValues.length > 0) {
+                        const sumZ = filteredZValues.reduce((a, b) => a + b, 0);
+                        baselineZ = sumZ / filteredZValues.length;
+                        console.log(`Calibrated trampoline Z baseline (averaged, filtered): ${baselineZ.toFixed(3)}m`);
+                        
+                        currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
+                        calibrationJumpsData = []; // Clear previous jump data
+                        trampolineNotice.style.color = '#0f0';
+                        trampolineNotice.textContent = `Baseline set! Now perform ${REQUIRED_CALIBRATION_JUMPS} jumps for Z-scale calibration.`;
+                        calibrateBtn.style.display = "none"; // Hide calibrate button during jump calibration
+                        jumpState = JUMP_STATE_ON_TRAMPOLINE; // Reset jump state for new phase
+                        currentZSmoothed = null; // Reset smoothing for new phase
+                        verticalVelocitySmoothed = null; // Reset smoothing
+                    } else {
+                        trampolineNotice.style.color = '#f00';
+                        trampolineNotice.textContent = "Calibration failed: No valid baseline data after filtering. Try again from a stable position.";
+                        baselineZ = null;
+                        currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
+                        calibrateBtn.disabled = false;
+                    }
                 } else {
                     trampolineNotice.style.color = '#f00';
                     trampolineNotice.textContent = "Calibration failed: No valid baseline data collected. Make sure your ankles/hips are visible and still.";
@@ -689,10 +749,6 @@
 
         checkPoseAndStartCalibration(); // Initiate the robust pose check
 
-      } else if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
-          // This button won't be visible during jump calibration,
-          // the jumps themselves trigger the next step.
-          // This block might be useful if we want a "Skip Jump Calibration" button later.
       }
     });
 
@@ -723,9 +779,11 @@
     function applyDebugMode() {
         if (debugMode) {
             rawHeightDebugDisplay.style.display = 'block';
+            frameRateDisplay.style.display = 'block'; // Show FPS in debug mode
             debugValuesDisplay.style.display = 'block';
         } else {
             rawHeightDebugDisplay.style.display = 'none';
+            frameRateDisplay.style.display = 'none';
             debugValuesDisplay.style.display = 'none';
         }
     }
@@ -773,6 +831,9 @@
       calibrateBtn.style.display = "none"; // Hide until corners are marked
       saveSettingsBtn.textContent = 'Saved!';
       setTimeout(() => saveSettingsBtn.textContent = 'Save', 1200);
+      // Reset smoothing when settings change
+      currentZSmoothed = null;
+      verticalVelocitySmoothed = null;
     });
     window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
 
@@ -780,13 +841,23 @@
     let cameraDistanceMeters = parseFloat(localStorage.getItem('jt_cameraDistance')) || 2.0;
     let cameraHeightMeters   = parseFloat(localStorage.getItem('jt_cameraHeight')) || 1.0;
     let depthScaleFactor = parseFloat(localStorage.getItem('jt_depthScaleFactor')) || 5.0; // Starting value, will be tuned
-    const SMOOTHING_WINDOW   = 5; 
-    const MIN_JUMP_DISPLAY_THRESHOLD = 0.05;
+
+    // --- Smoothing Parameters ---
+    const ALPHA_Z_SMOOTHING = 0.4; // Higher alpha means less smoothing (0-1)
+    const ALPHA_VELOCITY_SMOOTHING = 0.3; // Higher alpha means less smoothing (0-1)
+
+    // --- Jump Detection Thresholds (tweaked for robustness) ---
+    const MIN_JUMP_DISPLAY_THRESHOLD = 0.05; // Minimum height to display as a jump
     const GRAVITY = 9.81; // m/s^2
 
-    // New thresholds for jump detection
-    const JUMP_OFF_TRAMPOLINE_THRESHOLD_METERS = 0.05;
-    const LANDING_ON_TRAMPOLINE_THRESHOLD_METERS = 0.03;
+    // Thresholds for jump detection (in meters)
+    const JUMP_OFF_TRAMPOLINE_THRESHOLD_METERS = 0.05; // How far above baseline to count as leaving trampoline
+    const LANDING_ON_TRAMPOLINE_THRESHOLD_METERS = 0.03; // How close to baseline to count as landing
+
+    // Velocity thresholds for jump state changes (m/s) - more robust
+    const TAKEOFF_VELOCITY_THRESHOLD = 0.1; // Min positive velocity to confirm takeoff
+    const PEAK_VELOCITY_THRESHOLD = -0.05; // Negative velocity indicating descent past peak
+    const LANDING_VELOCITY_THRESHOLD = -0.2; // Max negative velocity at landing (can be slightly negative due to impact)
 
     cameraDistanceInput.addEventListener('input', () => {
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
@@ -813,6 +884,9 @@
       jumpState = JUMP_STATE_ON_TRAMPOLINE;
       highestPointZ = -Infinity;
       flightTime = 0;
+      // Reset smoothing history
+      currentZSmoothed = null;
+      verticalVelocitySmoothed = null;
     });
     window.addEventListener('beforeunload', () => {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
@@ -831,6 +905,9 @@
         jumpState = JUMP_STATE_ON_TRAMPOLINE;
         highestPointZ = -Infinity;
         flightTime = 0;
+        // Reset smoothing history
+        currentZSmoothed = null;
+        verticalVelocitySmoothed = null;
     };
 
     zoomInBtn.addEventListener('click', async () => {
@@ -861,64 +938,67 @@
     zoomInBtn.disabled = true;
     zoomOutBtn.disabled = true;
 
-    // Helper to safely get value or 'N/A'
-    function getVal(landmark, prop) {
-        return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(3) : 'N/A';
-    }
-
     // Helper to get the lowest landmark (on screen Y) for tracking
+    // Prioritizes ankles, then knees, then hips for robustness
     function getLowestBodyLandmark(landmarks) {
-        const leftAnkle = landmarks[27];
-        const rightAnkle = landmarks[28];
-        const leftHip = landmarks[23];
-        const rightHip = landmarks[24];
-
+        // Define relevant lower body landmarks by their indices
+        const relevantLandmarkIndices = [
+            27, 28, // Left and Right Ankle
+            25, 26, // Left and Right Knee
+            23, 24  // Left and Right Hip
+        ];
+        
         let lowestLandmark = null;
-        let lowestLandmarkY = -Infinity; // Track the lowest Y (on screen)
+        let lowestY = -Infinity; // Canvas Y-coordinate (higher is lower on screen)
 
-        if (leftAnkle && leftAnkle.score > 0.5) {
-            if (leftAnkle.y > lowestLandmarkY) {
-                lowestLandmarkY = leftAnkle.y;
-                lowestLandmark = leftAnkle;
-            }
-        }
-        if (rightAnkle && rightAnkle.score > 0.5) {
-            if (rightAnkle.y > lowestLandmarkY) {
-                lowestLandmarkY = rightAnkle.y;
-                lowestLandmark = rightAnkle;
-            }
-        }
-        // If ankles aren't detected well, fallback to hips
-        if (!lowestLandmark || lowestLandmark.score < 0.7) { // Check score for ankles before considering hips
-            if (leftHip && leftHip.score > 0.5) {
-                if (leftHip.y > lowestLandmarkY) {
-                    lowestLandmarkY = leftHip.y;
-                    lowestLandmark = leftHip;
+        // Find the lowest point among all relevant landmarks that have a high enough confidence score
+        for (const index of relevantLandmarkIndices) {
+            const landmark = landmarks[index];
+            if (landmark && landmark.score > 0.6) { // Use a confidence threshold for reliability
+                // If it's the first confident landmark or lower than current lowest
+                if (!lowestLandmark || landmark.y > lowestY) {
+                    lowestY = landmark.y;
+                    lowestLandmark = landmark;
                 }
             }
-            if (rightHip && rightHip.score > 0.5) {
-                if (rightHip.y > lowestLandmarkY) {
-                    lowestLandmarkY = rightHip.y;
-                    lowestLandmark = rightHip;
-                }
-                // If neither ankles nor hips are well-detected, try other lower body points like knees
-                // (e.g., landmarks[25] and landmarks[26])
-            }
         }
+
+        // If no reliable lower body landmark is found, try other body parts like shoulders or nose,
+        // though this is less ideal for jump tracking
+        if (!lowestLandmark) {
+            // Fallback to a central, reliable landmark like the nose or shoulders, if needed
+            // This is a last resort to keep tracking something, but accuracy for Z might suffer.
+            const nose = landmarks[0];
+            const leftShoulder = landmarks[11];
+            const rightShoulder = landmarks[12];
+
+            if (nose && nose.score > 0.6) return nose;
+            if (leftShoulder && leftShoulder.score > 0.6) return leftShoulder;
+            if (rightShoulder && rightShoulder.score > 0.6) return rightShoulder;
+        }
+
         return lowestLandmark;
     }
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
+    let lastZPosRaw = null; // Store raw Z for velocity calculation
+    let lastTimeRaw = null; // Store time for velocity calculation
+
     function computeAndSendJump(landmarks) {
       const currentTime = performance.now();
 
+      // Update FPS display if debug mode is active
       if (debugMode) {
-        debugValuesDisplay.innerHTML = `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
-        debugValuesDisplay.innerHTML += `Jump State: ${jumpState}<br>`;
-        debugValuesDisplay.innerHTML += `Cal Phase: ${currentCalibrationPhase}<br>`;
+          if (!lastFpsUpdateTime) lastFpsUpdateTime = currentTime; // Initialize
+          // FPS is updated in drawLoop, no need to duplicate here
+          // Update debug values display
+          debugValuesDisplay.innerHTML = `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
+          debugValuesDisplay.innerHTML += `Jump State: ${jumpState}<br>`;
+          debugValuesDisplay.innerHTML += `Cal Phase: ${currentCalibrationPhase}<br>`;
       }
 
-      if (currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION || baselineZ === null) {
+      // Exit early if not in a tracking or jump calibration phase, or if not calibrated
+      if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || baselineZ === null) {
         if (debugMode) {
             rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
             rawHeightDebugDisplay.classList.remove('positive');
@@ -944,56 +1024,74 @@
       const ly = lowestLandmark.y * canvas.height; 
 
       const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
-      const currentZ = worldPt[2];
+      const currentZRaw = worldPt[2]; // Raw Z position
 
-      if (jumpState === JUMP_STATE_AIRBORNE && currentZ > highestPointZ) {
-          highestPointZ = currentZ;
-      }
-      
-      let verticalVelocity = 0;
-      if (lastZPos !== null && lastZTime !== null) {
-          const deltaTime = (currentTime - lastZTime) / 1000;
+      // --- Calculate Raw Vertical Velocity ---
+      let verticalVelocityRaw = 0;
+      if (lastZPosRaw !== null && lastTimeRaw !== null) {
+          const deltaTime = (currentTime - lastTimeRaw) / 1000;
           if (deltaTime > 0) {
-              verticalVelocity = (currentZ - lastZPos) / deltaTime;
+              verticalVelocityRaw = (currentZRaw - lastZPosRaw) / deltaTime;
           }
       }
-      lastZPos = currentZ;
-      lastZTime = currentTime;
+      lastZPosRaw = currentZRaw;
+      lastTimeRaw = currentTime;
 
 
+      // --- Exponential Smoothing ---
+      if (currentZSmoothed === null) {
+          currentZSmoothed = currentZRaw;
+          verticalVelocitySmoothed = verticalVelocityRaw;
+      } else {
+          currentZSmoothed = ALPHA_Z_SMOOTHING * currentZRaw + (1 - ALPHA_Z_SMOOTHING) * currentZSmoothed;
+          verticalVelocitySmoothed = ALPHA_VELOCITY_SMOOTHING * verticalVelocityRaw + (1 - ALPHA_VELOCITY_SMOOTHING) * verticalVelocitySmoothed;
+      }
+
+      // Update highest point reached *during* airborne phase using smoothed Z
+      if (jumpState === JUMP_STATE_AIRBORNE && currentZSmoothed > highestPointZ) {
+          highestPointZ = currentZSmoothed;
+      }
+      
       if (debugMode) {
-          rawHeightDebugDisplay.textContent = `Current Z: ${currentZ.toFixed(3)}m`;
-          debugValuesDisplay.innerHTML += `Lowest LM Z: ${currentZ.toFixed(3)}m<br>`;
-          debugValuesDisplay.innerHTML += `Vert Vel: ${verticalVelocity.toFixed(2)} m/s<br>`;
-          if (currentZ > baselineZ + 0.05) {
+          rawHeightDebugDisplay.textContent = `Current Z: ${currentZSmoothed.toFixed(3)}m`;
+          debugValuesDisplay.innerHTML += `Smoothed Z: ${currentZSmoothed.toFixed(3)}m<br>`;
+          debugValuesDisplay.innerHTML += `Smoothed Vel: ${verticalVelocitySmoothed.toFixed(2)} m/s<br>`;
+          debugValuesDisplay.innerHTML += `Raw Z: ${currentZRaw.toFixed(3)}m<br>`;
+          debugValuesDisplay.innerHTML += `Raw Vel: ${verticalVelocityRaw.toFixed(2)} m/s<br>`;
+          if (currentZSmoothed > baselineZ + 0.05) {
               rawHeightDebugDisplay.classList.add('positive');
           } else {
               rawHeightDebugDisplay.classList.remove('positive');
           }
       }
 
-      // --- Jump State Machine ---
+      // --- Jump State Machine with Hysteresis and Smoothed Values ---
       switch (jumpState) {
           case JUMP_STATE_ON_TRAMPOLINE:
-              if (currentZ > (baselineZ + JUMP_OFF_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocity > 0.1) {
+              // Condition to go Airborne: Z is above baseline AND vertical velocity is positive
+              if (currentZSmoothed > (baselineZ + JUMP_OFF_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocitySmoothed > TAKEOFF_VELOCITY_THRESHOLD) {
                   jumpState = JUMP_STATE_AIRBORNE;
                   takeOffTime = currentTime;
-                  highestPointZ = currentZ;
+                  highestPointZ = currentZSmoothed; // Initialize highest point with current smoothed Z
                   flightTime = 0;
                   if (debugMode) console.log(`[${currentTime.toFixed(0)}ms] Take-off detected!`);
               }
-              sendJumpHeight(0, true);
+              sendJumpHeight(0, true); // Still on trampoline, send 0 height
               break;
 
           case JUMP_STATE_AIRBORNE:
-              if (verticalVelocity < -0.05) {
+              // Condition to go Descending: Vertical velocity becomes negative (past peak)
+              if (verticalVelocitySmoothed < PEAK_VELOCITY_THRESHOLD) {
                   jumpState = JUMP_STATE_DESCENDING;
                   if (debugMode) console.log(`[${currentTime.toFixed(0)}ms] Peak/Descending detected.`);
               }
+              // highestPointZ is updated continuously in global scope
               break;
 
           case JUMP_STATE_DESCENDING:
-              if (currentZ <= (baselineZ + LANDING_ON_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocity < 0.1) {
+              // Condition to go On Trampoline: Z is back near baseline AND vertical velocity is low/positive (landing impact)
+              // Use slightly different threshold for landing (hysteresis)
+              if (currentZSmoothed <= (baselineZ + LANDING_ON_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocitySmoothed > LANDING_VELOCITY_THRESHOLD) {
                   jumpState = JUMP_STATE_ON_TRAMPOLINE;
                   const landingTime = currentTime;
                   flightTime = (landingTime - takeOffTime) / 1000;
@@ -1002,7 +1100,8 @@
                   let finalReportedHeight = Math.max(0, calculatedJumpHeightFlight < MIN_JUMP_DISPLAY_THRESHOLD ? 0 : calculatedJumpHeightFlight);
 
                   // --- Z-Scale Factor Automation Logic ---
-                  if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION && flightTime > 0.3) { // Only calibrate with meaningful jumps
+                  // Only calibrate with meaningful jumps (sufficient flight time)
+                  if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION && flightTime > 0.3) {
                       const current3DHeight = Math.max(0, highestPointZ - baselineZ); // Height derived from MediaPipe Z
 
                       if (current3DHeight > 0.01 && calculatedJumpHeightFlight > 0.01) { // Avoid division by zero/near zero
@@ -1037,11 +1136,11 @@
                       console.log(`[${currentTime.toFixed(0)}ms] Landing detected! Flight Time: ${flightTime.toFixed(3)}s, Calculated Height: ${calculatedJumpHeightFlight.toFixed(2)}m`);
                       debugValuesDisplay.innerHTML += `Flight Time: ${flightTime.toFixed(3)}s<br>`;
                       debugValuesDisplay.innerHTML += `Calculated Height: ${calculatedJumpHeightFlight.toFixed(2)}m<br>`;
-                      debugValuesDisplay.innerHTML += `H3D: ${(highestPointZ - baselineZ).toFixed(2)}m<br>`;
+                      debugValuesDisplay.innerHTML += `H3D (peak-baseline): ${(highestPointZ - baselineZ).toFixed(2)}m<br>`;
                   }
                   sendJumpHeight(finalReportedHeight, true);
 
-                  highestPointZ = -Infinity;
+                  highestPointZ = -Infinity; // Reset for next jump
               }
               break;
       }
@@ -1056,17 +1155,18 @@
                 type: 'jump_height',
                 height: height,
                 calibrated: calibratedStatus,
-                hd_deduction: 0
+                hd_deduction: 0 // Keep for compatibility if used elsewhere
             }, '*');
         }
     }
 
+    // Processing interval for jump height calculation (at a lower rate than MP results for performance)
     setInterval(() => {
       // Only process pose if we are in a tracking or jump calibration phase and have results
       if ((currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE || currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) && lastPoseResults && lastPoseResults.poseLandmarks) {
         computeAndSendJump(lastPoseResults.poseLandmarks);
       }
-    }, 33);
+    }, 33); // Approximately 30 FPS for jump logic, balancing accuracy and performance
   </script>
 </body>
 </html>
