@@ -272,7 +272,9 @@
     let jumpHeightHistory = [];
     let lastPoseResults = null;
     let animationFrameId = null;
-    let baselineZ = null; // New: Stores the Z-coordinate of the lowest point at calibration
+    let baselineZ = null; // Stores the Z-coordinate of the lowest point at calibration
+    let isCalibratingNow = false; // New flag for calibration in progress
+    let calibrationZValues = []; // New array to store Z values during calibration
 
     // --------- CAMERA SETUP ---------
     async function startCamera() {
@@ -367,11 +369,11 @@
         drawTrampolineArea(ctx, trampolinePolygon);
       }
 
-      if (lastPoseResults && lastPoseResults.poseLandmarks && trampolinePolygon && !calibrationReady) {
+      if (lastPoseResults && lastPoseResults.poseLandmarks && trampolinePolygon && !calibrationReady && !isCalibratingNow) {
         calibrateBtn.style.display = 'block';
         calibrateBtn.disabled = false;
         trampolineNotice.textContent = "Press Calibrate once camera settings are finalized.";
-      } else if ((!lastPoseResults || !lastPoseResults.poseLandmarks) && trampolinePolygon && !calibrationReady) {
+      } else if ((!lastPoseResults || !lastPoseResults.poseLandmarks) && trampolinePolygon && !calibrationReady && !isCalibratingNow) {
         calibrateBtn.disabled = true;
         trampolineNotice.textContent = "Waiting for pose detection... Make sure you're visible.";
       }
@@ -452,7 +454,6 @@
     function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
     function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 
-    // MODIFIED: Accepts the MediaPipe Z-coordinate (depth) - REVISED APPROACH
     function pixelToWorld(u, v, mpZ) {
       const {fx, fy, cx, cy} = window._JT_intrinsics;
       const {C} = window._JT_extrinsics;
@@ -474,45 +475,16 @@
       let t;
       if (Math.abs(denominator) < 1e-8) {
           t = 0;
-          debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`;
-          debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
+          // debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`; // Commented out for cleaner debug
+          // debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
       } else {
-          t = numerator / -denominator; // Retain the sign flip here
-          debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
-          debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
-          debugValuesDisplay.innerHTML += `<br>t_base: ${t.toFixed(3)}`;
+          t = numerator / -denominator;
+          // debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
+          // debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
+          // debugValuesDisplay.innerHTML += `<br>t_base: ${t.toFixed(3)}`;
       }
       
-      // NEW: Adjust 't' (distance along ray) based on MediaPipe's Z
-      // mpZ range is approx [0, 1]. Smaller mpZ means closer (less depth).
-      // If mpZ decreases (e.g., from 0.3 to 0.05), it means the point is closer.
-      // To reflect this in world Z, we want worldPt[2] to INCREASE (go up).
-      // Since worldPt[2] = C[2] + ray[2] * t_scaled, and ray[2] is likely positive (camera looks forward/down),
-      // for worldPt[2] to INCREASE, t_scaled must DECREASE.
-      // So, if mpZ DECREASES, t_scaled must DECREASE.
-      // A simple multiplication is indeed what we want IF mpZ is inverted or we flip the sign here.
-
-      // Let's assume mpZ=0 is closest, mpZ=1 is furthest.
-      // When jumping, mpZ decreases (closer). We want t_scaled to decrease.
-      // The formula `t_scaled = t * (mpZ * depthScaleFactor)` means:
-      // If mpZ is small (e.g., 0.05), then t_scaled is small.
-      // If mpZ is large (e.g., 0.30), then t_scaled is large.
-      // This is the correct relationship to make worldPt[2] go UP when mpZ goes DOWN.
-      // So, the previous formula `t_scaled = t * (mpZ * depthScaleFactor)` was actually correct IF mpZ directly correlates with perceived depth.
-
-      // Perhaps the issue is that mpZ doesn't represent distance linearly or that `depthScaleFactor` isn't making enough impact.
-      // Let's try to make the `mpZ` adjustment a direct *offset* to the Z-coordinate itself, rather than scaling `t`.
-      // This is more robust as it decouples the depth scaling from the ray intersection with the plane.
-
-      const worldPtBase = add(C, scale(ray, t)); // Calculate base world point without mpZ
-      
-      // Now, adjust the Z component of the world point based on mpZ
-      // mpZ from MediaPipe: Smaller value = closer to camera.
-      // For jump height, if you are closer to camera, your world Z should be higher.
-      // So, if mpZ decreases, worldPt[2] should increase.
-      // Let's add `(1 - mpZ) * depthScaleFactor` to the Z of the world point.
-      // `1 - mpZ`: Converts smaller mpZ to larger value (e.g., 0.05 -> 0.95).
-      // `depthScaleFactor`: Controls the magnitude of this effect.
+      const worldPtBase = add(C, scale(ray, t));
       
       const worldPt = [
         worldPtBase[0],
@@ -520,13 +492,13 @@
         worldPtBase[2] + (1 - mpZ) * depthScaleFactor
       ];
 
-      debugValuesDisplay.innerHTML += `<br>mpZ: ${mpZ.toFixed(3)}`;
-      // debugValuesDisplay.innerHTML += `<br>t_scaled: ${t_scaled.toFixed(3)}`; // Removed t_scaled in favor of direct Z adjustment
-      debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},<span style="color:cyan;">${C[2].toFixed(2)}</span>]` +
-                                     `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},<span style="color:cyan;">${ray[2].toFixed(2)}</span>]` +
-                                     `<br>worldPtBase: [${worldPtBase[0].toFixed(2)},${worldPtBase[1].toFixed(2)},<span style="color:${worldPtBase[2].toFixed(3) !== '0.000' ? 'magenta' : 'red'};">${worldPtBase[2].toFixed(3)}</span>]` +
-                                     `<br>Adjust (+ (1-mpZ)*scale): ${( (1 - mpZ) * depthScaleFactor ).toFixed(3)}`;
-      debugValuesDisplay.innerHTML += `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
+      // Debugging values (can be uncommented if needed)
+      // debugValuesDisplay.innerHTML += `<br>mpZ: ${mpZ.toFixed(3)}`;
+      // debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},<span style="color:cyan;">${C[2].toFixed(2)}</span>]` +
+      //                                `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},<span style="color:cyan;">${ray[2].toFixed(2)}</span>]` +
+      //                                `<br>worldPtBase: [${worldPtBase[0].toFixed(2)},${worldPtBase[1].toFixed(2)},<span style="color:${worldPtBase[2].toFixed(3) !== '0.000' ? 'magenta' : 'red'};">${worldPtBase[2].toFixed(3)}</span>]` +
+      //                                `<br>Adjust (+ (1-mpZ)*scale): ${( (1 - mpZ) * depthScaleFactor ).toFixed(3)}`;
+      // debugValuesDisplay.innerHTML += `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
       return worldPt;
     }
 
@@ -549,7 +521,7 @@
       }
     });
 
-    calibrateBtn.addEventListener('click', function() {
+    calibrateBtn.addEventListener('click', async function() {
       if (!trampolinePolygon) {
           trampolineNotice.style.color = '#f00';
           trampolineNotice.textContent = "Please mark the 4 corners of the trampoline first.";
@@ -561,7 +533,7 @@
           return;
       }
 
-      // First, establish camera and plane settings
+      // First, establish camera and plane settings (moved here to ensure they're up-to-date)
       REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.0;
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
       cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
@@ -584,57 +556,83 @@
         point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
       };
 
-      // Now, try to get the baseline Z from the current pose
-      const leftAnkle = lastPoseResults.poseLandmarks[27];
-      const rightAnkle = lastPoseResults.poseLandmarks[28];
-      const leftHip = lastPoseResults.poseLandmarks[23];
-      const rightHip = lastPoseResults.poseLandmarks[24];
+      // --- Start Calibration Averaging ---
+      isCalibratingNow = true;
+      calibrateBtn.disabled = true;
+      calibrationZValues = [];
+      const calibrationDurationMs = 3000; // 3 seconds
+      const calibrationIntervalMs = 100; // Sample every 100ms
+      let calibrationSamples = 0;
+      const maxCalibrationSamples = calibrationDurationMs / calibrationIntervalMs;
 
-      let anyLandmarkForBaseline = null;
-      if (leftAnkle && rightAnkle) {
-          lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
-          anyLandmarkForBaseline = lowestLandmark;
-      } else if (leftAnkle) {
-          anyLandmarkForBaseline = leftAnkle;
-      } else if (rightAnkle) {
-          anyLandmarkForBaseline = rightAnkle;
-      } else if (leftHip && rightHip) {
-          lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
-          anyLandmarkForBaseline = lowestLandmark;
-      } else if (leftHip) {
-          anyLandmarkForBaseline = leftHip;
-      } else if (rightHip) {
-          anyLandmarkForBaseline = rightHip;
-      }
+      trampolineNotice.style.color = '#fff';
+      trampolineNotice.textContent = "CALIBRATING... Stand still for 3 seconds.";
 
-      if (anyLandmarkForBaseline) {
-          const lx = anyLandmarkForBaseline.x * canvas.width;
-          const ly = anyLandmarkForBaseline.y * canvas.height;
-          // Pass MediaPipe's Z to pixelToWorld for baseline calculation
-          const worldPtBaseline = pixelToWorld(lx, ly, anyLandmarkForBaseline.z);
-          baselineZ = worldPtBaseline[2]; // Set the current Z as the baseline
-          trampolineNotice.style.color = '#0f0';
-          trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
-          console.log(`Calibrated baseline Z: ${baselineZ.toFixed(3)}m`);
-      } else {
-          trampolineNotice.style.color = '#f00';
-          trampolineNotice.textContent = "Could not find suitable landmark for baseline calibration. Make sure your ankles/hips are visible.";
-          baselineZ = null; // Reset baseline if not found
-      }
-      
-      let anyLandmarkInPolygon = false;
-      if (leftAnkle && pointInPolygon([leftAnkle.x * canvas.width, leftAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
-      if (rightAnkle && pointInPolygon([rightAnkle.x * canvas.width, rightAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
-      if (leftHip && pointInPolygon([leftHip.x * canvas.width, leftHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
-      if (rightHip && pointInPolygon([rightHip.x * canvas.width, rightHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+      const calibrationLoop = setInterval(() => {
+        if (lastPoseResults && lastPoseResults.poseLandmarks) {
+          const leftAnkle = lastPoseResults.poseLandmarks[27];
+          const rightAnkle = lastPoseResults.poseLandmarks[28];
+          const leftHip = lastPoseResults.poseLandmarks[23];
+          const rightHip = lastPoseResults.poseLandmarks[24];
 
-      if (!anyLandmarkInPolygon && baselineZ !== null) { // Only show warning if baseline was set but still not in polygon
-          trampolineNotice.style.color = '#ff9900';
-          trampolineNotice.textContent = "Warning: Main pose landmarks not within marked trampoline area during calibration. Adjust position or mark area again for best accuracy. (Calibration complete, tracking active)";
-      }
-      
-      calibrationReady = true;
-      calibrateBtn.style.display = "none";
+          let anyLandmarkForBaseline = null;
+          if (leftAnkle && rightAnkle) {
+              lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
+              anyLandmarkForBaseline = lowestLandmark;
+          } else if (leftAnkle) {
+              anyLandmarkForBaseline = leftAnkle;
+          } else if (rightAnkle) {
+              anyLandmarkForBaseline = rightAnkle;
+          } else if (leftHip && rightHip) {
+              lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
+              anyLandmarkForBaseline = lowestLandmark;
+          } else if (leftHip) {
+              anyLandmarkForBaseline = leftHip;
+          } else if (rightHip) {
+              anyLandmarkForBaseline = rightHip;
+          }
+
+          if (anyLandmarkForBaseline) {
+            const lx = anyLandmarkForBaseline.x * canvas.width;
+            const ly = anyLandmarkForBaseline.y * canvas.height;
+            const worldPtBaselineSample = pixelToWorld(lx, ly, anyLandmarkForBaseline.z);
+            calibrationZValues.push(worldPtBaselineSample[2]);
+            calibrationSamples++;
+            trampolineNotice.textContent = `CALIBRATING... Stand still for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)} seconds.`;
+          }
+        }
+
+        if (calibrationSamples >= maxCalibrationSamples) {
+          clearInterval(calibrationLoop);
+          isCalibratingNow = false;
+          calibrateBtn.disabled = false;
+          
+          if (calibrationZValues.length > 0) {
+              const sumZ = calibrationZValues.reduce((a, b) => a + b, 0);
+              baselineZ = sumZ / calibrationZValues.length; // Average the collected Z values
+              trampolineNotice.style.color = '#0f0';
+              trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
+              console.log(`Calibrated baseline Z (averaged): ${baselineZ.toFixed(3)}m`);
+          } else {
+              trampolineNotice.style.color = '#f00';
+              trampolineNotice.textContent = "Calibration failed: No valid pose data collected. Make sure your ankles/hips are visible.";
+              baselineZ = null; // Reset baseline if no data
+          }
+          
+          let anyLandmarkInPolygon = false;
+          if (leftAnkle && pointInPolygon([leftAnkle.x * canvas.width, leftAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+          if (rightAnkle && pointInPolygon([rightAnkle.x * canvas.width, rightAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+          if (leftHip && pointInPolygon([leftHip.x * canvas.x * canvas.width, leftHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+          if (rightHip && pointInPolygon([rightHip.x * canvas.x * canvas.width, rightHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+
+          if (!anyLandmarkInPolygon && baselineZ !== null) {
+              trampolineNotice.style.color = '#ff9900';
+              trampolineNotice.textContent = "Warning: Main pose landmarks not within marked trampoline area during calibration. Adjust position or mark area again for best accuracy. (Calibration complete, tracking active)";
+          }
+          calibrationReady = true;
+          calibrateBtn.style.display = "none";
+        }
+      }, calibrationIntervalMs);
     });
 
     // --------- SETTINGS POPOVER LOGIC ---------
@@ -659,33 +657,33 @@
     const cameraDistanceInput = document.getElementById('cameraDistance');
     const cameraHeightInput   = document.getElementById('cameraHeight');
     const trampolineHeightInput = document.getElementById('trampolineHeight');
-    const depthScaleFactorInput = document.getElementById('depthScaleFactor'); // New input
+    const depthScaleFactorInput = document.getElementById('depthScaleFactor');
     function saveSettingsToStorage() {
       localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
       localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
       localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
-      localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value); // Save new setting
+      localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value);
     }
     function loadSettingsFromStorage() {
-      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight', 'jt_depthScaleFactor'].forEach(k => { // Add new setting to load
+      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight', 'jt_depthScaleFactor'].forEach(k => {
         const v = localStorage.getItem(k);
         if (v !== null) {
           document.getElementById({
             'jt_cameraDistance':'cameraDistance',
             'jt_cameraHeight':'cameraHeight',
             'jt_trampolineHeight':'trampolineHeight',
-            'jt_depthScaleFactor':'depthScaleFactor' // Map to new input ID
+            'jt_depthScaleFactor':'depthScaleFactor'
           }[k]).value = v;
         }
       });
       // Trigger input event to update the global variables from loaded values
-      ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id => // Add new setting to trigger
+      ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id =>
         document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
     saveSettingsBtn.addEventListener('click', () => {
       saveSettingsToStorage();
-      if (trampolinePolygon) {
+      if (trampolinePolygon && !isCalibratingNow) { // Only auto-recalibrate if not already calibrating
           calibrateBtn.click(); // Recalibrate if area is set
       }
       saveSettingsBtn.textContent = 'Saved!';
@@ -697,9 +695,10 @@
     let REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(localStorage.getItem('jt_trampolineHeight')) || 0.0;
     let cameraDistanceMeters = parseFloat(localStorage.getItem('jt_cameraDistance')) || 2.0;
     let cameraHeightMeters   = parseFloat(localStorage.getItem('jt_cameraHeight')) || 1.0;
-    let depthScaleFactor = parseFloat(localStorage.getItem('jt_depthScaleFactor')) || 5.0; // Initialize new setting
+    let depthScaleFactor = parseFloat(localStorage.getItem('jt_depthScaleFactor')) || 5.0;
     const SMOOTHING_WINDOW   = 5;
     const MIN_DELTA_METERS   = 0.002;
+    const MIN_JUMP_DISPLAY_THRESHOLD = 0.05; // New: Jumps below this will display as 0.00m
 
     cameraDistanceInput.addEventListener('input', () => {
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
@@ -710,7 +709,7 @@
     trampolineHeightInput.addEventListener('input', () => {
       REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.0;
     });
-    depthScaleFactorInput.addEventListener('input', () => { // Event listener for new input
+    depthScaleFactorInput.addEventListener('input', () => {
       depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0;
     });
 
@@ -725,7 +724,7 @@
 
     // Helper to safely get value or 'N/A'
     function getVal(landmark, prop) {
-        return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(3) : 'N/A'; // Increased precision for debug
+        return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(3) : 'N/A';
     }
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
@@ -789,14 +788,12 @@
       const lx = lowestLandmark.x * canvas.width;
       const ly = lowestLandmark.y * canvas.height; 
 
-      // MODIFIED: Pass MediaPipe's Z to pixelToWorld
       const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
       
-      // Calculate jump height relative to the calibrated baseline Z
-      const rawHeightAboveTrampoline = worldPt[2] - baselineZ;
+      let rawHeightAboveTrampoline = worldPt[2] - baselineZ;
 
       rawHeightDebugDisplay.textContent = `Raw Z-Delta: ${rawHeightAboveTrampoline.toFixed(3)}m`;
-      if (rawHeightAboveTrampoline > 0.005) {
+      if (rawHeightAboveTrampoline > 0.005) { // Small threshold for visual feedback color
         rawHeightDebugDisplay.classList.add('positive');
       } else {
         rawHeightDebugDisplay.classList.remove('positive');
@@ -806,7 +803,9 @@
       if (jumpHeightHistory.length > SMOOTHING_WINDOW) jumpHeightHistory.shift();
 
       const avgRawHeight = jumpHeightHistory.reduce((a,b) => a + b, 0) / jumpHeightHistory.length;
-      const reportedHeight = Math.max(0, avgRawHeight);
+      
+      // NEW: Clamp jump height to 0 if it's below a threshold
+      const reportedHeight = Math.max(0, avgRawHeight < MIN_JUMP_DISPLAY_THRESHOLD ? 0 : avgRawHeight);
 
       widgetJumpHeightDisplay.textContent = `Jump: ${reportedHeight.toFixed(2)} m`;
 
@@ -822,8 +821,9 @@
       }
     }
 
+    // This setInterval will now only trigger jump height computation IF not calibrating
     setInterval(() => {
-      if (calibrationReady && lastPoseResults && lastPoseResults.poseLandmarks) {
+      if (calibrationReady && lastPoseResults && lastPoseResults.poseLandmarks && !isCalibratingNow) {
         computeAndSendJump(lastPoseResults.poseLandmarks);
       }
     }, 33);
