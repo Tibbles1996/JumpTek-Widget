@@ -228,14 +228,9 @@
         <div class="desc">Measure vertically from the trampoline mat to the center of the camera lens.</div>
       </div>
       <div>
-        <label for="trampolineHeight">Trampoline mat height (meters):</label><br>
-        <input type="number" step="0.01" min="0.1" max="2.0" value="0.6" id="trampolineHeight">
-        <div class="desc">Vertical distance from ground to trampoline mat. (This setting is now primarily for reference in this debug version).</div>
-      </div>
-      <div>
         <label for="depthScaleFactor">MediaPipe Z Depth Scale Factor:</label><br>
         <input type="number" step="0.1" min="0.1" max="50" value="5.0" id="depthScaleFactor">
-        <div class="desc">Adjusts how much MediaPipe's Z-coordinate (depth) influences the calculated world Z. Higher values mean more sensitivity to MediaPipe's Z.</div>
+        <div class="desc">Adjusts how MediaPipe's relative Z-coordinate (depth) is scaled into real-world meters. Find a value that makes vertical movements on screen match real-world vertical distances.</div>
       </div>
       <div class="checkbox-container">
         <label for="debugMode">Enable Debug Mode (show raw data):</label>
@@ -270,7 +265,7 @@
     const debugValuesDisplay = document.getElementById('debugValuesDisplay');
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
-    const debugModeCheckbox = document.getElementById('debugMode'); // Re-added
+    const debugModeCheckbox = document.getElementById('debugMode');
 
     // --------- STATE ---------
     let poseLoaded = false;
@@ -531,6 +526,12 @@
       
       const worldPtBase = add(C, scale(ray, t));
       
+      // The mpZ (MediaPipe's normalized Z) scales the depth relative to the camera ray.
+      // A higher mpZ (closer to 1) means further away from the camera.
+      // (1 - mpZ) inverts this so that 0 means furthest, 1 means closest.
+      // We scale this by depthScaleFactor to convert MediaPipe's relative depth to meters.
+      // The worldPtBase[2] is the Z-coordinate if the point was on the calibrated plane.
+      // We add the scaled mpZ value to get the actual Z.
       const worldPt = [
         worldPtBase[0],
         worldPtBase[1],
@@ -572,7 +573,6 @@
       }
 
       // First, establish camera and plane settings (moved here to ensure they're up-to-date)
-      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.0;
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
       cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
       depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0; // Retrieve new setting
@@ -585,14 +585,17 @@
         cy: canvas.height / 2
       };
 
+      // Define the camera's assumed position (C) relative to the trampoline's "ground"
+      // P0 defines a point on the plane (e.g., origin of the trampoline plane at the bottom)
+      // N defines the normal vector to the plane (e.g., [0,0,1] for a flat horizontal plane)
       window._JT_extrinsics = {
-        C: [0, -cameraDistanceMeters, cameraHeightMeters],
-        R: [[1,0,0],[0,1,0],[0,0,1]]
+        C: [0, -cameraDistanceMeters, cameraHeightMeters], // Camera position: [X, Y (depth into scene), Z (height)]
+        R: [[1,0,0],[0,1,0],[0,0,1]] // Simple rotation matrix (identity - no rotation)
       };
 
       window._JT_plane = {
-        normal: [0,0,1],
-        point: [0,0,REAL_TRAMPOLINE_HEIGHT_METERS]
+        normal: [0,0,1], // Assuming trampoline is a horizontal plane
+        point: [0,0,0] // Assuming the trampoline plane is at Z=0 in this coordinate system for calculation
       };
 
       // --- Start Calibration Averaging ---
@@ -605,7 +608,7 @@
       const maxCalibrationSamples = calibrationDurationMs / calibrationIntervalMs;
 
       trampolineNotice.style.color = '#fff';
-      trampolineNotice.textContent = "CALIBRATING... Stand still for 3 seconds.";
+      trampolineNotice.textContent = "CALIBRATING... Stand still on the trampoline for 3 seconds. Ensure your ankles/hips are visible.";
 
       const calibrationLoop = setInterval(() => {
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
@@ -617,7 +620,7 @@
             const worldPtBaselineSample = pixelToWorld(lx, ly, lowestLandmark.z);
             calibrationZValues.push(worldPtBaselineSample[2]);
             calibrationSamples++;
-            trampolineNotice.textContent = `CALIBRATING... Stand still for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)} seconds.`;
+            trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)} seconds.`;
           }
         }
 
@@ -670,7 +673,6 @@
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
     const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
-    // const debugModeCheckbox = document.getElementById('debugMode'); // Already defined above
 
     settingsBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -688,7 +690,7 @@
     // --------- SAVE/LOAD SETTINGS ---------
     const cameraDistanceInput = document.getElementById('cameraDistance');
     const cameraHeightInput   = document.getElementById('cameraHeight');
-    const trampolineHeightInput = document.getElementById('trampolineHeight');
+    // const trampolineHeightInput = document.getElementById('trampolineHeight'); // REMOVED
     const depthScaleFactorInput = document.getElementById('depthScaleFactor');
 
     function applyDebugMode() {
@@ -704,18 +706,17 @@
     function saveSettingsToStorage() {
       localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
       localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
-      localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
+      // localStorage.removeItem('jt_trampolineHeight'); // REMOVED
       localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value);
-      localStorage.setItem('jt_debugMode', debugModeCheckbox.checked ? 'true' : 'false'); // Re-added
+      localStorage.setItem('jt_debugMode', debugModeCheckbox.checked ? 'true' : 'false');
     }
     function loadSettingsFromStorage() {
-      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight', 'jt_depthScaleFactor'].forEach(k => {
+      ['jt_cameraDistance','jt_cameraHeight', 'jt_depthScaleFactor'].forEach(k => { // REMOVED trampolineHeight from list
         const v = localStorage.getItem(k);
         if (v !== null) {
           document.getElementById({
             'jt_cameraDistance':'cameraDistance',
             'jt_cameraHeight':'cameraHeight',
-            'jt_trampolineHeight':'trampolineHeight',
             'jt_depthScaleFactor':'depthScaleFactor'
           }[k]).value = v;
         }
@@ -728,7 +729,7 @@
       applyDebugMode(); // Apply immediately on load
 
       // Trigger input event to update the global variables from loaded values
-      ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id =>
+      ['cameraDistance','cameraHeight', 'depthScaleFactor'].forEach(id => // REMOVED trampolineHeight from list
         document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
@@ -746,11 +747,11 @@
     window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
 
     // --------- CONFIGURABLE PARAMETERS ---------
-    let REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(localStorage.getItem('jt_trampolineHeight')) || 0.0;
+    // Removed REAL_TRAMPOLINE_HEIGHT_METERS
     let cameraDistanceMeters = parseFloat(localStorage.getItem('jt_cameraDistance')) || 2.0;
     let cameraHeightMeters   = parseFloat(localStorage.getItem('jt_cameraHeight')) || 1.0;
     let depthScaleFactor = parseFloat(localStorage.getItem('jt_depthScaleFactor')) || 5.0;
-    const SMOOTHING_WINDOW   = 5; // For raw Z delta smoothing
+    const SMOOTHING_WINDOW   = 5; // For raw Z delta smoothing (currently unused, but keeping)
     const MIN_JUMP_DISPLAY_THRESHOLD = 0.05; // Jumps below this will display as 0.00m
     const GRAVITY = 9.81; // m/s^2
 
@@ -764,9 +765,7 @@
     cameraHeightInput.addEventListener('input', () => {
       cameraHeightMeters = parseFloat(cameraHeightInput.value) || 1.0;
     });
-    trampolineHeightInput.addEventListener('input', () => {
-      REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.0;
-    });
+    // Removed trampolineHeightInput event listener
     depthScaleFactorInput.addEventListener('input', () => {
       depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0;
     });
@@ -778,7 +777,7 @@
       // Reset calibration on camera switch
       calibrationReady = false;
       baselineZ = null;
-      trampolineNotice.textContent = "Camera switched. Please re-mark trampoline corners and re-calibrate.";
+      trampolineNotice.textContent = "Camera switched. Please re-mark trampoline corners and re-calibrate by standing still on the trampoline.";
       calibrateBtn.style.display = "block"; // Ensure calibrate button is visible
       calibrateBtn.disabled = true;
       trampolineCorners = []; // Clear marked corners
@@ -796,7 +795,7 @@
     const resetCalibrationForZoom = () => {
         calibrationReady = false;
         baselineZ = null;
-        trampolineNotice.textContent = "Zoom changed. Please re-calibrate for accurate jump height.";
+        trampolineNotice.textContent = "Zoom changed. Please re-calibrate by standing still on the trampoline for accurate jump height.";
         calibrateBtn.style.display = "block"; // Ensure calibrate button is visible
         calibrateBtn.disabled = true;
         // Do NOT clear trampolineCorners or trampolinePolygon here, as zoom doesn't affect pixel positions relative to the canvas
