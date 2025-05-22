@@ -518,7 +518,7 @@
       }
       if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
           trampolineNotice.style.color = '#f00';
-          trampolineNotice.textContent = "Pose data not ready. Make sure you are visible to the camera.";
+          trampolineNotice.textContent = "Pose data not ready. Make sure you're visible to the camera.";
           return;
       }
 
@@ -748,7 +748,7 @@
       }
 
       const lx = lowestLandmark.x * canvas.width;
-      const ly = lowestLandland.y * canvas.height;
+      const ly = lowestLandmark.y * canvas.height; // CORRECTED: Changed lowestLandland.y to lowestLandmark.y
 
       // MODIFIED: Pass MediaPipe's Z to pixelToWorld
       const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
