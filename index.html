@@ -449,13 +449,21 @@
         drawTrampolineArea(ctx, trampolinePolygon);
       }
 
-      // Update calibrate button visibility based on calibration phase
+      // --- DEBUGGING CALIBRATION BUTTON STATE ---
+      console.log(`[DRAW] Current Cal Phase: ${currentCalibrationPhase}`);
+      console.log(`[DRAW] Trampoline Polygon: ${trampolinePolygon ? 'Set' : 'Not Set'}`);
+      console.log(`[DRAW] Last Pose Results: ${lastPoseResults && lastPoseResults.poseLandmarks ? 'Available' : 'Not Available'}`);
+
+      // Update calibrate button visibility and disabled state
       if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS || currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
         calibrateBtn.style.display = "none";
+        console.log(`[DRAW] Calibrate Btn Display: none (Phase: ${currentCalibrationPhase})`);
       } else {
         calibrateBtn.style.display = "block";
         // ONLY enable the calibrate button if a pose is detected AND we are in the STAND_STILL phase
-        calibrateBtn.disabled = !(currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL && lastPoseResults && lastPoseResults.poseLandmarks);
+        const canEnableCalibrate = (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL && lastPoseResults && lastPoseResults.poseLandmarks && lastPoseResults.poseLandmarks.length > 0);
+        calibrateBtn.disabled = !canEnableCalibrate;
+        console.log(`[DRAW] Calibrate Btn Display: block, Disabled: ${calibrateBtn.disabled} (Can Enable: ${canEnableCalibrate})`);
       }
       
       // Update trampoline notice based on calibration phase
@@ -463,19 +471,23 @@
         trampolineNotice.textContent = "Tap the four corners of the trampoline to mark its boundaries.";
         trampolineNotice.style.color = '#0f0';
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-        if (calibrateBtn.disabled) {
+        if (calibrateBtn.disabled) { // If button is disabled despite being in this phase
             trampolineNotice.textContent = "Trampoline area set. Stand on the trampoline and ensure your body is fully visible, then press Calibrate.";
             trampolineNotice.style.color = '#ff0'; // Warning color if pose not ready
+            console.log("[NOTICE] Waiting for pose for calibration.");
         } else {
             trampolineNotice.textContent = "Trampoline area set! Stand still on the trampoline and press Calibrate.";
             trampolineNotice.style.color = '#0f0'; // Ready color
+            console.log("[NOTICE] Ready for stand-still calibration.");
         }
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
         trampolineNotice.textContent = `Perform ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more jump${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length === 1 ? '' : 's'} for Z-scale calibration.`;
         trampolineNotice.style.color = '#0f0';
+        console.log("[NOTICE] Jump calibration in progress.");
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
         trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
         trampolineNotice.style.color = '#0f0';
+        console.log("[NOTICE] Calibration complete.");
       }
 
       // Update FPS display
@@ -606,52 +618,75 @@
 
     // --------- CALIBRATION FLOW ---------
     canvas.addEventListener('click', function(e) {
-      if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
-      if (trampolinePolygon) return; // Already marked
+      if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) {
+        console.log(`[CLICK] Not in MARK_CORNERS phase. Current phase: ${currentCalibrationPhase}`);
+        return;
+      }
+      if (trampolinePolygon) {
+        console.log("[CLICK] Trampoline polygon already set. Ignoring click.");
+        return; // Already marked
+      }
 
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (canvas.width / rect.width);
       const y = (e.clientY - rect.top) * (canvas.height / rect.height);
       trampolineCorners.push([x, y]);
+      console.log(`[CLICK] Corner ${trampolineCorners.length} marked: (${x.toFixed(0)}, ${y.toFixed(0)})`);
+
       if (trampolineCorners.length === 4) {
         trampolinePolygon = trampolineCorners.slice();
         trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
         trampolineCorners = []; // Clear for next marking if needed
         currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
+        console.log("[CALIBRATION] 4 corners marked. Transitioning to STAND_STILL phase.");
         // The drawLoop will now update the notice and button state
       }
     });
 
     calibrateBtn.addEventListener('click', async function() {
+      console.log(`[CALIBRATE_BTN_CLICK] Clicked! Current Phase: ${currentCalibrationPhase}`);
+
       if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
         if (!trampolinePolygon) {
             trampolineNotice.style.color = '#f00';
             trampolineNotice.textContent = "Error: Please mark the 4 corners of the trampoline first.";
+            console.error("[CALIBRATE_BTN_CLICK] Calibration attempted without trampoline polygon.");
             return;
         }
+        
+        // --- Add this specific check ---
+        if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
+            trampolineNotice.style.color = '#f00';
+            trampolineNotice.textContent = "Error: No pose detected. Please ensure your body is fully visible and try again.";
+            console.error("[CALIBRATE_BTN_CLICK] Calibration attempted without valid pose landmarks.");
+            return;
+        }
+        // --- End of specific check ---
 
         let attempts = 0;
         const maxAttempts = 5;
         const poseCheckInterval = 200; // ms
 
         const checkPoseAndStartCalibration = () => {
-            if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
+            if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
                 attempts++;
                 if (attempts < maxAttempts) {
                     trampolineNotice.style.color = '#ff0';
                     trampolineNotice.textContent = `Waiting for pose data to stabilize... (${attempts}/${maxAttempts}). Ensure your body is fully visible.`;
                     setTimeout(checkPoseAndStartCalibration, poseCheckInterval);
+                    console.log(`[CALIBRATE_BTN_CLICK] Pose not ready for calibration, retrying... Attempt ${attempts}`);
                 } else {
                     trampolineNotice.style.color = '#f00';
                     trampolineNotice.textContent = "Calibration failed: No consistent pose data detected. Please ensure your body is fully visible and try again.";
                     calibrateBtn.disabled = false; // Re-enable button on failure
+                    console.error("[CALIBRATE_BTN_CLICK] Failed to get consistent pose data after max attempts.");
                 }
                 return;
             }
 
             // If we reach here, pose data is available, proceed with calibration
             calibrateBtn.disabled = true; // Disable button while calibration is active
-            calibrationZValues = [];
+            let calibrationZValues = []; // Moved this declaration inside, as it's specific to this calibration run
             const calibrationDurationMs = 3000;
             const calibrationIntervalMs = 100;
             let calibrationSamples = 0;
@@ -659,6 +694,7 @@
 
             trampolineNotice.style.color = '#fff';
             trampolineNotice.textContent = "CALIBRATING... Stand still on the trampoline for 3 seconds. Ensure your ankles/hips are visible.";
+            console.log("[CALIBRATE_BTN_CLICK] Starting stand-still calibration loop.");
 
             // Initialize camera and plane settings before stand-still calibration
             cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
@@ -683,7 +719,7 @@
             };
 
             const calibrationLoop = setInterval(() => {
-              if (lastPoseResults && lastPoseResults.poseLandmarks) {
+              if (lastPoseResults && lastPoseResults.poseLandmarks && lastPoseResults.poseLandmarks.length > 0) {
                 const lowestLandmark = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
                 
                 if (lowestLandmark) {
@@ -693,13 +729,16 @@
                   calibrationZValues.push(worldPtBaselineSample[2]);
                   calibrationSamples++;
                   trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s.`;
+                  console.log(`[CALIBRATION_LOOP] Sampled Z: ${worldPtBaselineSample[2].toFixed(3)}m. Samples: ${calibrationSamples}`);
                 } else {
                     trampolineNotice.textContent = `CALIBRATING... (Pose lost or not detected) Please ensure ankles/hips are visible. ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s remaining.`;
                     trampolineNotice.style.color = '#ff0'; // Change to warning color
+                    console.warn("[CALIBRATION_LOOP] No suitable low landmark found for this sample.");
                 }
               } else {
                  trampolineNotice.textContent = `CALIBRATING... (No Pose Data) Please ensure your body is visible. ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s remaining.`;
                  trampolineNotice.style.color = '#ff0'; // Change to warning color
+                 console.warn("[CALIBRATION_LOOP] No pose data for this sample.");
               }
 
               if (calibrationSamples >= maxCalibrationSamples) {
@@ -719,7 +758,7 @@
                     if (filteredZValues.length > 0) {
                         const sumZ = filteredZValues.reduce((a, b) => a + b, 0);
                         baselineZ = sumZ / filteredZValues.length;
-                        console.log(`Calibrated trampoline Z baseline (averaged, filtered): ${baselineZ.toFixed(3)}m`);
+                        console.log(`[CALIBRATION_COMPLETE] Calibrated trampoline Z baseline (averaged, filtered): ${baselineZ.toFixed(3)}m`);
                         
                         currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
                         calibrationJumpsData = []; // Clear previous jump data
@@ -728,13 +767,14 @@
                         calibrateBtn.style.display = "none"; // Hide calibrate button during jump calibration
                         jumpState = JUMP_STATE_ON_TRAMPOLINE; // Reset jump state for new phase
                         currentZSmoothed = null; // Reset smoothing for new phase
-                        verticalVelocitySmoothed = null; // Reset smoothing
+                        verticalVelocitySmoothed = null;
                     } else {
                         trampolineNotice.style.color = '#f00';
                         trampolineNotice.textContent = "Calibration failed: No valid baseline data after filtering. Try again from a stable position.";
                         baselineZ = null;
                         currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
                         calibrateBtn.disabled = false;
+                        console.error("[CALIBRATION_COMPLETE] No valid baseline data after filtering.");
                     }
                 } else {
                     trampolineNotice.style.color = '#f00';
@@ -742,6 +782,7 @@
                     baselineZ = null;
                     currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL; // Go back to stand still phase
                     calibrateBtn.disabled = false; // Re-enable to retry
+                    console.error("[CALIBRATION_COMPLETE] No valid baseline data collected at all.");
                 }
               }
             }, calibrationIntervalMs);
@@ -793,6 +834,7 @@
       localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
       localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value);
       localStorage.setItem('jt_debugMode', debugModeCheckbox.checked ? 'true' : 'false');
+      console.log("[SETTINGS] Settings saved to local storage.");
     }
     function loadSettingsFromStorage() {
       ['jt_cameraDistance','jt_cameraHeight', 'jt_depthScaleFactor'].forEach(k => {
@@ -810,6 +852,7 @@
       debugMode = (loadedDebugMode === 'true');
       debugModeCheckbox.checked = debugMode;
       applyDebugMode();
+      console.log("[SETTINGS] Settings loaded from local storage.");
 
       ['cameraDistance','cameraHeight', 'depthScaleFactor'].forEach(id =>
         document.getElementById(id).dispatchEvent(new Event('input'))
@@ -834,6 +877,7 @@
       // Reset smoothing when settings change
       currentZSmoothed = null;
       verticalVelocitySmoothed = null;
+      console.log("[SETTINGS] Settings saved. Calibration reset required.");
     });
     window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
 
@@ -861,12 +905,15 @@
 
     cameraDistanceInput.addEventListener('input', () => {
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
+      console.log(`[INPUT] Camera Distance: ${cameraDistanceMeters}m`);
     });
     cameraHeightInput.addEventListener('input', () => {
       cameraHeightMeters = parseFloat(cameraHeightInput.value) || 1.0;
+      console.log(`[INPUT] Camera Height: ${cameraHeightMeters}m`);
     });
     depthScaleFactorInput.addEventListener('input', () => {
       depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0;
+      console.log(`[INPUT] Depth Scale Factor: ${depthScaleFactor}`);
     });
 
     // --------- CAMERA SWITCH & CLEANUP ---------
@@ -887,6 +934,7 @@
       // Reset smoothing history
       currentZSmoothed = null;
       verticalVelocitySmoothed = null;
+      console.log("[CAMERA_SWITCH] Camera switched. Calibration reset required.");
     });
     window.addEventListener('beforeunload', () => {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
@@ -908,6 +956,7 @@
         // Reset smoothing history
         currentZSmoothed = null;
         verticalVelocitySmoothed = null;
+        console.log("[ZOOM] Zoom changed. Calibration reset required.");
     };
 
     zoomInBtn.addEventListener('click', async () => {
@@ -972,9 +1021,22 @@
             const leftShoulder = landmarks[11];
             const rightShoulder = landmarks[12];
 
-            if (nose && nose.score > 0.6) return nose;
-            if (leftShoulder && leftShoulder.score > 0.6) return leftShoulder;
-            if (rightShoulder && rightShoulder.score > 0.6) return rightShoulder;
+            if (nose && nose.score > 0.6) {
+                console.warn("[getLowestBodyLandmark] Falling back to Nose landmark (index 0).");
+                return nose;
+            }
+            if (leftShoulder && leftShoulder.score > 0.6) {
+                console.warn("[getLowestBodyLandmark] Falling back to Left Shoulder landmark (index 11).");
+                return leftShoulder;
+            }
+            if (rightShoulder && rightShoulder.score > 0.6) {
+                console.warn("[getLowestBodyLandmark] Falling back to Right Shoulder landmark (index 12).");
+                return rightShoulder;
+            }
+        }
+        
+        if (!lowestLandmark) {
+            console.warn("[getLowestBodyLandmark] No reliable landmarks found for tracking.");
         }
 
         return lowestLandmark;
@@ -1129,6 +1191,7 @@
                           }
                       } else {
                           trampolineNotice.textContent = `Jump too small for calibration or invalid height data. Please jump higher. (${calibrationJumpsData.length}/${REQUIRED_CALIBRATION_JUMPS})`;
+                          console.warn(`[CALIBRATION_JUMP] Jump too small or invalid for calibration. H3D: ${current3DHeight.toFixed(2)}, HFlight: ${calculatedJumpHeightFlight.toFixed(2)}`);
                       }
                   }
 
@@ -1163,8 +1226,16 @@
     // Processing interval for jump height calculation (at a lower rate than MP results for performance)
     setInterval(() => {
       // Only process pose if we are in a tracking or jump calibration phase and have results
-      if ((currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE || currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) && lastPoseResults && lastPoseResults.poseLandmarks) {
+      if ((currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE || currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) && lastPoseResults && lastPoseResults.poseLandmarks && lastPoseResults.poseLandmarks.length > 0) {
         computeAndSendJump(lastPoseResults.poseLandmarks);
+      } else {
+        // If not in a processing phase or no valid landmarks, ensure smoothing state is reset
+        // This is important if we go from a tracked state to a non-tracked state
+        if (currentZSmoothed !== null) {
+            currentZSmoothed = null;
+            verticalVelocitySmoothed = null;
+            if (debugMode) console.log("[COMPUTE_LOOP] Resetting smoothed values due to non-tracking state or no landmarks.");
+        }
       }
     }, 33); // Approximately 30 FPS for jump logic, balancing accuracy and performance
   </script>
