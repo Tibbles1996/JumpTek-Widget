@@ -229,6 +229,11 @@
         <input type="number" step="0.01" min="0.1" max="2.0" value="0.6" id="trampolineHeight">
         <div class="desc">Vertical distance from ground to trampoline mat. (This setting is now primarily for reference in this debug version).</div>
       </div>
+      <div>
+        <label for="depthScaleFactor">MediaPipe Z Depth Scale Factor:</label><br>
+        <input type="number" step="0.1" min="0.1" max="50" value="5.0" id="depthScaleFactor">
+        <div class="desc">Adjusts how much MediaPipe's Z-coordinate (depth) influences the calculated world Z. Higher values mean more sensitivity to MediaPipe's Z.</div>
+      </div>
       <button id="saveSettingsBtn">Save</button>
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
@@ -447,28 +452,33 @@
     function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
     function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 
-    function pixelToWorld(u, v) {
+    // MODIFIED: Accepts the MediaPipe Z-coordinate (depth)
+    function pixelToWorld(u, v, mpZ) {
       const {fx, fy, cx, cy} = window._JT_intrinsics;
       const {C} = window._JT_extrinsics;
-      const N = window._JT_plane.normal, P0 = window._JT_plane.point; // P0 is now mostly for conceptual definition
+      const N = window._JT_plane.normal, P0 = window._JT_plane.point;
 
       const xCam = (u - cx) / fx;
       const yCam = (v - cy) / fy;
-      const zCam = 1; // Assuming a perspective projection where Z is depth
+      
+      // NEW: Incorporate MediaPipe's Z into the camera ray's Z component
+      // We flip mpZ (1 - mpZ) because smaller mpZ means closer (larger effective depth for our ray)
+      // And scale by DEPTH_SCALE_FACTOR
+      const zCam = (1 - mpZ) * depthScaleFactor; // Adjusted for MediaPipe's Z interpretation
+      
       const rayCam = normalize([xCam, yCam, zCam]);
       const ray = rayCam; // Assuming no camera rotation R in extrinsics for ray
 
-      const numerator = -dot(N, subtract(C, P0)); // P0 defines the trampoline plane's actual world Z
+      const numerator = -dot(N, subtract(C, P0));
       const denominator = dot(N, ray);
 
       let t;
       if (Math.abs(denominator) < 1e-8) {
-          t = 0; // Or handle as a ray parallel to plane
+          t = 0;
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`;
           debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
       } else {
-          // FLIP SIGN OF DENOMINATOR FOR CORRECT DEPTH (AS DETERMINED IN LAST ROUND)
-          t = numerator / -denominator; 
+          t = numerator / -denominator; // Retain the sign flip here
           debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
           debugValuesDisplay.innerHTML += `<br>t: ${t.toFixed(3)}`;
@@ -516,6 +526,7 @@
       REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.0;
       cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
       cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
+      depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0; // Retrieve new setting
 
       window._JT_intrinsics = {
         fx: Math.min(canvas.width, canvas.height) * 0.8, // Approximation for focal length
@@ -558,7 +569,8 @@
       if (anyLandmarkForBaseline) {
           const lx = anyLandmarkForBaseline.x * canvas.width;
           const ly = anyLandmarkForBaseline.y * canvas.height;
-          const worldPtBaseline = pixelToWorld(lx, ly);
+          // Pass MediaPipe's Z to pixelToWorld for baseline calculation
+          const worldPtBaseline = pixelToWorld(lx, ly, anyLandmarkForBaseline.z);
           baselineZ = worldPtBaseline[2]; // Set the current Z as the baseline
           trampolineNotice.style.color = '#0f0';
           trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
@@ -606,24 +618,27 @@
     const cameraDistanceInput = document.getElementById('cameraDistance');
     const cameraHeightInput   = document.getElementById('cameraHeight');
     const trampolineHeightInput = document.getElementById('trampolineHeight');
+    const depthScaleFactorInput = document.getElementById('depthScaleFactor'); // New input
     function saveSettingsToStorage() {
       localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
       localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
-      localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value); // Still save for consistency
+      localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
+      localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value); // Save new setting
     }
     function loadSettingsFromStorage() {
-      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight'].forEach(k => {
+      ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight', 'jt_depthScaleFactor'].forEach(k => { // Add new setting to load
         const v = localStorage.getItem(k);
         if (v !== null) {
           document.getElementById({
             'jt_cameraDistance':'cameraDistance',
             'jt_cameraHeight':'cameraHeight',
-            'jt_trampolineHeight':'trampolineHeight'
+            'jt_trampolineHeight':'trampolineHeight',
+            'jt_depthScaleFactor':'depthScaleFactor' // Map to new input ID
           }[k]).value = v;
         }
       });
       // Trigger input event to update the global variables from loaded values
-      ['cameraDistance','cameraHeight','trampolineHeight'].forEach(id =>
+      ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id => // Add new setting to trigger
         document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
@@ -641,6 +656,7 @@
     let REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(localStorage.getItem('jt_trampolineHeight')) || 0.0;
     let cameraDistanceMeters = parseFloat(localStorage.getItem('jt_cameraDistance')) || 2.0;
     let cameraHeightMeters   = parseFloat(localStorage.getItem('jt_cameraHeight')) || 1.0;
+    let depthScaleFactor = parseFloat(localStorage.getItem('jt_depthScaleFactor')) || 5.0; // Initialize new setting
     const SMOOTHING_WINDOW   = 5;
     const MIN_DELTA_METERS   = 0.002;
 
@@ -652,6 +668,9 @@
     });
     trampolineHeightInput.addEventListener('input', () => {
       REAL_TRAMPOLINE_HEIGHT_METERS = parseFloat(trampolineHeightInput.value) || 0.0;
+    });
+    depthScaleFactorInput.addEventListener('input', () => { // Event listener for new input
+      depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0;
     });
 
     // --------- CAMERA SWITCH & CLEANUP ---------
@@ -665,19 +684,21 @@
 
     // Helper to safely get value or 'N/A'
     function getVal(landmark, prop) {
-        return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(2) : 'N/A';
+        return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(3) : 'N/A'; // Increased precision for debug
     }
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
       // Clear debug display each frame
       debugValuesDisplay.innerHTML = '';
+      debugValuesDisplay.innerHTML += `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
+
 
       if (!calibrationReady || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane || baselineZ === null) {
         widgetJumpHeightDisplay.textContent = 'Jump: N/A (Calibrate)';
         rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
         rawHeightDebugDisplay.classList.remove('positive');
-        debugValuesDisplay.innerHTML = 'Calibration Not Ready / Baseline Missing';
+        debugValuesDisplay.innerHTML += 'Calibration Not Ready / Baseline Missing';
         return;
       }
 
@@ -688,33 +709,33 @@
 
       let lowestLandmark = null;
 
-      // Debugging landmark scores and availability - NOW SAFER WITH getVal()
-      debugValuesDisplay.innerHTML += `LAnkle: ${leftAnkle ? `(${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, ${getVal(leftAnkle, 'z')}) sc:${getVal(leftAnkle, 'score')}` : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `RAnkle: ${rightAnkle ? `(${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, ${getVal(rightAnkle, 'z')}) sc:${getVal(rightAnkle, 'score')}` : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `LHip: ${leftHip ? `(${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, ${getVal(leftHip, 'z')}) sc:${getVal(leftHip, 'score')}` : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `RHip: ${rightHip ? `(${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, ${getVal(rightHip, 'z')}) sc:${getVal(rightHip, 'score')}` : 'N/A'}<br><br>`;
+      // Debugging landmark scores and availability
+      debugValuesDisplay.innerHTML += `LAnkle: (${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, <span style="color:yellow;">${getVal(leftAnkle, 'z')}</span>) sc:${getVal(leftAnkle, 'score')}<br>`;
+      debugValuesDisplay.innerHTML += `RAnkle: (${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, <span style="color:yellow;">${getVal(rightAnkle, 'z')}</span>) sc:${getVal(rightAnkle, 'score')}<br>`;
+      debugValuesDisplay.innerHTML += `LHip: (${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, <span style="color:yellow;">${getVal(leftHip, 'z')}</span>) sc:${getVal(leftHip, 'score')}<br>`;
+      debugValuesDisplay.innerHTML += `RHip: (${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, <span style="color:yellow;">${getVal(rightHip, 'z')}</span>) sc:${getVal(rightHip, 'score')}<br><br>`;
 
 
       // Logic to find the lowest landmark - Prioritize ankles, then hips.
       // Still forced selection, as scores are N/A.
       if (leftAnkle && rightAnkle) {
           lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
-          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'} (Forced for debug)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
       } else if (leftAnkle) {
           lowestLandmark = leftAnkle;
-          debugValuesDisplay.innerHTML += `Selected: LAnkle (Forced for debug)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: LAnkle<br>`;
       } else if (rightAnkle) {
           lowestLandmark = rightAnkle;
-          debugValuesDisplay.innerHTML += `Selected: RAnkle (Forced for debug)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: RAnkle<br>`;
       } else if (leftHip && rightHip) {
           lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
-          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (Forced for debug, ankles missing)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (ankles missing)<br>`;
       } else if (leftHip) {
           lowestLandmark = leftHip;
-          debugValuesDisplay.innerHTML += `Selected: LHip (Forced for debug, ankles missing)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: LHip (ankles missing)<br>`;
       } else if (rightHip) {
           lowestLandmark = rightHip;
-          debugValuesDisplay.innerHTML += `Selected: RHip (Forced for debug, ankles missing)<br>`;
+          debugValuesDisplay.innerHTML += `Selected: RHip (ankles missing)<br>`;
       }
 
 
@@ -722,15 +743,15 @@
           widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)';
           rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
           rawHeightDebugDisplay.classList.remove('positive');
-          debugValuesDisplay.innerHTML += 'No suitable low landmark found (even with forced selection).';
+          debugValuesDisplay.innerHTML += 'No suitable low landmark found.';
           return;
       }
 
       const lx = lowestLandmark.x * canvas.width;
-      const ly = lowestLandmark.y * canvas.height;
+      const ly = lowestLandland.y * canvas.height;
 
-      // The `pixelToWorld` function will now append its internal debug values to debugValuesDisplay
-      const worldPt = pixelToWorld(lx, ly);
+      // MODIFIED: Pass MediaPipe's Z to pixelToWorld
+      const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
       
       // Calculate jump height relative to the calibrated baseline Z
       const rawHeightAboveTrampoline = worldPt[2] - baselineZ;
