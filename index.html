@@ -427,14 +427,22 @@
         calibrateBtn.style.display = "none";
       } else {
         calibrateBtn.style.display = "block";
-        calibrateBtn.disabled = !lastPoseResults || !lastPoseResults.poseLandmarks;
+        // ONLY enable the calibrate button if a pose is detected AND we are in the STAND_STILL phase
+        calibrateBtn.disabled = !(currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL && lastPoseResults && lastPoseResults.poseLandmarks);
       }
       
       // Update trampoline notice based on calibration phase
       if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
         trampolineNotice.textContent = "Tap the four corners of the trampoline to mark its boundaries.";
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-        trampolineNotice.textContent = "Trampoline area set! Press Calibrate, then stand still on the trampoline.";
+        // If the button is disabled here, it means no pose is ready
+        if (calibrateBtn.disabled) {
+            trampolineNotice.textContent = "Trampoline area set! Stand on the trampoline and ensure your body is fully visible, then press Calibrate.";
+            trampolineNotice.style.color = '#ff0'; // Warning color
+        } else {
+            trampolineNotice.textContent = "Trampoline area set! Stand still on the trampoline and press Calibrate.";
+            trampolineNotice.style.color = '#0f0'; // Ready color
+        }
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
         trampolineNotice.textContent = `Perform ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more jumps for best accuracy.`;
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
@@ -567,9 +575,7 @@
         trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
         trampolineCorners = []; // Clear for next marking if needed
         currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-        trampolineNotice.textContent = "Trampoline area set! Adjust camera settings if needed, then press Calibrate.";
-        calibrateBtn.style.display = "block"; // Make sure calibrate button is visible
-        calibrateBtn.disabled = true; // Will be enabled when pose is ready
+        // The drawLoop will now update the notice and button state
       }
     });
 
@@ -580,83 +586,109 @@
             trampolineNotice.textContent = "Please mark the 4 corners of the trampoline first.";
             return;
         }
-        if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
-            trampolineNotice.style.color = '#f00';
-            trampolineNotice.textContent = "Pose data not ready. Make sure you're visible to the camera.";
-            return;
-        }
 
-        // Initialize camera and plane settings before stand-still calibration
-        cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
-        cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
-        depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0; 
+        // --- NEW IMPROVEMENT: Robust Pose Check for Stand-Still Calibration ---
+        // This will try a few times to get a valid pose before failing.
+        let attempts = 0;
+        const maxAttempts = 5;
+        const poseCheckInterval = 200; // ms
 
-        window._JT_intrinsics = {
-          fx: Math.min(canvas.width, canvas.height) * 0.8, // Approximation for focal length
-          fy: Math.min(canvas.width, canvas.height) * 0.8,
-          cx: canvas.width / 2,
-          cy: canvas.height / 2
-        };
-
-        window._JT_extrinsics = {
-          C: [0, -cameraDistanceMeters, cameraHeightMeters],
-          R: [[1,0,0],[0,1,0],[0,0,1]]
-        };
-
-        window._JT_plane = {
-          normal: [0,0,1],
-          point: [0,0,0]
-        };
-
-        // --- Start Stand-Still Calibration Averaging ---
-        calibrateBtn.disabled = true;
-        calibrationZValues = [];
-        const calibrationDurationMs = 3000;
-        const calibrationIntervalMs = 100;
-        let calibrationSamples = 0;
-        const maxCalibrationSamples = calibrationDurationMs / calibrationIntervalMs;
-
-        trampolineNotice.style.color = '#fff';
-        trampolineNotice.textContent = "CALIBRATING... Stand still on the trampoline for 3 seconds. Ensure your ankles/hips are visible.";
-
-        const calibrationLoop = setInterval(() => {
-          if (lastPoseResults && lastPoseResults.poseLandmarks) {
-            const lowestLandmark = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
-            
-            if (lowestLandmark) {
-              const lx = lowestLandmark.x * canvas.width;
-              const ly = lowestLandmark.y * canvas.height;
-              const worldPtBaselineSample = pixelToWorld(lx, ly, lowestLandmark.z);
-              calibrationZValues.push(worldPtBaselineSample[2]);
-              calibrationSamples++;
-              trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)} seconds.`;
+        const checkPoseAndStartCalibration = () => {
+            if (!lastPoseResults || !lastPoseResults.poseLandmarks) {
+                attempts++;
+                if (attempts < maxAttempts) {
+                    trampolineNotice.style.color = '#ff0';
+                    trampolineNotice.textContent = `Waiting for pose data... (${attempts}/${maxAttempts}). Ensure your body is visible.`;
+                    setTimeout(checkPoseAndStartCalibration, poseCheckInterval);
+                } else {
+                    trampolineNotice.style.color = '#f00';
+                    trampolineNotice.textContent = "Calibration failed: No consistent pose data detected. Please ensure your body is fully visible and try again.";
+                    calibrateBtn.disabled = false; // Re-enable button on failure
+                }
+                return;
             }
-          }
 
-          if (calibrationSamples >= maxCalibrationSamples) {
-            clearInterval(calibrationLoop);
-            
-            if (calibrationZValues.length > 0) {
-                const sumZ = calibrationZValues.reduce((a, b) => a + b, 0);
-                baselineZ = sumZ / calibrationZValues.length;
-                console.log(`Calibrated trampoline Z baseline (averaged): ${baselineZ.toFixed(3)}m`);
+            // If we reach here, pose data is available, proceed with calibration
+            calibrateBtn.disabled = true; // Disable button while calibration is active
+            calibrationZValues = [];
+            const calibrationDurationMs = 3000;
+            const calibrationIntervalMs = 100;
+            let calibrationSamples = 0;
+            const maxCalibrationSamples = calibrationDurationMs / calibrationIntervalMs;
+
+            trampolineNotice.style.color = '#fff';
+            trampolineNotice.textContent = "CALIBRATING... Stand still on the trampoline for 3 seconds. Ensure your ankles/hips are visible.";
+
+            // Initialize camera and plane settings before stand-still calibration
+            cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
+            cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
+            depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0; 
+
+            window._JT_intrinsics = {
+              fx: Math.min(canvas.width, canvas.height) * 0.8, // Approximation for focal length
+              fy: Math.min(canvas.width, canvas.height) * 0.8,
+              cx: canvas.width / 2,
+              cy: canvas.height / 2
+            };
+
+            window._JT_extrinsics = {
+              C: [0, -cameraDistanceMeters, cameraHeightMeters],
+              R: [[1,0,0],[0,1,0],[0,0,1]]
+            };
+
+            window._JT_plane = {
+              normal: [0,0,1],
+              point: [0,0,0]
+            };
+
+            const calibrationLoop = setInterval(() => {
+              if (lastPoseResults && lastPoseResults.poseLandmarks) {
+                const lowestLandmark = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
                 
-                // Transition to jump calibration phase
-                currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
-                calibrationJumpsData = []; // Clear previous jump data
-                trampolineNotice.style.color = '#0f0';
-                trampolineNotice.textContent = `Baseline set! Now perform ${REQUIRED_CALIBRATION_JUMPS} jumps for Z-scale calibration.`;
-                calibrateBtn.disabled = false; // Re-enable calibrate button to prompt user for jump calibration
-                calibrateBtn.style.display = "none"; // Hide calibrate button during jump calibration
-                jumpState = JUMP_STATE_ON_TRAMPOLINE; // Reset jump state for new phase
-            } else {
-                trampolineNotice.style.color = '#f00';
-                trampolineNotice.textContent = "Calibration failed: No valid pose data collected for baseline. Make sure your ankles/hips are visible.";
-                baselineZ = null;
-                calibrateBtn.disabled = false;
-            }
-          }
-        }, calibrationIntervalMs);
+                if (lowestLandmark) {
+                  const lx = lowestLandmark.x * canvas.width;
+                  const ly = lowestLandland.y * canvas.height; // Fix: typo from lowestLandmark to lowestLandland
+                  const worldPtBaselineSample = pixelToWorld(lx, ly, lowestLandmark.z);
+                  calibrationZValues.push(worldPtBaselineSample[2]);
+                  calibrationSamples++;
+                  trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)} seconds.`;
+                } else {
+                    trampolineNotice.textContent = `CALIBRATING... (Pose lost) Please ensure ankles/hips are visible. ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s remaining.`;
+                    trampolineNotice.style.color = '#ff0'; // Change to warning color
+                }
+              } else {
+                 trampolineNotice.textContent = `CALIBRATING... (No Pose Data) Please ensure your body is visible. ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s remaining.`;
+                 trampolineNotice.style.color = '#ff0'; // Change to warning color
+              }
+
+              if (calibrationSamples >= maxCalibrationSamples) {
+                clearInterval(calibrationLoop);
+                
+                if (calibrationZValues.length > 0) {
+                    const sumZ = calibrationZValues.reduce((a, b) => a + b, 0);
+                    baselineZ = sumZ / calibrationZValues.length;
+                    console.log(`Calibrated trampoline Z baseline (averaged): ${baselineZ.toFixed(3)}m`);
+                    
+                    // Transition to jump calibration phase
+                    currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
+                    calibrationJumpsData = []; // Clear previous jump data
+                    trampolineNotice.style.color = '#0f0';
+                    trampolineNotice.textContent = `Baseline set! Now perform ${REQUIRED_CALIBRATION_JUMPS} jumps for Z-scale calibration.`;
+                    calibrateBtn.style.display = "none"; // Hide calibrate button during jump calibration
+                    jumpState = JUMP_STATE_ON_TRAMPOLINE; // Reset jump state for new phase
+                } else {
+                    trampolineNotice.style.color = '#f00';
+                    trampolineNotice.textContent = "Calibration failed: No valid baseline data collected. Make sure your ankles/hips are visible and still.";
+                    baselineZ = null;
+                    currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL; // Go back to stand still phase
+                    calibrateBtn.disabled = false; // Re-enable to retry
+                }
+              }
+            }, calibrationIntervalMs);
+        };
+
+        checkPoseAndStartCalibration(); // Initiate the robust pose check
+
       } else if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
           // This button won't be visible during jump calibration,
           // the jumps themselves trigger the next step.
@@ -886,11 +918,11 @@
         debugValuesDisplay.innerHTML += `Cal Phase: ${currentCalibrationPhase}<br>`;
       }
 
-      if (currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE || baselineZ === null) {
+      if (currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION || baselineZ === null) {
         if (debugMode) {
             rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
             rawHeightDebugDisplay.classList.remove('positive');
-            debugValuesDisplay.innerHTML += 'Not fully calibrated.';
+            debugValuesDisplay.innerHTML += 'Not fully calibrated for tracking.';
         }
         sendJumpHeight(0, false); // Send 0 and not calibrated status
         return;
@@ -997,7 +1029,7 @@
                               calibrationJumpsData = []; // Clear for next potential recalibration
                           }
                       } else {
-                          trampolineNotice.textContent = `Jump too small for calibration. Please jump higher. (${calibrationJumpsData.length}/${REQUIRED_CALIBRATION_JUMPS})`;
+                          trampolineNotice.textContent = `Jump too small for calibration or invalid height data. Please jump higher. (${calibrationJumpsData.length}/${REQUIRED_CALIBRATION_JUMPS})`;
                       }
                   }
 
