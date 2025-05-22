@@ -35,9 +35,8 @@
       display: flex;
       gap: 20px;
       z-index: 20;
-      align-items: center;
     }
-    #switchCameraBtn, #calibrateBtn, #settingsBtn {
+    #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn {
       position: static;
       margin: 0;
       padding: 10px 18px;
@@ -54,12 +53,32 @@
       font-weight: bold;
       background: #27ae60;
     }
-    #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover { background: #219150; }
+    #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img {
       width: 28px;
       height: 28px;
       display: block;
     }
+    /* Zoom buttons specific styles */
+    #zoomControls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 20;
+    }
+    #zoomInBtn, #zoomOutBtn {
+      font-size: 2rem;
+      padding: 5px 15px;
+      width: 60px; /* Fixed width for consistent look */
+      height: 60px; /* Fixed height for consistent look */
+      border-radius: 50%; /* Make them round */
+      background: rgba(39, 174, 96, 0.8); /* Slightly transparent background */
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
     #loadingIndicator {
       position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
       z-index: 30; color: #ff0; background: rgba(0,0,0,0.7);
@@ -97,7 +116,7 @@
       to   { opacity: 1; transform: translateX(-50%) scale(1); }
     }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"] {
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"] {
       padding: 6px;
       font-size: 1rem;
       border-radius: 6px;
@@ -106,6 +125,16 @@
       margin-bottom: 8px;
       background: #222;
       color: #fff;
+    }
+    #settingsPopover input[type="checkbox"] {
+        width: auto;
+        margin-left: 10px;
+        vertical-align: middle;
+    }
+    #settingsPopover .checkbox-container {
+        display: flex;
+        align-items: center;
+        margin-top: 5px;
     }
     #settingsPopover .desc {
       color: #aaa;
@@ -160,37 +189,9 @@
         min-width: 180px; /* Ensure it's wide enough for text */
         text-align: center;
     }
-    /* New: For debugging `rawHeightAboveTrampoline` display */
-    #rawHeightDebugDisplay {
-        position: absolute;
-        top: 70px; /* Below the main jump height */
-        right: 20px;
-        background: rgba(0, 0, 0, 0.7);
-        color: #fff; /* White for general info */
-        padding: 4px 10px;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        z-index: 20;
-        pointer-events: none;
-        min-width: 180px;
-        text-align: center;
-    }
-    #rawHeightDebugDisplay.positive {
-        color: #00f; /* Blue when raw height is positive */
-    }
-    #debugValuesDisplay { /* New Debugging element */
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        background: rgba(0, 0, 0, 0.7);
-        color: #fff;
-        padding: 8px 15px;
-        border-radius: 12px;
-        font-size: 0.8rem;
-        z-index: 20;
-        pointer-events: none;
-        max-width: 300px;
-        text-align: left;
+    /* Hide debugging displays by default */
+    #rawHeightDebugDisplay, #debugValuesDisplay {
+        display: none;
     }
   </style>
 
@@ -205,7 +206,7 @@
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
         <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
       </button>
-      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: none;" disabled>
+      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: none;">
         <img src="https://icon-library.com/images/wrench-icon-png/wrench-icon-png-11.jpg" alt="Calibrate" style="width:28px;height:28px;" />
       </button>
       <button class="settings-btn" id="settingsBtn" aria-label="Open settings" tabindex="0" role="button">
@@ -234,6 +235,10 @@
         <input type="number" step="0.1" min="0.1" max="50" value="5.0" id="depthScaleFactor">
         <div class="desc">Adjusts how much MediaPipe's Z-coordinate (depth) influences the calculated world Z. Higher values mean more sensitivity to MediaPipe's Z.</div>
       </div>
+      <div class="checkbox-container">
+        <label for="debugMode">Enable Debug Mode (show landmarks/data):</label>
+        <input type="checkbox" id="debugMode">
+      </div>
       <button id="saveSettingsBtn">Save</button>
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
@@ -241,6 +246,11 @@
     <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
     <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div>
     <div id="debugValuesDisplay"></div>
+
+    <div id="zoomControls">
+      <button id="zoomInBtn">+</button>
+      <button id="zoomOutBtn">-</button>
+    </div>
   </div>
   <video id="video" autoplay playsinline></video>
 
@@ -260,6 +270,8 @@
     const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
     const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
     const debugValuesDisplay = document.getElementById('debugValuesDisplay');
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
 
     // --------- STATE ---------
     let poseLoaded = false;
@@ -275,11 +287,18 @@
     let baselineZ = null; // Stores the Z-coordinate of the lowest point at calibration
     let isCalibratingNow = false; // New flag for calibration in progress
     let calibrationZValues = []; // New array to store Z values during calibration
+    let debugMode = false; // New: Toggles debug info visibility
+    let videoTrack = null; // To store the current video track for zoom
+    let zoomCapabilities = null; // To store zoom min/max/step
 
     // --------- CAMERA SETUP ---------
     async function startCamera() {
       loadingIndicator.style.display = 'block';
-      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        videoTrack = null; // Clear previous track
+        zoomCapabilities = null; // Clear previous capabilities
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -295,11 +314,32 @@
         loadingIndicator.style.display = 'none';
         resizeCanvasToVideo();
         console.log("Camera started successfully.");
+
+        // Get video track and capabilities for zoom
+        videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+            zoomCapabilities = videoTrack.getCapabilities().zoom;
+            if (zoomCapabilities) {
+                console.log("Zoom capabilities:", zoomCapabilities);
+                zoomInBtn.disabled = false;
+                zoomOutBtn.disabled = false;
+            } else {
+                console.log("Zoom not supported by this camera.");
+                zoomInBtn.disabled = true;
+                zoomOutBtn.disabled = true;
+            }
+        } else {
+            zoomInBtn.disabled = true;
+            zoomOutBtn.disabled = true;
+        }
+
       } catch (err) {
         loadingIndicator.style.display = 'none';
         trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
         trampolineNotice.style.color = '#f00';
         console.error('Camera error:', err);
+        zoomInBtn.disabled = true;
+        zoomOutBtn.disabled = true;
       }
     }
 
@@ -356,8 +396,8 @@
       if (video.readyState === 4)
         ctx.drawImage(video,0,0,canvas.width,canvas.height);
 
-      // This part draws the landmarks based on lastPoseResults directly
-      if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
+      // Only draw landmarks if debugMode is enabled
+      if (debugMode && lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
         drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
         drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
       }
@@ -475,13 +515,8 @@
       let t;
       if (Math.abs(denominator) < 1e-8) {
           t = 0;
-          // debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(6)} (near zero)`; // Commented out for cleaner debug
-          // debugValuesDisplay.innerHTML += `<br>t: 0 (or inf/NaN)`;
       } else {
           t = numerator / -denominator;
-          // debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
-          // debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
-          // debugValuesDisplay.innerHTML += `<br>t_base: ${t.toFixed(3)}`;
       }
       
       const worldPtBase = add(C, scale(ray, t));
@@ -492,13 +527,6 @@
         worldPtBase[2] + (1 - mpZ) * depthScaleFactor
       ];
 
-      // Debugging values (can be uncommented if needed)
-      // debugValuesDisplay.innerHTML += `<br>mpZ: ${mpZ.toFixed(3)}`;
-      // debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},<span style="color:cyan;">${C[2].toFixed(2)}</span>]` +
-      //                                `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},<span style="color:cyan;">${ray[2].toFixed(2)}</span>]` +
-      //                                `<br>worldPtBase: [${worldPtBase[0].toFixed(2)},${worldPtBase[1].toFixed(2)},<span style="color:${worldPtBase[2].toFixed(3) !== '0.000' ? 'magenta' : 'red'};">${worldPtBase[2].toFixed(3)}</span>]` +
-      //                                `<br>Adjust (+ (1-mpZ)*scale): ${( (1 - mpZ) * depthScaleFactor ).toFixed(3)}`;
-      // debugValuesDisplay.innerHTML += `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
       return worldPt;
     }
 
@@ -570,26 +598,47 @@
 
       const calibrationLoop = setInterval(() => {
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
+          // Define landmarks here, so they are in scope for this interval
           const leftAnkle = lastPoseResults.poseLandmarks[27];
           const rightAnkle = lastPoseResults.poseLandmarks[28];
           const leftHip = lastPoseResults.poseLandmarks[23];
           const rightHip = lastPoseResults.poseLandmarks[24];
 
           let anyLandmarkForBaseline = null;
-          if (leftAnkle && rightAnkle) {
-              lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
-              anyLandmarkForBaseline = lowestLandmark;
-          } else if (leftAnkle) {
-              anyLandmarkForBaseline = leftAnkle;
-          } else if (rightAnkle) {
-              anyLandmarkForBaseline = rightAnkle;
-          } else if (leftHip && rightHip) {
-              lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
-              anyLandmarkForBaseline = lowestLandmark;
-          } else if (leftHip) {
-              anyLandmarkForBaseline = leftHip;
-          } else if (rightHip) {
-              anyLandmarkForBaseline = rightHip;
+          let lowestLandmarkY = -Infinity; // Track the lowest Y (on screen)
+
+          // Prioritize ankles, then hips for finding the lowest point
+          if (leftAnkle && leftAnkle.score > 0.5) { // Check confidence if available
+              if (leftAnkle.y > lowestLandmarkY) {
+                  lowestLandmarkY = leftAnkle.y;
+                  anyLandmarkForBaseline = leftAnkle;
+              }
+          }
+          if (rightAnkle && rightAnkle.score > 0.5) {
+              if (rightAnkle.y > lowestLandmarkY) {
+                  lowestLandmarkY = rightAnkle.y;
+                  anyLandmarkForBaseline = rightAnkle;
+              }
+          }
+          if (leftHip && leftHip.score > 0.5) {
+              if (leftHip.y > lowestLandmarkY) {
+                  lowestLandmarkY = leftHip.y;
+                  anyLandmarkForBaseline = leftHip;
+              }
+          }
+          if (rightHip && rightHip.score > 0.5) {
+              if (rightHip.y > lowestLandmarkY) {
+                  lowestLandmarkY = rightHip.y;
+                  anyLandmarkForBaseline = rightHip;
+              }
+          }
+
+          // Fallback if scores aren't present or reliable, use just existence
+          if (!anyLandmarkForBaseline) {
+              if (leftAnkle) anyLandmarkForBaseline = leftAnkle;
+              else if (rightAnkle) anyLandmarkForBaseline = rightAnkle;
+              else if (leftHip) anyLandmarkForBaseline = leftHip;
+              else if (rightHip) anyLandmarkForBaseline = rightHip;
           }
 
           if (anyLandmarkForBaseline) {
@@ -619,11 +668,18 @@
               baselineZ = null; // Reset baseline if no data
           }
           
+          // Re-check for landmarks in polygon after calibration completes for warning
           let anyLandmarkInPolygon = false;
-          if (leftAnkle && pointInPolygon([leftAnkle.x * canvas.width, leftAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
-          if (rightAnkle && pointInPolygon([rightAnkle.x * canvas.width, rightAnkle.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
-          if (leftHip && pointInPolygon([leftHip.x * canvas.x * canvas.width, leftHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
-          if (rightHip && pointInPolygon([rightHip.x * canvas.x * canvas.width, rightHip.y * canvas.height], trampolinePolygon)) anyLandmarkInPolygon = true;
+          const currentLandmarks = lastPoseResults ? lastPoseResults.poseLandmarks : null;
+          if (currentLandmarks) {
+              const testLandmarks = [currentLandmarks[27], currentLandmarks[28], currentLandmarks[23], currentLandmarks[24]]; // Ankles, then hips
+              for (const lm of testLandmarks) {
+                  if (lm && pointInPolygon([lm.x * canvas.width, lm.y * canvas.height], trampolinePolygon)) {
+                      anyLandmarkInPolygon = true;
+                      break;
+                  }
+              }
+          }
 
           if (!anyLandmarkInPolygon && baselineZ !== null) {
               trampolineNotice.style.color = '#ff9900';
@@ -640,6 +696,8 @@
     const settingsPopover = document.getElementById('settingsPopover');
     const closeSettingsBtn = document.getElementById('closeSettingsBtn');
     const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
+    const debugModeCheckbox = document.getElementById('debugMode');
+
     settingsBtn.addEventListener('click', e => {
       e.stopPropagation();
       settingsPopover.classList.toggle('open');
@@ -658,11 +716,23 @@
     const cameraHeightInput   = document.getElementById('cameraHeight');
     const trampolineHeightInput = document.getElementById('trampolineHeight');
     const depthScaleFactorInput = document.getElementById('depthScaleFactor');
+
+    function applyDebugMode() {
+        if (debugMode) {
+            rawHeightDebugDisplay.style.display = 'block';
+            debugValuesDisplay.style.display = 'block';
+        } else {
+            rawHeightDebugDisplay.style.display = 'none';
+            debugValuesDisplay.style.display = 'none';
+        }
+    }
+
     function saveSettingsToStorage() {
       localStorage.setItem('jt_cameraDistance', cameraDistanceInput.value);
       localStorage.setItem('jt_cameraHeight',   cameraHeightInput.value);
       localStorage.setItem('jt_trampolineHeight', trampolineHeightInput.value);
       localStorage.setItem('jt_depthScaleFactor', depthScaleFactorInput.value);
+      localStorage.setItem('jt_debugMode', debugModeCheckbox.checked ? 'true' : 'false');
     }
     function loadSettingsFromStorage() {
       ['jt_cameraDistance','jt_cameraHeight','jt_trampolineHeight', 'jt_depthScaleFactor'].forEach(k => {
@@ -676,13 +746,23 @@
           }[k]).value = v;
         }
       });
+
+      // Load debug mode setting
+      const loadedDebugMode = localStorage.getItem('jt_debugMode');
+      debugMode = (loadedDebugMode === 'true');
+      debugModeCheckbox.checked = debugMode;
+      applyDebugMode(); // Apply immediately on load
+
       // Trigger input event to update the global variables from loaded values
       ['cameraDistance','cameraHeight','trampolineHeight', 'depthScaleFactor'].forEach(id =>
         document.getElementById(id).dispatchEvent(new Event('input'))
       );
     }
+
     saveSettingsBtn.addEventListener('click', () => {
       saveSettingsToStorage();
+      debugMode = debugModeCheckbox.checked; // Update global debugMode
+      applyDebugMode(); // Re-apply visibility
       if (trampolinePolygon && !isCalibratingNow) { // Only auto-recalibrate if not already calibrating
           calibrateBtn.click(); // Recalibrate if area is set
       }
@@ -722,6 +802,27 @@
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
     });
 
+    // --------- ZOOM CONTROLS ---------
+    zoomInBtn.addEventListener('click', () => {
+        if (!videoTrack || !zoomCapabilities) return;
+        const currentZoom = videoTrack.getSettings().zoom || zoomCapabilities.min;
+        const newZoom = Math.min(zoomCapabilities.max, currentZoom + zoomCapabilities.step);
+        videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] })
+            .catch(e => console.error("Failed to set zoom:", e));
+    });
+
+    zoomOutBtn.addEventListener('click', () => {
+        if (!videoTrack || !zoomCapabilities) return;
+        const currentZoom = videoTrack.getSettings().zoom || zoomCapabilities.min;
+        const newZoom = Math.max(zoomCapabilities.min, currentZoom - zoomCapabilities.step);
+        videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] })
+            .catch(e => console.error("Failed to set zoom:", e));
+    });
+
+    // Initial state for zoom buttons
+    zoomInBtn.disabled = true;
+    zoomOutBtn.disabled = true;
+
     // Helper to safely get value or 'N/A'
     function getVal(landmark, prop) {
         return landmark && typeof landmark[prop] === 'number' ? landmark[prop].toFixed(3) : 'N/A';
@@ -729,16 +830,20 @@
 
     // --------- COMPUTE & SEND JUMP HEIGHT ---------
     function computeAndSendJump(landmarks) {
-      // Clear debug display each frame
-      debugValuesDisplay.innerHTML = '';
-      debugValuesDisplay.innerHTML += `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
+      // Clear debug display each frame if in debug mode
+      if (debugMode) {
+        debugValuesDisplay.innerHTML = '';
+        debugValuesDisplay.innerHTML += `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
+      }
 
 
       if (!calibrationReady || !window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane || baselineZ === null) {
         widgetJumpHeightDisplay.textContent = 'Jump: N/A (Calibrate)';
-        rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
-        rawHeightDebugDisplay.classList.remove('positive');
-        debugValuesDisplay.innerHTML += 'Calibration Not Ready / Baseline Missing';
+        if (debugMode) {
+            rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
+            rawHeightDebugDisplay.classList.remove('positive');
+            debugValuesDisplay.innerHTML += 'Calibration Not Ready / Baseline Missing';
+        }
         return;
       }
 
@@ -749,27 +854,28 @@
 
       let lowestLandmark = null;
 
-      // Debugging landmark scores and availability
-      debugValuesDisplay.innerHTML += `LAnkle: (${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, <span style="color:yellow;">${getVal(leftAnkle, 'z')}</span>) sc:${getVal(leftAnkle, 'score')}<br>`;
-      debugValuesDisplay.innerHTML += `RAnkle: (${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, <span style="color:yellow;">${getVal(rightAnkle, 'z')}</span>) sc:${getVal(rightAnkle, 'score')}<br>`;
-      debugValuesDisplay.innerHTML += `LHip: (${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, <span style="color:yellow;">${getVal(leftHip, 'z')}</span>) sc:${getVal(leftHip, 'score')}<br>`;
-      debugValuesDisplay.innerHTML += `RHip: (${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, <span style="color:yellow;">${getVal(rightHip, 'z')}</span>) sc:${getVal(rightHip, 'score')}<br><br>`;
-
+      // Debugging landmark scores and availability (only if debugMode)
+      if (debugMode) {
+        debugValuesDisplay.innerHTML += `LAnkle: (${getVal(leftAnkle, 'x')}, ${getVal(leftAnkle, 'y')}, <span style="color:yellow;">${getVal(leftAnkle, 'z')}</span>) sc:${getVal(leftAnkle, 'score')}<br>`;
+        debugValuesDisplay.innerHTML += `RAnkle: (${getVal(rightAnkle, 'x')}, ${getVal(rightAnkle, 'y')}, <span style="color:yellow;">${getVal(rightAnkle, 'z')}</span>) sc:${getVal(rightAnkle, 'score')}<br>`;
+        debugValuesDisplay.innerHTML += `LHip: (${getVal(leftHip, 'x')}, ${getVal(leftHip, 'y')}, <span style="color:yellow;">${getVal(leftHip, 'z')}</span>) sc:${getVal(leftHip, 'score')}<br>`;
+        debugValuesDisplay.innerHTML += `RHip: (${getVal(rightHip, 'x')}, ${getVal(rightHip, 'y')}, <span style="color:yellow;">${getVal(rightHip, 'z')}</span>) sc:${getVal(rightHip, 'score')}<br><br>`;
+      }
 
       // Logic to find the lowest landmark - Prioritize ankles, then hips.
       // Still forced selection, as scores are N/A.
       if (leftAnkle && rightAnkle) {
           lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
-          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
+          if (debugMode) debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftAnkle ? 'LAnkle' : 'RAnkle'}<br>`;
       } else if (leftAnkle) {
           lowestLandmark = leftAnkle;
-          debugValuesDisplay.innerHTML += `Selected: LAnkle<br>`;
+          if (debugMode) debugValuesDisplay.innerHTML += `Selected: LAnkle<br>`;
       } else if (rightAnkle) {
           lowestLandmark = rightAnkle;
-          debugValuesDisplay.innerHTML += `Selected: RAnkle<br>`;
+          if (debugMode) debugValuesDisplay.innerHTML += `Selected: RAnkle<br>`;
       } else if (leftHip && rightHip) {
           lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
-          debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (ankles missing)<br>`;
+          if (debugMode) debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (ankles missing)<br>`;
       } else if (leftHip) {
           lowestLandmark = leftHip;
       } else if (rightHip) {
@@ -779,9 +885,11 @@
 
       if (!lowestLandmark) {
           widgetJumpHeightDisplay.textContent = 'Jump: N/A (No Pose)';
-          rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
-          rawHeightDebugDisplay.classList.remove('positive');
-          debugValuesDisplay.innerHTML += 'No suitable low landmark found.';
+          if (debugMode) {
+              rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
+              rawHeightDebugDisplay.classList.remove('positive');
+              debugValuesDisplay.innerHTML += 'No suitable low landmark found.';
+          }
           return;
       }
 
@@ -792,11 +900,13 @@
       
       let rawHeightAboveTrampoline = worldPt[2] - baselineZ;
 
-      rawHeightDebugDisplay.textContent = `Raw Z-Delta: ${rawHeightAboveTrampoline.toFixed(3)}m`;
-      if (rawHeightAboveTrampoline > 0.005) { // Small threshold for visual feedback color
-        rawHeightDebugDisplay.classList.add('positive');
-      } else {
-        rawHeightDebugDisplay.classList.remove('positive');
+      if (debugMode) {
+          rawHeightDebugDisplay.textContent = `Raw Z-Delta: ${rawHeightAboveTrampoline.toFixed(3)}m`;
+          if (rawHeightAboveTrampoline > 0.005) { // Small threshold for visual feedback color
+            rawHeightDebugDisplay.classList.add('positive');
+          } else {
+            rawHeightDebugDisplay.classList.remove('positive');
+          }
       }
 
       jumpHeightHistory.push(rawHeightAboveTrampoline);
