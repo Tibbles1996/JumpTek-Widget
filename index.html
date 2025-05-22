@@ -452,23 +452,22 @@
     function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
     function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 
-    // MODIFIED: Accepts the MediaPipe Z-coordinate (depth)
+    // MODIFIED: Accepts the MediaPipe Z-coordinate (depth) - REVISED APPROACH
     function pixelToWorld(u, v, mpZ) {
       const {fx, fy, cx, cy} = window._JT_intrinsics;
       const {C} = window._JT_extrinsics;
       const N = window._JT_plane.normal, P0 = window._JT_plane.point;
 
+      // Camera ray in camera coordinates (before any rotation)
       const xCam = (u - cx) / fx;
       const yCam = (v - cy) / fy;
-      
-      // NEW: Incorporate MediaPipe's Z into the camera ray's Z component
-      // We flip mpZ (1 - mpZ) because smaller mpZ means closer (larger effective depth for our ray)
-      // And scale by DEPTH_SCALE_FACTOR
-      const zCam = (1 - mpZ) * depthScaleFactor; // Adjusted for MediaPipe's Z interpretation
-      
-      const rayCam = normalize([xCam, yCam, zCam]);
-      const ray = rayCam; // Assuming no camera rotation R in extrinsics for ray
+      const zCamBase = 1; // Base Z component for ray in camera space
 
+      // Ray vector from camera origin to point in camera space
+      const rayCamBase = [xCam, yCam, zCamBase];
+      const ray = normalize(rayCamBase); // Normalized ray direction
+
+      // Calculate 't' (distance along ray) based on intersection with plane
       const numerator = -dot(N, subtract(C, P0));
       const denominator = dot(N, ray);
 
@@ -481,10 +480,51 @@
           t = numerator / -denominator; // Retain the sign flip here
           debugValuesDisplay.innerHTML += `<br>num: ${numerator.toFixed(3)}`;
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
-          debugValuesDisplay.innerHTML += `<br>t: ${t.toFixed(3)}`;
+          debugValuesDisplay.innerHTML += `<br>t_base: ${t.toFixed(3)}`;
       }
+
+      // NEW: Adjust 't' (distance along ray) based on MediaPipe's Z
+      // mpZ range is approx [0, 1]. Smaller mpZ means closer (less depth).
+      // We want to reduce 't' when mpZ is smaller (closer) and increase when mpZ is larger (further).
+      // Let's assume mpZ=0 means very close, mpZ=1 means very far.
+      // We can map mpZ to a scaling factor.
+      // Example: (1 - mpZ) could be a simple inverse scaling
+      // A linear mapping: map mpZ [0,1] to depth factor [min_depth_factor, max_depth_factor]
+      // For simplicity, let's try a direct scaling of t.
       
-      const worldPt = add(C, scale(ray, t));
+      // Let's use 0.5 as a reference average Z from MediaPipe (can be fine-tuned)
+      // If mpZ is smaller than reference, point is closer, so t should be smaller.
+      // If mpZ is larger than reference, point is further, so t should be larger.
+
+      // A simple linear scaling based on mpZ relative to a reference (e.g., 0.5)
+      // The `depthScaleFactor` from settings will control the strength of this effect.
+      // We need to decide if an *increase* in mpZ means *further* or *closer*.
+      // From your observation (.30 to .05 during jump), smaller Z means closer.
+      // So, if mpZ goes down, we want `t` to decrease (closer to camera).
+      // If mpZ goes up, we want `t` to increase (further from camera).
+
+      // Let's use a base 't' at a reference mpZ, and then offset from there.
+      // A simple offset is to scale `t` by (1 + (reference_mpZ - current_mpZ) * depthScaleFactor)
+      // If current_mpZ is smaller, (reference_mpZ - current_mpZ) is positive, so t increases. THIS IS WRONG.
+      // If current_mpZ is smaller, it's closer, so worldPt[2] should be *higher* (less negative, or more positive).
+      // The Z component of our `C` vector is cameraHeightMeters (positive upwards).
+      // The Z component of `worldPt` is (C[2] + ray[2] * t).
+      // To get higher worldPt[2] (for a jump), `t` needs to become *smaller* (closer to camera).
+
+      // So, if mpZ goes from 0.3 to 0.05 (closer), we want `t` to become smaller.
+      // Let's use a direct linear relationship for simplicity.
+      // `t_scaled = t_base * (some_constant - mpZ * depthScaleFactor)`
+      // Let's try: `t_scaled = t * (mpZ * depthScaleFactor)`
+      // If mpZ is 0.3 (standing) -> 0.3 * 5 = 1.5
+      // If mpZ is 0.05 (jump) -> 0.05 * 5 = 0.25
+      // This way, t decreases when mpZ decreases, which pulls the point closer to the camera and results in a higher world Z (more positive).
+      const t_scaled = t * (mpZ * depthScaleFactor);
+
+
+      debugValuesDisplay.innerHTML += `<br>mpZ: ${mpZ.toFixed(3)}`;
+      debugValuesDisplay.innerHTML += `<br>t_scaled: ${t_scaled.toFixed(3)}`;
+      
+      const worldPt = add(C, scale(ray, t_scaled)); // Use the scaled 't'
       debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},<span style="color:cyan;">${C[2].toFixed(2)}</span>]` +
                                      `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},<span style="color:cyan;">${ray[2].toFixed(2)}</span>]` +
                                      `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
@@ -553,13 +593,15 @@
 
       let anyLandmarkForBaseline = null;
       if (leftAnkle && rightAnkle) {
-          anyLandmarkForBaseline = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
+          lowestLandmark = leftAnkle.y > rightAnkle.y ? leftAnkle : rightAnkle;
+          anyLandmarkForBaseline = lowestLandmark;
       } else if (leftAnkle) {
           anyLandmarkForBaseline = leftAnkle;
       } else if (rightAnkle) {
           anyLandmarkForBaseline = rightAnkle;
       } else if (leftHip && rightHip) {
-          anyLandmarkForBaseline = leftHip.y > rightHip.y ? leftHip : rightHip;
+          lowestLandmark = leftHip.y > rightHip.y ? leftHip : rightHip;
+          anyLandmarkForBaseline = lowestLandmark;
       } else if (leftHip) {
           anyLandmarkForBaseline = leftHip;
       } else if (rightHip) {
@@ -748,7 +790,7 @@
       }
 
       const lx = lowestLandmark.x * canvas.width;
-      const ly = lowestLandmark.y * canvas.height; // CORRECTED: Changed lowestLandland.y to lowestLandmark.y
+      const ly = lowestLandmark.y * canvas.height; 
 
       // MODIFIED: Pass MediaPipe's Z to pixelToWorld
       const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
