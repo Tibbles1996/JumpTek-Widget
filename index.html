@@ -482,52 +482,51 @@
           debugValuesDisplay.innerHTML += `<br>denom: ${denominator.toFixed(3)}`;
           debugValuesDisplay.innerHTML += `<br>t_base: ${t.toFixed(3)}`;
       }
-
+      
       // NEW: Adjust 't' (distance along ray) based on MediaPipe's Z
       // mpZ range is approx [0, 1]. Smaller mpZ means closer (less depth).
-      // We want to reduce 't' when mpZ is smaller (closer) and increase when mpZ is larger (further).
-      // Let's assume mpZ=0 means very close, mpZ=1 means very far.
-      // We can map mpZ to a scaling factor.
-      // Example: (1 - mpZ) could be a simple inverse scaling
-      // A linear mapping: map mpZ [0,1] to depth factor [min_depth_factor, max_depth_factor]
-      // For simplicity, let's try a direct scaling of t.
+      // If mpZ decreases (e.g., from 0.3 to 0.05), it means the point is closer.
+      // To reflect this in world Z, we want worldPt[2] to INCREASE (go up).
+      // Since worldPt[2] = C[2] + ray[2] * t_scaled, and ray[2] is likely positive (camera looks forward/down),
+      // for worldPt[2] to INCREASE, t_scaled must DECREASE.
+      // So, if mpZ DECREASES, t_scaled must DECREASE.
+      // A simple multiplication is indeed what we want IF mpZ is inverted or we flip the sign here.
+
+      // Let's assume mpZ=0 is closest, mpZ=1 is furthest.
+      // When jumping, mpZ decreases (closer). We want t_scaled to decrease.
+      // The formula `t_scaled = t * (mpZ * depthScaleFactor)` means:
+      // If mpZ is small (e.g., 0.05), then t_scaled is small.
+      // If mpZ is large (e.g., 0.30), then t_scaled is large.
+      // This is the correct relationship to make worldPt[2] go UP when mpZ goes DOWN.
+      // So, the previous formula `t_scaled = t * (mpZ * depthScaleFactor)` was actually correct IF mpZ directly correlates with perceived depth.
+
+      // Perhaps the issue is that mpZ doesn't represent distance linearly or that `depthScaleFactor` isn't making enough impact.
+      // Let's try to make the `mpZ` adjustment a direct *offset* to the Z-coordinate itself, rather than scaling `t`.
+      // This is more robust as it decouples the depth scaling from the ray intersection with the plane.
+
+      const worldPtBase = add(C, scale(ray, t)); // Calculate base world point without mpZ
       
-      // Let's use 0.5 as a reference average Z from MediaPipe (can be fine-tuned)
-      // If mpZ is smaller than reference, point is closer, so t should be smaller.
-      // If mpZ is larger than reference, point is further, so t should be larger.
-
-      // A simple linear scaling based on mpZ relative to a reference (e.g., 0.5)
-      // The `depthScaleFactor` from settings will control the strength of this effect.
-      // We need to decide if an *increase* in mpZ means *further* or *closer*.
-      // From your observation (.30 to .05 during jump), smaller Z means closer.
-      // So, if mpZ goes down, we want `t` to decrease (closer to camera).
-      // If mpZ goes up, we want `t` to increase (further from camera).
-
-      // Let's use a base 't' at a reference mpZ, and then offset from there.
-      // A simple offset is to scale `t` by (1 + (reference_mpZ - current_mpZ) * depthScaleFactor)
-      // If current_mpZ is smaller, (reference_mpZ - current_mpZ) is positive, so t increases. THIS IS WRONG.
-      // If current_mpZ is smaller, it's closer, so worldPt[2] should be *higher* (less negative, or more positive).
-      // The Z component of our `C` vector is cameraHeightMeters (positive upwards).
-      // The Z component of `worldPt` is (C[2] + ray[2] * t).
-      // To get higher worldPt[2] (for a jump), `t` needs to become *smaller* (closer to camera).
-
-      // So, if mpZ goes from 0.3 to 0.05 (closer), we want `t` to become smaller.
-      // Let's use a direct linear relationship for simplicity.
-      // `t_scaled = t_base * (some_constant - mpZ * depthScaleFactor)`
-      // Let's try: `t_scaled = t * (mpZ * depthScaleFactor)`
-      // If mpZ is 0.3 (standing) -> 0.3 * 5 = 1.5
-      // If mpZ is 0.05 (jump) -> 0.05 * 5 = 0.25
-      // This way, t decreases when mpZ decreases, which pulls the point closer to the camera and results in a higher world Z (more positive).
-      const t_scaled = t * (mpZ * depthScaleFactor);
-
+      // Now, adjust the Z component of the world point based on mpZ
+      // mpZ from MediaPipe: Smaller value = closer to camera.
+      // For jump height, if you are closer to camera, your world Z should be higher.
+      // So, if mpZ decreases, worldPt[2] should increase.
+      // Let's add `(1 - mpZ) * depthScaleFactor` to the Z of the world point.
+      // `1 - mpZ`: Converts smaller mpZ to larger value (e.g., 0.05 -> 0.95).
+      // `depthScaleFactor`: Controls the magnitude of this effect.
+      
+      const worldPt = [
+        worldPtBase[0],
+        worldPtBase[1],
+        worldPtBase[2] + (1 - mpZ) * depthScaleFactor
+      ];
 
       debugValuesDisplay.innerHTML += `<br>mpZ: ${mpZ.toFixed(3)}`;
-      debugValuesDisplay.innerHTML += `<br>t_scaled: ${t_scaled.toFixed(3)}`;
-      
-      const worldPt = add(C, scale(ray, t_scaled)); // Use the scaled 't'
+      // debugValuesDisplay.innerHTML += `<br>t_scaled: ${t_scaled.toFixed(3)}`; // Removed t_scaled in favor of direct Z adjustment
       debugValuesDisplay.innerHTML += `<br>C: [${C[0].toFixed(2)},${C[1].toFixed(2)},<span style="color:cyan;">${C[2].toFixed(2)}</span>]` +
                                      `<br>ray: [${ray[0].toFixed(2)},${ray[1].toFixed(2)},<span style="color:cyan;">${ray[2].toFixed(2)}</span>]` +
-                                     `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
+                                     `<br>worldPtBase: [${worldPtBase[0].toFixed(2)},${worldPtBase[1].toFixed(2)},<span style="color:${worldPtBase[2].toFixed(3) !== '0.000' ? 'magenta' : 'red'};">${worldPtBase[2].toFixed(3)}</span>]` +
+                                     `<br>Adjust (+ (1-mpZ)*scale): ${( (1 - mpZ) * depthScaleFactor ).toFixed(3)}`;
+      debugValuesDisplay.innerHTML += `<br>worldPt: [${worldPt[0].toFixed(2)},${worldPt[1].toFixed(2)},<span style="color:${worldPt[2].toFixed(3) !== '0.000' ? 'cyan' : 'red'};">${worldPt[2].toFixed(3)}</span>]`;
       return worldPt;
     }
 
@@ -774,10 +773,8 @@
           debugValuesDisplay.innerHTML += `Selected: ${lowestLandmark === leftHip ? 'LHip' : 'RHip'} (ankles missing)<br>`;
       } else if (leftHip) {
           lowestLandmark = leftHip;
-          debugValuesDisplay.innerHTML += `Selected: LHip (ankles missing)<br>`;
       } else if (rightHip) {
           lowestLandmark = rightHip;
-          debugValuesDisplay.innerHTML += `Selected: RHip (ankles missing)<br>`;
       }
 
 
