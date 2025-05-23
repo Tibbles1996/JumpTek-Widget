@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JumpTek Trampoline Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675039327/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.10.9/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.13.0/dist/tf.min.js"></script>
     <style>
         body {
@@ -113,10 +113,11 @@
             opacity: 0.6;
         }
 
+        /* REVERTED: Original icon sizing as seen in your screenshot */
         #controls button img {
-            filter: invert(1); /* Makes icons white */
-            width: 28px;
-            height: 28px;
+            width: 32px; /* Or whatever your original size was */
+            height: 32px; /* Or whatever your original size was */
+            /* If you had specific filters for the icons, add them back here */
         }
 
         .debug-display {
@@ -284,16 +285,16 @@
 
             <div id="controls">
                 <button id="cameraSwitchBtn" aria-label="Switch Camera" tabindex="0" role="button">
-                    <img src="https://icon-library.com/images/switch-camera-icon/switch-camera-icon-7.jpg" alt="Switch Camera" />
+                    <img src="https://tibbles1996.github.io/JumpTek-Widget/camera_switch_icon.png" alt="Switch Camera" />
                 </button>
                 <button id="clearCornersBtn" aria-label="Clear marked corners" tabindex="0" role="button" style="display: none;">
-                    <img src="https://icon-library.com/images/clear-icon-png/clear-icon-png-3.jpg" alt="Clear Corners" />
+                    <img src="https://tibbles1996.github.io/JumpTek-Widget/clear_icon.png" alt="Clear Corners" />
                 </button>
                 <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display: none;">
-                    <img src="https://icon-library.com/images/wrench-icon-png/wrench-icon-png-11.jpg" alt="Calibrate" />
+                    <img src="https://tibbles1996.github.io/JumpTek-Widget/wrench_icon.png" alt="Calibrate" />
                 </button>
                 <button id="settingsBtn" aria-label="Settings" tabindex="0" role="button">
-                    <img src="https://icon-library.com/images/settings-icon-png/settings-icon-png-20.jpg" alt="Settings" />
+                    <img src="https://tibbles1996.github.io/JumpTek-Widget/settings_icon.png" alt="Settings" />
                 </button>
             </div>
 
@@ -425,7 +426,8 @@
     async function initializePose() {
         pose = new Pose({
             locateFile: (file) => {
-                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675039327/${file}`;
+                // Ensure MediaPipe assets are loaded from the correct path
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.10.9/${file}`;
             }
         });
 
@@ -521,6 +523,10 @@
         // Draw pose landmarks if available
         if (results.poseLandmarks) {
             if (debugMode) {
+                // Ensure drawConnectors and drawLandmarks are defined if debugMode is true
+                // These are typically provided by MediaPipe's drawing_utils,
+                // but if not included, they would cause an error.
+                // Assuming they are present for drawing skeleton in debug mode.
                 drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
                 drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FFFF00', lineWidth: 2, radius: 6 });
             }
@@ -1244,6 +1250,57 @@
         startCamera();
         detectionLoop();
     });
+
+    // Helper functions for drawing (assuming these are globally available or from MediaPipe's drawing_utils)
+    // If you are using MediaPipe's drawing_utils, make sure to include it:
+    // <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js" crossorigin="anonymous"></script>
+    // And define POSE_CONNECTIONS:
+    // const POSE_CONNECTIONS = [[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],[11,12],[11,13],[13,15],[15,17],[17,19],[19,21],[12,14],[14,16],[16,18],[18,20],[20,22],[11,23],[12,24],[23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[29,31],[30,32],[27,31],[28,32]];
+    // If you don't have these, the debug skeleton drawing won't work, but the core logic will.
+    // For this full example, I will include placeholder definitions for `drawConnectors`, `drawLandmarks`, and `POSE_CONNECTIONS`
+    // to prevent errors if you haven't linked MediaPipe's `drawing_utils`.
+
+    // --- Placeholder/Simple Drawing Utilities if MediaPipe's are not linked ---
+    // (If you use MediaPipe's drawing_utils.js, you can remove these definitions)
+    function drawConnectors(ctx, landmarks, connections, style) {
+        ctx.strokeStyle = style.color || 'white';
+        ctx.lineWidth = style.lineWidth || 2;
+        for (const connection of connections) {
+            const [i, j] = connection;
+            if (landmarks[i] && landmarks[j] && landmarks[i].score > 0.5 && landmarks[j].score > 0.5) {
+                ctx.beginPath();
+                ctx.moveTo(landmarks[i].x * ctx.canvas.width, landmarks[i].y * ctx.canvas.height);
+                ctx.lineTo(landmarks[j].x * ctx.canvas.width, landmarks[j].y * ctx.canvas.height);
+                ctx.stroke();
+            }
+        }
+    }
+
+    function drawLandmarks(ctx, landmarks, style) {
+        ctx.fillStyle = style.color || 'white';
+        ctx.beginPath();
+        for (const landmark of landmarks) {
+            if (landmark.score > 0.5) {
+                ctx.arc(landmark.x * ctx.canvas.width, landmark.y * ctx.canvas.height, style.radius || 3, 0, 2 * Math.PI);
+            }
+        }
+        ctx.fill();
+    }
+
+    // Standard MediaPipe Pose Connections (copied from their examples for debug drawing)
+    const POSE_CONNECTIONS = [
+        [0,1],[1,2],[2,3],[3,7], // Head
+        [0,4],[4,5],[5,6],[6,8], // Head
+        [9,10], // Hands
+        [11,12], // Shoulders
+        [11,13],[13,15],[15,17],[17,19],[19,21], // Left Arm
+        [12,14],[14,16],[16,18],[18,20],[20,22], // Right Arm
+        [11,23],[12,24], // Torso
+        [23,25],[24,26],[25,27],[26,28],[27,29],[28,30],[29,31],[30,32], // Legs
+        [27,31],[28,32] // Feet
+    ];
+    // --- End Placeholder/Simple Drawing Utilities ---
+
 </script>
 </body>
 </html>
