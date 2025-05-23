@@ -14,19 +14,16 @@
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #1a1a1a;
+            background-color: #000;
             font-family: Arial, sans-serif;
             color: #eee;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            position: relative;
         }
         #webcam-container {
-            position: relative;
+            position: absolute;
             width: 100vw;
             height: 100vh;
+            top: 0;
+            left: 0;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -56,20 +53,62 @@
             height: 100%;
             z-index: 20;
             pointer-events: none; /* Allow clicks to pass through to canvas for marking */
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
             padding: 20px;
             box-sizing: border-box;
         }
-        #top-ui {
-            width: 100%;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+
+        /* Original Layout for elements */
+        #frameRateDisplay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #00ff00; /* Green for FPS */
+            display: none; /* Hidden by default in non-debug mode */
         }
+        #rawHeightDebugDisplay {
+            position: absolute;
+            top: 55px; /* Below FPS */
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            display: none; /* Hidden by default in non-debug mode */
+            color: #eee; /* Default color */
+        }
+        #rawHeightDebugDisplay.positive {
+            color: #ffcc00; /* Yellow for positive Z-delta */
+        }
+        #debugValuesDisplay {
+            position: absolute;
+            top: 90px; /* Below rawHeightDebugDisplay */
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            line-height: 1.4;
+            white-space: pre; /* Preserve newlines */
+            text-align: left;
+            color: #fff;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none; /* Hidden by default in non-debug mode */
+        }
+
+
         #trampolineNotice {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
             background-color: rgba(0, 0, 0, 0.6);
             padding: 10px 20px;
             border-radius: 8px;
@@ -78,9 +117,9 @@
             color: #fff;
             pointer-events: auto;
             max-width: 80%;
-            margin-top: 10px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
         }
+
         #calibrationCountdown {
             position: absolute;
             top: 50%;
@@ -93,95 +132,65 @@
             z-index: 30;
             display: none; /* Hidden by default */
         }
-        #bottom-ui {
-            width: 100%;
+
+        /* Buttons on bottom right */
+        #bottom-right-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 20px;
+            align-items: flex-end;
+            gap: 10px;
+            pointer-events: auto; /* Allow button clicks */
         }
         .btn-group {
             display: flex;
             gap: 10px;
         }
         button {
-            padding: 12px 25px;
-            font-size: 1.1em;
+            padding: 10px 20px;
+            font-size: 1em;
             border: none;
-            border-radius: 30px;
+            border-radius: 5px;
             cursor: pointer;
-            background-color: #007bff;
-            color: white;
             transition: background-color 0.3s ease, transform 0.2s ease;
-            pointer-events: auto;
-            box-shadow: 0 4px 10px rgba(0, 123, 255, 0.4);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
         }
-        button:hover {
-            background-color: #0056b3;
+
+        /* Original Green Calibrate Button */
+        #calibrateBtn {
+            background-color: #28a745; /* Bootstrap Success Green */
+            color: white;
+            display: none; /* Hidden until corners marked */
+        }
+        #calibrateBtn:hover {
+            background-color: #218838;
             transform: translateY(-2px);
         }
-        button:disabled {
+        #calibrateBtn:disabled {
             background-color: #6c757d;
             cursor: not-allowed;
             box-shadow: none;
             transform: none;
         }
-        #calibrateBtn {
-            background-color: #28a745;
-            box-shadow: 0 4px 10px rgba(40, 167, 69, 0.4);
-            display: none; /* Hidden until corners marked */
+
+        /* Original Blue Settings/Switch Camera/Zoom Buttons */
+        #settingsBtn, #switchCameraBtn, #zoomInBtn, #zoomOutBtn {
+            background-color: #007bff; /* Bootstrap Primary Blue */
+            color: white;
         }
-        #calibrateBtn:hover {
-            background-color: #218838;
+        #settingsBtn:hover, #switchCameraBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover {
+            background-color: #0056b3;
+            transform: translateY(-2px);
         }
-        #switchCameraBtn, #settingsBtn {
+        #settingsBtn:disabled, #switchCameraBtn:disabled, #zoomInBtn:disabled, #zoomOutBtn:disabled {
             background-color: #6c757d;
-            box-shadow: 0 4px 10px rgba(108, 117, 125, 0.4);
-        }
-        #switchCameraBtn:hover, #settingsBtn:hover {
-            background-color: #5a6268;
-        }
-        #zoomControls {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        #zoomControls button {
-            padding: 8px 15px;
-            font-size: 1em;
-            border-radius: 20px;
-            background-color: #17a2b8;
-            box-shadow: 0 2px 5px rgba(23, 162, 184, 0.4);
-        }
-        #zoomControls button:hover {
-            background-color: #138496;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
         }
 
-        #rawHeightDebugDisplay, #frameRateDisplay, #debugValuesDisplay {
-            background-color: rgba(0, 0, 0, 0.7);
-            padding: 8px 15px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            white-space: pre; /* Preserve newlines */
-            text-align: left;
-            margin-top: 10px;
-            display: none; /* Hidden by default */
-        }
-        #rawHeightDebugDisplay.positive {
-            color: #ffcc00; /* Yellow for positive Z-delta */
-        }
-        #frameRateDisplay {
-            color: #00ff00; /* Green for FPS */
-        }
-        #debugValuesDisplay {
-            color: #fff;
-            max-height: 200px; /* Limit height */
-            overflow-y: auto; /* Scroll if content overflows */
-            font-size: 0.8em;
-            line-height: 1.4;
-        }
 
         #settingsPopover {
             position: absolute;
@@ -265,26 +274,21 @@
     </div>
 
     <div id="ui-overlay">
-        <div id="top-ui">
-            <span id="frameRateDisplay">FPS: 0</span>
-            <span id="rawHeightDebugDisplay">Raw Z-Delta: N/A</span>
-            <span id="debugValuesDisplay"></span>
+        <span id="frameRateDisplay">FPS: 0</span>
+        <span id="rawHeightDebugDisplay">Raw Z-Delta: N/A</span>
+        <span id="debugValuesDisplay"></span>
+
+        <span id="calibrationCountdown"></span> <div id="trampolineNotice">
+            Click on the 4 corners of your trampoline to mark its area.
         </div>
 
-        <span id="calibrationCountdown"></span> <div id="bottom-ui">
-            <div id="trampolineNotice">
-                Click on the 4 corners of your trampoline to mark its area.
-            </div>
+        <div id="bottom-right-controls">
+            <button id="calibrateBtn" disabled>Start Calibration</button>
+            <button id="settingsBtn">Settings</button>
+            <button id="switchCameraBtn">Switch Camera</button>
             <div class="btn-group">
-                <button id="calibrateBtn" disabled>Start Calibration</button>
-                <button id="settingsBtn">Settings</button>
-            </div>
-            <div class="btn-group">
-                <button id="switchCameraBtn">Switch Camera</button>
-                <div id="zoomControls">
-                    <button id="zoomOutBtn">- Zoom</button>
-                    <button id="zoomInBtn">+ Zoom</button>
-                </div>
+                <button id="zoomOutBtn">- Zoom</button>
+                <button id="zoomInBtn">+ Zoom</button>
             </div>
         </div>
     </div>
@@ -329,7 +333,7 @@
     const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
     const frameRateDisplay = document.getElementById('frameRateDisplay');
     const debugValuesDisplay = document.getElementById('debugValuesDisplay');
-    const calibrationCountdown = document.getElementById('calibrationCountdown'); // New element
+    const calibrationCountdown = document.getElementById('calibrationCountdown');
 
     // --- GLOBAL STATE VARIABLES ---
     let currentStream = null;
@@ -403,85 +407,19 @@
         const cy = window._JT_intrinsics.cy;
 
         const C = window._JT_extrinsics.C; // Camera position [Cx, Cy, Cz]
-        const R_inv = math.inv(window._JT_extrinsics.R); // Inverse of Rotation matrix
 
         // De-normalize pixel coordinates
         const x_norm = (pixelX - cx) / fx;
         const y_norm = (pixelY - cy) / fy;
 
-        // Calculate a ray from camera origin through the pixel
-        // Assuming original MediaPipe Z (depth) is relative to the camera in some normalized space.
-        // We need to map this MediaPipe Z to a real-world depth.
-        // The `depthScaleFactor` is used here to adjust the MediaPipe Z value.
-        // A larger depthScaleFactor means the actual depth (Z) in the world is larger for the same MediaPipe Z.
-        // We'll calculate a theoretical Z_c (depth in camera coordinates)
-        // using the depthScaleFactor as a multiplier for the normalized MediaPipe Z value.
-        const Z_c_estimated = depthScaleFactor * mpZ + cameraDistanceMeters; // Simple linear mapping
+        // The `depthScaleFactor` is used here to adjust the MediaPipe Z value
+        // The cameraHeightMeters is the offset to bring it to world Z=0 (trampoline surface)
+        const estimatedWorldZ = (depthScaleFactor * mpZ) + cameraHeightMeters;
 
-        // 3D point in camera coordinates (Xc, Yc, Zc)
-        const Xc = x_norm * Z_c_estimated;
-        const Yc = y_norm * Z_c_estimated;
-        const Zc = Z_c_estimated;
-
-        // Convert from camera coordinates to world coordinates
-        // P_w = R_inv * (P_c - C)
-        const P_c_minus_C = [Xc - C[0], Yc - C[1], Zc - C[2]]; // This is incorrect, P_w = R_inv * P_c + T_world_from_camera
-        // The correct transformation is P_w = R_inv * P_c + C_world, where C_world is the camera position in world coordinates.
-        // Given C is defined as [0, -cameraDistanceMeters, cameraHeightMeters] in world space, and R is identity for simplicity,
-        // then (Xw, Yw, Zw) = (Xc + Cx, Yc + Cy, Zc + Cz)
-        // However, the input Z is a normalized depth from MediaPipe.
-        // The current implementation seems to derive world Z directly from this.
-
-        // Let's re-evaluate based on the provided camera parameters and how MediaPipe Z works.
-        // MediaPipe's Z is a relative depth where 0 is the center of the hips, and negative values are further away.
-        // The `depthScaleFactor` is used to convert this relative Z into a real-world distance.
-        // A more robust approach might involve:
-        // 1. Calculating a world X and Y from the pixel coordinates and the camera's assumed position and orientation.
-        // 2. Mapping MediaPipe's Z to a "real" Z (depth from camera)
-        // 3. Projecting the point onto the world plane if a plane is defined, or directly using the calculated Z.
-
-        // For simplicity, let's stick to the current interpretation but clarify.
-        // `pixelToWorld` is effectively mapping the normalized Z from MediaPipe to a world Z.
-        // The X and Y conversion from pixel to world is more complex without a proper projection matrix setup.
-        // Assuming for now, that `worldPt[2]` is the primary value of interest for vertical jump.
-
-        // A more direct interpretation of what your current camera setup implies:
-        // If the camera is at [0, -cameraDistanceMeters, cameraHeightMeters]
-        // and facing primarily along the Y-axis (given R is identity),
-        // then the Z component from MediaPipe's normalized depth (which is relative to the camera's view)
-        // needs to be scaled and offset to align with a world Z-axis where 0 is the trampoline surface.
-        // It appears `depthScaleFactor * mpZ` adjusts the relative depth, and `cameraHeightMeters` offsets it to the trampoline's Z=0.
-        // This is a simplification but common for 2D-to-3D pose estimation when a full 3D reconstruction isn't done.
-
-        // Let's assume the Z output `worldPt[2]` is the critical vertical position relative to an arbitrary origin.
-        // The X and Y here are less directly used for jump height.
-
-        // Based on the given structure:
-        // C: [0, -cameraDistanceMeters, cameraHeightMeters] -> Camera is at X=0, Y=-dist, Z=height
-        // R: identity -> Camera is looking straight ahead (along positive Y-axis if conventional, but given Z is for height, implies looking at XY plane)
-        // The `pixelToWorld` logic is likely simplified for Z (vertical height).
-
-        // If the camera is at [0, -dist, height] and the trampoline is at Z=0,
-        // and the input `mpZ` is a *relative* depth from the camera,
-        // then `depthScaleFactor * mpZ` maps this relative depth to a real-world depth.
-        // And `cameraHeightMeters` is the camera's Z position.
-
-        // This implies that as `mpZ` changes (e.g., foot goes up), `worldPt[2]` will change.
-        // We'll proceed with this interpretation, focusing on `worldPt[2]` as the vertical component.
-        const worldX = x_norm * Zc; // Simplified, not truly projected
-        const worldY = y_norm * Zc; // Simplified, not truly projected
-        const worldZ = Zc; // The estimated Z position relative to the camera's Z plane.
-
-        // Your current code implies that `worldPtBaselineSample[2]` is directly used as a Z value.
-        // Let's assume the current pixelToWorld is producing a useful Z-coordinate for vertical tracking.
-        // Given that `depthScaleFactor * mpZ` is used and then compared to `baselineZ` which is also a `worldPt[2]`.
-        // This means we are primarily concerned with the *change* in Z.
-        // This is likely a simplification where `mpZ` is directly mapped to a world Z.
-        // The `cameraDistanceMeters` and `cameraHeightMeters` would influence the overall scaling and offset.
-
-        // A more correct full 3D projection is involved for precise world coordinates,
-        // but for relative height tracking, the current approach might be sufficient if calibrated well.
-        return [worldX, worldY, currentZRaw]; // Returning currentZRaw which depends on the input params
+        // For X and Y, a full projection is complex, but for relative vertical tracking,
+        // we mainly care about Z. We can return simple projections for X, Y, or placeholder values.
+        // Let's use 0 for X, Y as they are not currently used for height calculation.
+        return [0, 0, estimatedWorldZ];
     }
 
 
@@ -718,7 +656,7 @@
     calibrateBtn.addEventListener('click', async function() {
         console.log(`[CALIBRATE_BTN_CLICK] Clicked! Current Phase: ${currentCalibrationPhase}`);
 
-        if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) { // Changed from STAND_STILL to MARK_CORNERS
+        if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
              if (!trampolinePolygon) {
                 trampolineNotice.style.color = '#f00';
                 trampolineNotice.textContent = "Error: Please mark the 4 corners of the trampoline first.";
@@ -730,14 +668,12 @@
         }
 
         if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-            // --- Add this specific check ---
             if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
                 trampolineNotice.style.color = '#f00';
                 trampolineNotice.textContent = "Error: No pose detected. Please ensure your body is fully visible and try again.";
                 console.error("[CALIBRATE_BTN_CLICK] Calibration attempted without valid pose landmarks.");
                 return;
             }
-            // --- End of specific check ---
 
             let attempts = 0;
             const maxAttempts = 5;
@@ -1162,12 +1098,8 @@
         const lx = lowestLandmark.x * canvas.width;
         const ly = lowestLandmark.y * canvas.height;
 
-        // Note: The pixelToWorld function returns worldX, worldY, and an estimated Z_c.
-        // For jump height, we are primarily interested in the Z_c component.
-        // Let's ensure this mapping makes sense for relative vertical displacement.
-        // The current implementation's `worldPt[2]` is the `currentZRaw` from the body of pixelToWorld.
         const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
-        const currentZRaw = worldPt[2]; // Raw Z position
+        const currentZRaw = worldPt[2]; // Raw Z position (our estimated vertical position)
 
         // --- Calculate Raw Vertical Velocity ---
         let verticalVelocityRaw = 0;
