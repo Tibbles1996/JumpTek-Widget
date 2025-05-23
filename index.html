@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JumpTek MediaPipe AI Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675079839/pose.js" crossorigin="anonymous"></script>
+    <title>JumpTek MediaPipe AI Tracker Widget</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@3.16.0/dist/tf-core.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@3.16.0/dist/tf-converter.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@3.16.0/dist/tf-backend-webgl.min.js"></script>
@@ -299,7 +299,7 @@
                     <button id="saveSettingsBtn">Save</button>
                 </div>
             </div>
-            
+
             <div id="calibrationOverlay"></div>
 
             <div id="rawHeightDebugDisplay" class="debug-display"></div>
@@ -318,9 +318,10 @@
     </div>
 
     <script type="module">
-    import { Pose, POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675079839/pose.js';
-    import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera@0.3.1675079839/camera.js';
-    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675079839/drawing_utils.js';
+    // Corrected MediaPipe Library Imports
+    import { Pose, POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
+    import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera/camera.js';
+    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
 
     // --- DOM Elements ---
     const videoElement = document.getElementById('webcam');
@@ -434,7 +435,8 @@
     function setupMediaPipe() {
         pose = new Pose({
             locateFile: (file) => {
-                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675079839/${file}`;
+                // Corrected path for MediaPipe assets
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
             }
         });
 
