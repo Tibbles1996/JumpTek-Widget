@@ -78,7 +78,28 @@
       background: rgba(39, 174, 96, 0.8);
       box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
-<!-- Part 2: Styles (continued) and MediaPipe Script Imports -->
+#restartDrawBtn {
+  display: none;
+  position: absolute;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 21;
+  padding: 10px 22px;
+  border-radius: 14px;
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  font-size: 1.1rem;
+  font-weight: bold;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  cursor: pointer;
+}
+#restartDrawBtn:hover {
+  background: #b53224;
+}
+    
+/* <!-- Part 2: Styles (continued) and MediaPipe Script Imports --> */
     #loadingIndicator {
       position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
       z-index: 30; color: #ff0; background: rgba(0,0,0,0.7);
@@ -213,9 +234,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
 </head>
-  <!-- Part 3: Main Body Structure and UI -->
+//  <!-- Part 3: Main Body Structure and UI -->
 <body>
   <div id="container">
+    <!-- Restart Draw Button (hidden by default) -->
+<button id="restartDrawBtn" style="display:none; position:absolute; top:110px; left:50%; transform:translateX(-50%); z-index:21; padding:10px 22px; border-radius:14px; background:#e74c3c; color:#fff; border:none; font-size:1.1rem; font-weight:bold; box-shadow:0 2px 8px rgba(0,0,0,0.15); cursor:pointer;">
+  Restart Draw
+</button>
     <canvas id="canvas"></canvas>
     <div id="buttonRow">
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
@@ -915,151 +940,176 @@
     return lowestLandmark;
   }
 //  <!-- Part 9: Jump Computation and Output -->
-  // --------- JUMP COMPUTATION ---------
-  let lastZPosRaw = null;
-  let lastTimeRaw = null;
+// --------- JUMP COMPUTATION AND RESTART DRAW BUTTON ---------
 
-  function computeAndSendJump(landmarks) {
-    const currentTime = performance.now();
+// Element Declarations
+const restartDrawBtn = document.getElementById('restartDrawBtn');
+
+let lastZPosRaw = null;
+let lastTimeRaw = null;
+
+// Show/hide Restart Draw button in drawLoop (ensure this is called every frame)
+function updateRestartDrawBtnVisibility() {
+  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
+    restartDrawBtn.style.display = "block";
+  } else {
+    restartDrawBtn.style.display = "none";
+  }
+}
+
+// Add this call inside your drawLoop(), after calibrate button/UI updates:
+updateRestartDrawBtnVisibility();
+
+// Restart Draw Button Click Handler
+restartDrawBtn.addEventListener('click', () => {
+  trampolineCorners = [];
+  trampolinePolygon = null;
+  trampolineNotice.textContent = "Corner selection reset. Tap the four corners of the trampoline.";
+  // Button stays visible until phase changes
+});
+
+function computeAndSendJump(landmarks) {
+  const currentTime = performance.now();
+  if (debugMode) {
+    if (!lastFpsUpdateTime) lastFpsUpdateTime = currentTime;
+    debugValuesDisplay.innerHTML = `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
+    debugValuesDisplay.innerHTML += `Jump State: ${jumpState}<br>`;
+    debugValuesDisplay.innerHTML += `Cal Phase: ${currentCalibrationPhase}<br>`;
+  }
+  if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || baselineZ === null) {
     if (debugMode) {
-      if (!lastFpsUpdateTime) lastFpsUpdateTime = currentTime;
-      debugValuesDisplay.innerHTML = `Baseline Z: ${baselineZ !== null ? baselineZ.toFixed(3) : 'N/A'}<br>`;
-      debugValuesDisplay.innerHTML += `Jump State: ${jumpState}<br>`;
-      debugValuesDisplay.innerHTML += `Cal Phase: ${currentCalibrationPhase}<br>`;
+      rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
+      rawHeightDebugDisplay.classList.remove('positive');
+      debugValuesDisplay.innerHTML += 'Not fully calibrated for tracking.';
     }
-    if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || baselineZ === null) {
-      if (debugMode) {
-        rawHeightDebugDisplay.textContent = 'Raw Z-Delta: N/A';
-        rawHeightDebugDisplay.classList.remove('positive');
-        debugValuesDisplay.innerHTML += 'Not fully calibrated for tracking.';
-      }
-      sendJumpHeight(0, false);
-      return;
+    sendJumpHeight(0, false);
+    return;
+  }
+  const lowestLandmark = getLowestBodyLandmark(landmarks);
+  if (!lowestLandmark) {
+    if (debugMode) {
+      rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
+      rawHeightDebugDisplay.classList.remove('positive');
+      debugValuesDisplay.innerHTML += 'No suitable low landmark found.';
     }
-    const lowestLandmark = getLowestBodyLandmark(landmarks);
-    if (!lowestLandmark) {
-      if (debugMode) {
-        rawHeightDebugDisplay.textContent = 'Raw Z-Delta: No Landmrk';
-        rawHeightDebugDisplay.classList.remove('positive');
-        debugValuesDisplay.innerHTML += 'No suitable low landmark found.';
+    sendJumpHeight(0, true);
+    return;
+  }
+  const lx = lowestLandmark.x * canvas.width;
+  const ly = lowestLandmark.y * canvas.height; 
+  const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
+  const currentZRaw = worldPt[2];
+  let verticalVelocityRaw = 0;
+  if (lastZPosRaw !== null && lastTimeRaw !== null) {
+    const deltaTime = (currentTime - lastTimeRaw) / 1000;
+    if (deltaTime > 0) {
+      verticalVelocityRaw = (currentZRaw - lastZPosRaw) / deltaTime;
+    }
+  }
+  lastZPosRaw = currentZRaw;
+  lastTimeRaw = currentTime;
+  if (currentZSmoothed === null) {
+    currentZSmoothed = currentZRaw;
+    verticalVelocitySmoothed = verticalVelocityRaw;
+  } else {
+    currentZSmoothed = ALPHA_Z_SMOOTHING * currentZRaw + (1 - ALPHA_Z_SMOOTHING) * currentZSmoothed;
+    verticalVelocitySmoothed = ALPHA_VELOCITY_SMOOTHING * verticalVelocityRaw + (1 - ALPHA_VELOCITY_SMOOTHING) * verticalVelocitySmoothed;
+  }
+  if (jumpState === JUMP_STATE_AIRBORNE && currentZSmoothed > highestPointZ) {
+    highestPointZ = currentZSmoothed;
+  }
+  if (debugMode) {
+    rawHeightDebugDisplay.textContent = `Current Z: ${currentZSmoothed.toFixed(3)}m`;
+    debugValuesDisplay.innerHTML += `Smoothed Z: ${currentZSmoothed.toFixed(3)}m<br>`;
+    debugValuesDisplay.innerHTML += `Smoothed Vel: ${verticalVelocitySmoothed.toFixed(2)} m/s<br>`;
+    debugValuesDisplay.innerHTML += `Raw Z: ${currentZRaw.toFixed(3)}m<br>`;
+    debugValuesDisplay.innerHTML += `Raw Vel: ${verticalVelocityRaw.toFixed(2)} m/s<br>`;
+    if (currentZSmoothed > baselineZ + 0.05) {
+      rawHeightDebugDisplay.classList.add('positive');
+    } else {
+      rawHeightDebugDisplay.classList.remove('positive');
+    }
+  }
+  switch (jumpState) {
+    case JUMP_STATE_ON_TRAMPOLINE:
+      if (currentZSmoothed > (baselineZ + JUMP_OFF_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocitySmoothed > TAKEOFF_VELOCITY_THRESHOLD) {
+        jumpState = JUMP_STATE_AIRBORNE;
+        takeOffTime = currentTime;
+        highestPointZ = currentZSmoothed;
+        flightTime = 0;
       }
       sendJumpHeight(0, true);
-      return;
-    }
-    const lx = lowestLandmark.x * canvas.width;
-    const ly = lowestLandmark.y * canvas.height; 
-    const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
-    const currentZRaw = worldPt[2];
-    let verticalVelocityRaw = 0;
-    if (lastZPosRaw !== null && lastTimeRaw !== null) {
-      const deltaTime = (currentTime - lastTimeRaw) / 1000;
-      if (deltaTime > 0) {
-        verticalVelocityRaw = (currentZRaw - lastZPosRaw) / deltaTime;
+      break;
+    case JUMP_STATE_AIRBORNE:
+      if (verticalVelocitySmoothed < PEAK_VELOCITY_THRESHOLD) {
+        jumpState = JUMP_STATE_DESCENDING;
       }
-    }
-    lastZPosRaw = currentZRaw;
-    lastTimeRaw = currentTime;
-    if (currentZSmoothed === null) {
-      currentZSmoothed = currentZRaw;
-      verticalVelocitySmoothed = verticalVelocityRaw;
-    } else {
-      currentZSmoothed = ALPHA_Z_SMOOTHING * currentZRaw + (1 - ALPHA_Z_SMOOTHING) * currentZSmoothed;
-      verticalVelocitySmoothed = ALPHA_VELOCITY_SMOOTHING * verticalVelocityRaw + (1 - ALPHA_VELOCITY_SMOOTHING) * verticalVelocitySmoothed;
-    }
-    if (jumpState === JUMP_STATE_AIRBORNE && currentZSmoothed > highestPointZ) {
-      highestPointZ = currentZSmoothed;
-    }
-    if (debugMode) {
-      rawHeightDebugDisplay.textContent = `Current Z: ${currentZSmoothed.toFixed(3)}m`;
-      debugValuesDisplay.innerHTML += `Smoothed Z: ${currentZSmoothed.toFixed(3)}m<br>`;
-      debugValuesDisplay.innerHTML += `Smoothed Vel: ${verticalVelocitySmoothed.toFixed(2)} m/s<br>`;
-      debugValuesDisplay.innerHTML += `Raw Z: ${currentZRaw.toFixed(3)}m<br>`;
-      debugValuesDisplay.innerHTML += `Raw Vel: ${verticalVelocityRaw.toFixed(2)} m/s<br>`;
-      if (currentZSmoothed > baselineZ + 0.05) {
-        rawHeightDebugDisplay.classList.add('positive');
-      } else {
-        rawHeightDebugDisplay.classList.remove('positive');
-      }
-    }
-    switch (jumpState) {
-      case JUMP_STATE_ON_TRAMPOLINE:
-        if (currentZSmoothed > (baselineZ + JUMP_OFF_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocitySmoothed > TAKEOFF_VELOCITY_THRESHOLD) {
-          jumpState = JUMP_STATE_AIRBORNE;
-          takeOffTime = currentTime;
-          highestPointZ = currentZSmoothed;
-          flightTime = 0;
-        }
-        sendJumpHeight(0, true);
-        break;
-      case JUMP_STATE_AIRBORNE:
-        if (verticalVelocitySmoothed < PEAK_VELOCITY_THRESHOLD) {
-          jumpState = JUMP_STATE_DESCENDING;
-        }
-        break;
-      case JUMP_STATE_DESCENDING:
-        if (currentZSmoothed <= (baselineZ + LANDING_ON_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocitySmoothed > LANDING_VELOCITY_THRESHOLD) {
-          jumpState = JUMP_STATE_ON_TRAMPOLINE;
-          const landingTime = currentTime;
-          flightTime = (landingTime - takeOffTime) / 1000;
-          const calculatedJumpHeightFlight = (0.5 * GRAVITY * (flightTime / 2) * (flightTime / 2));
-          let finalReportedHeight = Math.max(0, calculatedJumpHeightFlight < MIN_JUMP_DISPLAY_THRESHOLD ? 0 : calculatedJumpHeightFlight);
-          if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION && flightTime > 0.3) {
-            const current3DHeight = Math.max(0, highestPointZ - baselineZ);
-            if (current3DHeight > 0.01 && calculatedJumpHeightFlight > 0.01) {
-              calibrationJumpsData.push({ h3d: current3DHeight, hflight: calculatedJumpHeightFlight });
-              trampolineNotice.textContent = `Jump ${calibrationJumpsData.length} of ${REQUIRED_CALIBRATION_JUMPS} recorded. Keep jumping!`;
-              if (calibrationJumpsData.length >= REQUIRED_CALIBRATION_JUMPS) {
-                let sumRatios = 0;
-                for (const data of calibrationJumpsData) {
-                  sumRatios += data.hflight / data.h3d;
-                }
-                const averageRatio = sumRatios / calibrationJumpsData.length;
-                depthScaleFactor *= averageRatio;
-                depthScaleFactorInput.value = depthScaleFactor.toFixed(1);
-                saveSettingsToStorage();
-                currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-                calibrationReady = true;
-                trampolineNotice.style.color = '#0f0';
-                trampolineNotice.textContent = "Z-Scale calibrated! Jump height tracking active.";
-                calibrationJumpsData = [];
+      break;
+    case JUMP_STATE_DESCENDING:
+      if (currentZSmoothed <= (baselineZ + LANDING_ON_TRAMPOLINE_THRESHOLD_METERS) && verticalVelocitySmoothed > LANDING_VELOCITY_THRESHOLD) {
+        jumpState = JUMP_STATE_ON_TRAMPOLINE;
+        const landingTime = currentTime;
+        flightTime = (landingTime - takeOffTime) / 1000;
+        const calculatedJumpHeightFlight = (0.5 * GRAVITY * (flightTime / 2) * (flightTime / 2));
+        let finalReportedHeight = Math.max(0, calculatedJumpHeightFlight < MIN_JUMP_DISPLAY_THRESHOLD ? 0 : calculatedJumpHeightFlight);
+        if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION && flightTime > 0.3) {
+          const current3DHeight = Math.max(0, highestPointZ - baselineZ);
+          if (current3DHeight > 0.01 && calculatedJumpHeightFlight > 0.01) {
+            calibrationJumpsData.push({ h3d: current3DHeight, hflight: calculatedJumpHeightFlight });
+            trampolineNotice.textContent = `Jump ${calibrationJumpsData.length} of ${REQUIRED_CALIBRATION_JUMPS} recorded. Keep jumping!`;
+            if (calibrationJumpsData.length >= REQUIRED_CALIBRATION_JUMPS) {
+              let sumRatios = 0;
+              for (const data of calibrationJumpsData) {
+                sumRatios += data.hflight / data.h3d;
               }
-            } else {
-              trampolineNotice.textContent = `Jump too small for calibration or invalid height data. Please jump higher. (${calibrationJumpsData.length}/${REQUIRED_CALIBRATION_JUMPS})`;
+              const averageRatio = sumRatios / calibrationJumpsData.length;
+              depthScaleFactor *= averageRatio;
+              depthScaleFactorInput.value = depthScaleFactor.toFixed(1);
+              saveSettingsToStorage();
+              currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
+              calibrationReady = true;
+              trampolineNotice.style.color = '#0f0';
+              trampolineNotice.textContent = "Z-Scale calibrated! Jump height tracking active.";
+              calibrationJumpsData = [];
             }
+          } else {
+            trampolineNotice.textContent = `Jump too small for calibration or invalid height data. Please jump higher. (${calibrationJumpsData.length}/${REQUIRED_CALIBRATION_JUMPS})`;
           }
-          if (debugMode) {
-            debugValuesDisplay.innerHTML += `Flight Time: ${flightTime.toFixed(3)}s<br>`;
-            debugValuesDisplay.innerHTML += `Calculated Height: ${calculatedJumpHeightFlight.toFixed(2)}m<br>`;
-            debugValuesDisplay.innerHTML += `H3D (peak-baseline): ${(highestPointZ - baselineZ).toFixed(2)}m<br>`;
-          }
-          sendJumpHeight(finalReportedHeight, true);
-          highestPointZ = -Infinity;
         }
-        break;
-    }
+        if (debugMode) {
+          debugValuesDisplay.innerHTML += `Flight Time: ${flightTime.toFixed(3)}s<br>`;
+          debugValuesDisplay.innerHTML += `Calculated Height: ${calculatedJumpHeightFlight.toFixed(2)}m<br>`;
+          debugValuesDisplay.innerHTML += `H3D (peak-baseline): ${(highestPointZ - baselineZ).toFixed(2)}m<br>`;
+        }
+        sendJumpHeight(finalReportedHeight, true);
+        highestPointZ = -Infinity;
+      }
+      break;
   }
+}
 
-  let lastSentJumpHeight = -1;
-  function sendJumpHeight(height, calibratedStatus) {
-    if (Math.abs(height - lastSentJumpHeight) > 0.005 || (height === 0 && lastSentJumpHeight !== 0)) {
-      lastSentJumpHeight = height;
-      window.parent.postMessage({
-        type: 'jump_height',
-        height: height,
-        calibrated: calibratedStatus,
-        hd_deduction: 0
-      }, '*');
-      if (typeof widgetJumpHeightDisplay !== "undefined") {
-        if (height >= MIN_JUMP_DISPLAY_THRESHOLD && calibratedStatus) {
-          widgetJumpHeightDisplay.textContent = `Jump: ${height.toFixed(2)} m`;
-          widgetJumpHeightDisplay.style.display = "block";
-        } else {
-          widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
-          widgetJumpHeightDisplay.style.display = "block";
-        }
+let lastSentJumpHeight = -1;
+function sendJumpHeight(height, calibratedStatus) {
+  if (Math.abs(height - lastSentJumpHeight) > 0.005 || (height === 0 && lastSentJumpHeight !== 0)) {
+    lastSentJumpHeight = height;
+    window.parent.postMessage({
+      type: 'jump_height',
+      height: height,
+      calibrated: calibratedStatus,
+      hd_deduction: 0
+    }, '*');
+    if (typeof widgetJumpHeightDisplay !== "undefined") {
+      if (height >= MIN_JUMP_DISPLAY_THRESHOLD && calibratedStatus) {
+        widgetJumpHeightDisplay.textContent = `Jump: ${height.toFixed(2)} m`;
+        widgetJumpHeightDisplay.style.display = "block";
+      } else {
+        widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
+        widgetJumpHeightDisplay.style.display = "block";
       }
     }
   }
+}
+  
 //  <!-- Part 10: Main Jump Tracking Interval and HTML End -->
   // Main jump tracking interval
   setInterval(() => {
