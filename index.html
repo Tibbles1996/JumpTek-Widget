@@ -466,7 +466,6 @@
   });
 
 //  <!-- Part 6: Draw Loop, Pose Loop, and Trampoline Geometry -->
-<script>
 let dirtyFrame = true; // Only redraw when needed
 
 // --------- DRAW LOOP: Draws every frame ---------
@@ -579,8 +578,6 @@ window.addEventListener('resize', () => { dirtyFrame = true; });
 // Redraw on UI changes if needed
 calibrateBtn.addEventListener('click', () => { dirtyFrame = true; });
 switchCameraBtn.addEventListener('click', () => { dirtyFrame = true; });
-
-</script>
   
 //  <!-- Part 7: Camera Calibration, Settings Popover, and Parameters -->
   // --------- SIMPLE CAMERA CALIBRATION MATH ---------
