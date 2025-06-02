@@ -974,114 +974,78 @@
       ];
       return worldPt;
     }
+calibrateBtn.addEventListener('click', async function() {
+  if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
+    if (!trampolinePolygon) {
+      trampolineNotice.style.color = '#f00';
+      trampolineNotice.textContent = "Error: Please mark the 4 corners of the trampoline first.";
+      return;
+    }
+    if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
+      trampolineNotice.style.color = '#f00';
+      trampolineNotice.textContent = "Error: No pose detected. Please ensure your body is fully visible and try again.";
+      return;
+    }
 
-    calibrateBtn.addEventListener('click', async function() {
-      if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-        if (!trampolinePolygon) {
-            trampolineNotice.style.color = '#f00';
-            trampolineNotice.textContent = "Error: Please mark the 4 corners of the trampoline first.";
-            return;
-        }
+    trampolineNotice.style.color = '#ff0';
+    trampolineNotice.textContent = "Calibrating... Stand still on the trampoline for 3 seconds.";
+
+    const stableDuration = 3000; // 3 seconds
+    const poseCheckInterval = 100; // ms
+    let stableStart = null;
+    let lastZ = null;
+    let stable = false;
+
+    function getCurrentZ() {
+      const lowestLandmark = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
+      if (!lowestLandmark) return null;
+      const lx = lowestLandmark.x * canvas.width;
+      const ly = lowestLandmark.y * canvas.height;
+      const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
+      return worldPt[2];
+    }
+
+    return new Promise(resolve => {
+      function checkStability() {
         if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
-            trampolineNotice.style.color = '#f00';
-            trampolineNotice.textContent = "Error: No pose detected. Please ensure your body is fully visible and try again.";
-            return;
+          stableStart = null;
+          trampolineNotice.textContent = "No pose detected. Please ensure your body is visible and stand still.";
+          setTimeout(checkStability, poseCheckInterval);
+          return;
         }
-        let attempts = 0;
-        const maxAttempts = 5;
-        const poseCheckInterval = 200;
-        const checkPoseAndStartCalibration = () => {
-          if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
-            attempts++;
-            if (attempts < maxAttempts) {
-              trampolineNotice.style.color = '#ff0';
-              trampolineNotice.textContent = `Waiting for pose data to stabilize... (${attempts}/${maxAttempts}). Ensure your body is fully visible.`;
-              setTimeout(checkPoseAndStartCalibration, poseCheckInterval);
-            } else {
-              trampolineNotice.style.color = '#f00';
-              trampolineNotice.textContent = "Calibration failed: No consistent pose data detected. Please ensure your body is fully visible and try again.";
-              calibrateBtn.disabled = false;
-            }
-            return;
-          }
-          calibrateBtn.disabled = true;
-          let calibrationZValues = [];
-          const calibrationDurationMs = 3000;
-          const calibrationIntervalMs = 100;
-          let calibrationSamples = 0;
-          const maxCalibrationSamples = calibrationDurationMs / calibrationIntervalMs;
-          trampolineNotice.style.color = '#fff';
-          trampolineNotice.textContent = "CALIBRATING... Stand still on the trampoline for 3 seconds. Ensure your ankles/hips are visible.";
-          cameraDistanceMeters = parseFloat(cameraDistanceInput.value) || 2.0;
-          cameraHeightMeters   = parseFloat(cameraHeightInput.value) || 1.0;
-          depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0; 
-          window._JT_intrinsics = {
-            fx: Math.min(canvas.width, canvas.height) * 0.8,
-            fy: Math.min(canvas.width, canvas.height) * 0.8,
-            cx: canvas.width / 2,
-            cy: canvas.height / 2
-          };
-          window._JT_extrinsics = {
-            C: [0, -cameraDistanceMeters, cameraHeightMeters],
-            R: [[1,0,0],[0,1,0],[0,0,1]]
-          };
-          window._JT_plane = {
-            normal: [0,0,1],
-            point: [0,0,0]
-          };
-          const calibrationLoop = setInterval(() => {
-            if (lastPoseResults && lastPoseResults.poseLandmarks && lastPoseResults.poseLandmarks.length > 0) {
-              const lowestLandmark = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
-              if (lowestLandmark) {
-                const lx = lowestLandmark.x * canvas.width;
-                const ly = lowestLandmark.y * canvas.height; 
-                const worldPtBaselineSample = pixelToWorld(lx, ly, lowestLandmark.z);
-                calibrationZValues.push(worldPtBaselineSample[2]);
-                calibrationSamples++;
-                trampolineNotice.textContent = `CALIBRATING... Stand still on the trampoline for ${((calibrationDurationMs - (calibrationSamples * calibrationIntervalMs)) / 1000).toFixed(1)}s.`;
-              }
-            }
-            if (calibrationSamples >= maxCalibrationSamples) {
-              clearInterval(calibrationLoop);
-              if (calibrationZValues.length > 0) {
-                const sortedZ = [...calibrationZValues].sort((a,b) => a - b);
-                const q1 = sortedZ[Math.floor(sortedZ.length * 0.25)];
-                const q3 = sortedZ[Math.ceil(sortedZ.length * 0.75) -1];
-                const iqr = q3 - q1;
-                const lowerBound = q1 - 1.5 * iqr;
-                const upperBound = q3 + 1.5 * iqr;
-                const filteredZValues = calibrationZValues.filter(z => z >= lowerBound && z <= upperBound);
-                if (filteredZValues.length > 0) {
-                  const sumZ = filteredZValues.reduce((a, b) => a + b, 0);
-                  baselineZ = sumZ / filteredZValues.length;
-                  currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
-                  calibrationJumpsData = [];
-                  trampolineNotice.style.color = '#0f0';
-                  trampolineNotice.textContent = `Baseline set! Now perform ${REQUIRED_CALIBRATION_JUMPS} jumps for Z-scale calibration.`;
-                  calibrateBtn.style.display = "none";
-                  jumpState = JUMP_STATE_ON_TRAMPOLINE;
-                  currentZSmoothed = null;
-                  verticalVelocitySmoothed = null;
-                } else {
-                  trampolineNotice.style.color = '#f00';
-                  trampolineNotice.textContent = "Calibration failed: No valid baseline data after filtering. Try again from a stable position.";
-                  baselineZ = null;
-                  currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-                  calibrateBtn.disabled = false;
-                }
-              } else {
-                trampolineNotice.style.color = '#f00';
-                trampolineNotice.textContent = "Calibration failed: No valid baseline data collected. Make sure your ankles/hips are visible and still.";
-                baselineZ = null;
-                currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-                calibrateBtn.disabled = false;
-              }
-            }
-          }, calibrationIntervalMs);
-        };
-        checkPoseAndStartCalibration();
+        const z = getCurrentZ();
+        if (z === null) {
+          stableStart = null;
+          trampolineNotice.textContent = "Pose detected, but couldn't read vertical position. Stand still.";
+          setTimeout(checkStability, poseCheckInterval);
+          return;
+        }
+
+        if (lastZ !== null && Math.abs(z - lastZ) > 0.01) { // 1cm threshold
+          stableStart = null;
+        } else if (!stableStart) {
+          stableStart = Date.now();
+        }
+
+        lastZ = z;
+
+        if (stableStart && (Date.now() - stableStart) >= stableDuration) {
+          // Calibration complete
+          baselineZ = z;
+          currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
+          trampolineNotice.style.color = '#0f0';
+          trampolineNotice.textContent = "Step off, then perform 3 calibration jumps.";
+          calibrateBtn.style.display = "none";
+          resolve();
+          return;
+        }
+
+        setTimeout(checkStability, poseCheckInterval);
       }
+      checkStability();
     });
+  }
+});
 
     // --------- JUMP HEIGHT OUTPUT STUB (REPLACE IF NEEDED) ---------
     function sendJumpHeight(jumpHeight, isActive) {
