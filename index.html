@@ -464,28 +464,59 @@
       console.error("Pose initialization error:", e);
     }
   });
- // <!-- Part 6: Draw Loop, Pose Loop, and Trampoline Geometry -->
+
+//  <!-- Part 6: Draw Loop, Pose Loop, and Trampoline Geometry -->
+<script>
+let dirtyFrame = true; // Only redraw when needed
+
 // --------- DRAW LOOP: Draws every frame ---------
 function drawLoop() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if (dirtyFrame) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (video.readyState === 4)
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    // Draw video only if visible
+    if (video.readyState === 4) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
 
-  // ALWAYS draw landmarks to confirm athlete tracking
-  if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
-    drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, {color: '#0f0', lineWidth: 2});
-    drawLandmarks(ctx, lastPoseResults.poseLandmarks, {color: '#ff0', lineWidth: 1});
+    // Draw pose landmarks only if available and needed
+    if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
+      drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: '#0f0', lineWidth: 2 });
+      drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: '#ff0', lineWidth: 1 });
+    }
+
+    // Draw trampoline overlays if needed
+    if (trampolineCorners.length > 0 && !trampolinePolygon) {
+      drawTrampolineArea(ctx, trampolineCorners);
+    }
+    if (trampolinePolygon) {
+      drawTrampolineArea(ctx, trampolinePolygon);
+    }
+
+    dirtyFrame = false;
   }
 
-  if (trampolineCorners.length > 0 && !trampolinePolygon) {
-    drawTrampolineArea(ctx, trampolineCorners);
-  }
-  if (trampolinePolygon) {
-    drawTrampolineArea(ctx, trampolinePolygon);
+  // Only update calibrate button and trampoline notice if calibration phase changed
+  if (window._lastCalibrationPhase !== currentCalibrationPhase) {
+    updateCalibrationUI();
+    window._lastCalibrationPhase = currentCalibrationPhase;
   }
 
-  // Update calibrate button visibility and disabled state
+  // Update FPS display less frequently (every 500ms)
+  frameCount++;
+  const now = performance.now();
+  if (!window._lastFpsUpdateTime || now - window._lastFpsUpdateTime >= 500) {
+    const fps = (frameCount / (now - (window._lastFpsUpdateTime || now))) * 1000;
+    frameRateDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
+    frameCount = 0;
+    window._lastFpsUpdateTime = now;
+  }
+
+  animationFrameId = requestAnimationFrame(drawLoop);
+}
+
+function updateCalibrationUI() {
+  // Calibrate button and notice
   if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS || currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
     calibrateBtn.style.display = "none";
   } else {
@@ -498,7 +529,7 @@ function drawLoop() {
     calibrateBtn.disabled = !canEnableCalibrate;
   }
 
-  // Update trampoline notice based on calibration phase
+  // Trampoline notice
   if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
     trampolineNotice.textContent = "Tap the four corners of the trampoline to mark its boundaries.";
     trampolineNotice.style.color = '#0f0';
@@ -517,99 +548,39 @@ function drawLoop() {
     trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
     trampolineNotice.style.color = '#0f0';
   }
-
-  // ---- Restart Draw Button Visibility ----
-  updateRestartDrawBtnVisibility();
-
-  // Update FPS display
-  frameCount++;
-  const now = performance.now();
-  if (now - lastFpsUpdateTime >= FPS_UPDATE_INTERVAL) {
-    const fps = (frameCount / (now - lastFpsUpdateTime)) * 1000;
-    frameRateDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
-    frameCount = 0;
-    lastFpsUpdateTime = now;
-  }
-
-  animationFrameId = requestAnimationFrame(drawLoop);
 }
 
-// --------- RESTART DRAW BUTTON VISIBILITY ---------
-function updateRestartDrawBtnVisibility() {
-  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
-    restartDrawBtn.style.display = "block";
-  } else {
-    restartDrawBtn.style.display = "none";
-  }
-}
-
-// --------- RESTART DRAW BUTTON HANDLER ---------
-restartDrawBtn.addEventListener('click', () => {
-  trampolineCorners = [];
-  trampolinePolygon = null;
-  trampolineNotice.textContent = "Corner selection reset. Tap the four corners of the trampoline.";
-  // The button's visibility is handled automatically by the draw loop.
-});
-
-// --------- POSE LOOP: Throttled to ~15 FPS ---------
+// --------- POSE LOOP: Throttled & Frame Dropping ---------
+let poseLoopActive = false;
 async function poseLoop() {
-  const minPoseInterval = 1000 / 15;
+  if (poseLoopActive) return; // Prevent overlap
+  poseLoopActive = true;
+
+  const minPoseInterval = 1000 / 10; // Lower rate to 10 FPS for lighter load
+  let lastPoseRequestTime = 0;
+
   while (poseLoaded) {
-    if (video.readyState === 4) {
-      const now = performance.now();
-      if (now - lastPoseTime >= minPoseInterval) {
-        await pose.send({ image: video });
-        lastPoseTime = now;
-      } else {
-        await new Promise(r => setTimeout(r, minPoseInterval - (now - lastPoseTime)));
-      }
-    } else {
-      await new Promise(r => setTimeout(r, 100));
+    const now = performance.now();
+    if (video.readyState === 4 && now - lastPoseRequestTime >= minPoseInterval) {
+      await pose.send({ image: video });
+      lastPoseRequestTime = now;
+      dirtyFrame = true; // Mark for redraw on new pose result
     }
+    await new Promise(r => setTimeout(r, 10)); // Small sleep to avoid busy loop
   }
+  poseLoopActive = false;
 }
 
-// --------- TRAMPOLINE GEOMETRY UTILS & OVERLAYS ---------
-function getQuadrilateralCenter(corners) {
-  let cx = 0, cy = 0;
-  corners.forEach(([x, y]) => { cx += x; cy += y; });
-  return [cx / corners.length, cy / corners.length];
-}
+// Mark as dirty when video or pose changes (for best performance)
+video.addEventListener('play', () => { dirtyFrame = true; });
+video.addEventListener('seeked', () => { dirtyFrame = true; });
+window.addEventListener('resize', () => { dirtyFrame = true; });
 
-function drawTrampolineArea(ctx, corners) {
-  if (corners.length < 2) return;
-  ctx.save();
-  ctx.strokeStyle = '#ff0';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(corners[0][0], corners[0][1]);
-  for (let i = 1; i < corners.length; ++i) {
-    ctx.lineTo(corners[i][0], corners[i][1]);
-  }
-  if (corners.length === 4) ctx.closePath();
-  ctx.stroke();
-  ctx.restore();
-  ctx.save();
-  ctx.fillStyle = '#ff0';
-  corners.forEach(([x, y]) => {
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, 2 * Math.PI);
-    ctx.fill();
-  });
-  ctx.restore();
-}
+// Redraw on UI changes if needed
+calibrateBtn.addEventListener('click', () => { dirtyFrame = true; });
+switchCameraBtn.addEventListener('click', () => { dirtyFrame = true; });
 
-function pointInPolygon(pt, poly) {
-  let [x, y] = pt, inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; i++) {
-    let [xi, yi] = poly[i], [xj, yj] = poly[j];
-    let intersect = ((yi > y) !== (yj > y)) &&
-      (x < (xj - xi) * (y - yi) / (yj - yi + 1e-8) + xi);
-    if (intersect) inside = !inside;
-    j = i;
-  }
-  return inside;
-}
+</script>
   
 //  <!-- Part 7: Camera Calibration, Settings Popover, and Parameters -->
   // --------- SIMPLE CAMERA CALIBRATION MATH ---------
