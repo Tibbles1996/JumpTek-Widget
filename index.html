@@ -2,993 +2,839 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Widget Debug Demo</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JumpTek MediaPipe AI Tracker Widget</title>
   <style>
-    body { font-family: sans-serif; background: #f4f4f9; color: #222; margin: 0; padding: 0; }
-    .jt-container { max-width: 900px; margin: 32px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px #0002; padding: 24px; }
-    .jt-row { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
-    #outputCanvas { border: 2px solid #2a4; border-radius: 8px; background: #e0fbe0; }
-    .jt-debug-section { background: #222; color: #fff; padding: 12px; border-radius: 6px; margin-top: 18px; font-size: 0.98em; }
-    button, input[type="number"], input[type="text"] { padding: 6px 18px; border-radius: 6px; border: 1px solid #aaa; font-size: 1em; }
-    button { background: #2a4; color: white; border: none; cursor: pointer; }
-    button:disabled { background: #aaa; cursor: not-allowed; }
-    #trampolineNotice { font-weight: bold; margin-bottom: 12px; min-height: 22px; }
-    #widgetJumpHeightDisplay { font-size: 1.6em; font-weight: bold; color: #267; margin-top: 8px; }
-    .jt-debug-log { white-space: pre-wrap; font-family: monospace; max-height: 220px; overflow-y: auto; background: #222; color: #d0f0ff; margin-top: 6px; border-radius: 4px; padding: 6px 10px; }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+    body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; box-sizing: border-box; }
+    #container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+    #canvas { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; border: none; z-index: 1; }
+    #video { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; opacity: 0; pointer-events: none; }
+    #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
+    #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn {
+      position: static; margin: 0; padding: 10px 18px; color: #fff;
+      border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
+      display: flex; align-items: center; justify-content: center; font-weight: bold;
+      background: #27ae60;
+    }
+    #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
+    #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
+    #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
+    #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
+    #restartDrawBtn { display: none; position: absolute; top: 20px; left: 20px; z-index: 21; padding: 10px 22px; border-radius: 14px; background: #e74c3c; color: #fff; border: none; font-size: 1.1rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.15); cursor: pointer;}
+    #restartDrawBtn:hover { background: #b53224; }
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; display: none; pointer-events: none;}
+    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; width: auto; max-width: 90vw; text-align: center; pointer-events: none; z-index: 30;}
+    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 30px rgba(0,0,0,0.35), 0 1.5px 3px #222; padding: 24px 28px 18px 28px; z-index: 100; color: #fff; flex-direction: column; gap: 12px;}
+    #settingsPopover.open { display: flex; animation: popIn 0.18s; }
+    @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
+    #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"] { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; background: #222; color: #fff;}
+    #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
+    #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
+    #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
+    #settingsPopover .close-btn { position: absolute; top: 10px; right: 16px; background: none; border: none; color: #aaa; font-size: 1.35rem; cursor: pointer; padding: 0; line-height: 1;}
+    #settingsPopover .close-btn:hover { color: #fff; }
+    #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s; align-self: flex-end;}
+    #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
+    #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;}
+    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 0.9rem; z-index: 20; pointer-events: none; text-align: left; display: none;}
+    #rawHeightDebugDisplay.positive { color: #0f0; }
+    #frameRateDisplay { top: 80px; }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
 </head>
 <body>
-  <div class="jt-container">
-    <h1>JumpTek Widget <span style="font-size:0.6em;color:#5ad;">[DEBUG]</span></h1>
-    <div id="trampolineNotice">Please mark the trampoline corners (not implemented in this minimal demo).</div>
-    <div class="jt-row">
-      <canvas id="outputCanvas" width="640" height="480"></canvas>
-      <div style="flex: 1;">
-        <button id="calibrateBtn">Calibrate</button>
-        <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
-        <div style="margin-top:10px;">
-          <label>Depth scale factor: <input type="number" step="0.01" id="depthScaleFactorInput" value="5.0" style="width:60px;"></label>
-        </div>
+  <div id="container">
+    <button id="restartDrawBtn">Restart Draw</button>
+    <canvas id="canvas"></canvas>
+    <div id="buttonRow">
+      <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
+        <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
+      </button>
+      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display:none;">
+        <img src="https://icon-library.com/images/wrench-icon-png/wrench-icon-png-11.jpg" alt="Calibrate" style="width:28px;height:28px;" />
+      </button>
+      <button class="settings-btn" id="settingsBtn" aria-label="Open settings" tabindex="0" role="button">
+        <img src="https://creazilla-store.fra1.digitaloceanspaces.com/icons/3430447/ruler-icon-md.png" alt="Calibration Settings" />
+      </button>
+    </div>
+    <div id="settingsPopover">
+      <button class="close-btn" id="closeSettingsBtn" aria-label="Close settings">&times;</button>
+      <div>
+        <label for="cameraDistance">Camera distance from trampoline center (meters):</label><br>
+        <input type="number" step="0.01" min="0.1" max="20" value="2.0" id="cameraDistance">
+        <div class="desc">Measure horizontally from the camera lens to the center of the trampoline.</div>
       </div>
-    </div>
-    <div class="jt-row">
-      <div style="flex: 1;">
-        <div>Frame rate: <span id="frameRateDisplay">-</span> FPS</div>
-        <div>Debug values: <span id="debugValuesDisplay"></span></div>
-        <div>Raw height: <span id="rawHeightDebugDisplay"></span></div>
+      <div>
+        <label for="cameraHeight">Camera height above trampoline surface (meters):</label><br>
+        <input type="number" step="0.01" min="0" max="10" value="1.0" id="cameraHeight">
+        <div class="desc">Measure vertically from the trampoline mat to the center of the camera lens.</div>
       </div>
+      <div>
+        <label for="depthScaleFactor">MediaPipe Z Depth Scale Factor:</label><br>
+        <input type="number" step="0.1" min="0.1" max="50" value="5.0" id="depthScaleFactor">
+        <div class="desc">Adjusts how MediaPipe's relative Z-coordinate (depth) is scaled into real-world meters. This is fine-tuned automatically after initial calibration jumps.</div>
+      </div>
+      <div class="checkbox-container">
+        <label for="debugMode">Enable Debug Mode (show raw data):</label>
+        <input type="checkbox" id="debugMode">
+      </div>
+      <button id="saveSettingsBtn">Save</button>
     </div>
-    <div class="jt-debug-section">
-      <strong>Debug Log:</strong>
-      <div id="jtDebugLog" class="jt-debug-log"></div>
-      <button onclick="window.JT_DEBUG_CLEAR && window.JT_DEBUG_CLEAR()">Clear Debug Log</button>
-      <button onclick="window.JT_DEBUG_MODE = !window.JT_DEBUG_MODE;alert('Debug mode is now ' + (window.JT_DEBUG_MODE ? 'ON' : 'OFF'))">Toggle Debug</button>
+    <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
+    <div id="loadingIndicator">Loading...</div>
+    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
+    <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div>
+    <div id="debugValuesDisplay"></div>
+    <div id="frameRateDisplay">FPS: 0</div>
+    <div id="zoomControls">
+      <button id="zoomInBtn">+</button>
+      <button id="zoomOutBtn">-</button>
     </div>
-    <!-- Hidden video for MediaPipe -->
-    <video id="inputVideo" playsinline style="display:none;"></video>
   </div>
-  <!-- MediaPipe libraries, loaded from CDN for demo -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
-  <!-- Widget Script (next block) -->
+  <video id="video" autoplay playsinline style="display:none;"></video>
   <script>
-/* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 1: Initialization, DOM, State, Debug Setup, Logging
-   ========================================================================== */
-(function() {
-  // -- Robust debug toggle and logger --
-  window.JT_DEBUG_MODE = true;
-  const JT_DEBUG_HISTORY = [];
-  const jtDebugLogElem = () => document.getElementById('jtDebugLog');
-  function jtDebug(...args) {
-    if (window.JT_DEBUG_MODE) {
-      const line = `[JTDEBUG ${new Date().toLocaleTimeString()}] ${args.map(x => (typeof x === 'object' ? JSON.stringify(x) : x)).join(' ')}`;
-      JT_DEBUG_HISTORY.push(line);
-      if (JT_DEBUG_HISTORY.length > 200) JT_DEBUG_HISTORY.shift();
-      const logElem = jtDebugLogElem();
-      if (logElem) logElem.textContent = JT_DEBUG_HISTORY.join('\n');
-      // Always output to console for full trace
-      console.log.apply(console, ["[JTDEBUG]"].concat(args));
+/**
+ * RIDICULOUSLY ROBUST ERROR LOGGER. Logs all errors (not debug/info) in any area of the code.
+ * All error logs go to the console (never to the UI).
+ */
+function jtError(area, message, errObj) {
+  try {
+    let msg = `[JTERROR][${area}] ${message}`;
+    if (errObj !== undefined) {
+      msg += (typeof errObj === "object" ? " " + (errObj.stack || JSON.stringify(errObj)) : " " + String(errObj));
     }
+    console.error(msg);
+  } catch (e) {
+    // Failsafe
+    console.error("[JTERROR][jtError] Logging failure", e);
   }
-  window.jtDebug = jtDebug;
-  window.JT_DEBUG_CLEAR = function() {
-    JT_DEBUG_HISTORY.length = 0;
-    const logElem = jtDebugLogElem();
-    if (logElem) logElem.textContent = '';
-  };
-  jtDebug("===== JumpTek-Widget.js LOADED =====");
-
-  // -- DOM ready check and error handling --
-  function getElem(id) {
-    const el = document.getElementById(id);
-    if (!el) {
-      jtDebug(`FATAL: Could not find element #${id}`);
-      throw new Error(`FATAL: Could not find element #${id}`);
-    }
-    jtDebug(`Element #${id} found.`);
-    return el;
-  }
-
-  function safeNum(val, fallback = 0) {
-    let n = Number(val);
-    if (isNaN(n)) {
-      jtDebug("safeNum fallback for", val);
-      return fallback;
-    }
-    return n;
-  }
-
-  function deepClone(obj) {
-    try { return JSON.parse(JSON.stringify(obj)); }
-    catch (e) { jtDebug("deepClone error", e); return null; }
-  }
-
-  // -- Global state --
-  window.JT_STATE = {
-    pose: null,
-    camera: null,
-    lastPoseResults: null,
-    poseSerial: 0,
-    currentCalibrationPhase: null,
-    trampolinePolygon: null,
-    baselineZ: null,
-    currentZSmoothed: null,
-    verticalVelocitySmoothed: null,
-    zHistory: [],
-    velocityHistory: [],
-    calibrationJumpsData: [],
-    jumpState: null,
-    takeOffTime: null,
-    flightTime: null,
-    highestPointZ: null,
-    REQUIRED_CALIBRATION_JUMPS: 3
-  };
-  window.CALIBRATION_PHASE_STAND_STILL = 1;
-  window.CALIBRATION_PHASE_JUMP_CALIBRATION = 2;
-  window.CALIBRATION_PHASE_COMPLETE = 3;
-  window.JUMP_STATE_ON_TRAMPOLINE = 0;
-  window.JUMP_STATE_AIRBORNE = 1;
-  window.JUMP_STATE_DESCENDING = 2;
-
-  // -- Main widget initializer --
-  function mainInit() {
-    jtDebug("mainInit() called");
-    // DOM elements
-    const calibrateBtn = getElem('calibrateBtn');
-    const trampolineNotice = getElem('trampolineNotice');
-    const canvas = getElem('outputCanvas');
-    const debugValuesDisplay = getElem('debugValuesDisplay');
-    const rawHeightDebugDisplay = getElem('rawHeightDebugDisplay');
-    const frameRateDisplay = getElem('frameRateDisplay');
-    const depthScaleFactorInput = getElem('depthScaleFactorInput');
-    const widgetJumpHeightDisplay = getElem('widgetJumpHeightDisplay');
-    const videoElement = getElem('inputVideo');
-    window.JT_DOM = {
-      calibrateBtn, trampolineNotice, canvas, debugValuesDisplay, rawHeightDebugDisplay,
-      frameRateDisplay, depthScaleFactorInput, widgetJumpHeightDisplay, videoElement
-    };
-    jtDebug("All critical DOM elements located.", deepClone(window.JT_DOM));
-
-    // Proceed to main logic
-    window.JT_READY = true;
-    startPoseCamera();
-    setupUIHandlers();
-    jtDebug("mainInit() complete.");
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", mainInit);
-    jtDebug("Waiting for DOMContentLoaded...");
-  } else {
-    jtDebug("DOMContentLoaded already fired, running mainInit immediately.");
-    mainInit();
-  }
-
-  /* ==========================================================================
-     PART 2: MediaPipe Pose, Camera, Frame Loop, FULL DEBUG
-     ========================================================================== */
-  function startPoseCamera() {
-    const { videoElement } = window.JT_DOM;
-    try {
-      // MediaPipe Pose instance
-      if (!window.Pose) throw new Error("MediaPipe Pose not loaded!");
-      const pose = new window.Pose({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-      });
-      pose.setOptions({
-        modelComplexity: 1,
-        smoothLandmarks: true,
-        enableSegmentation: false,
-        smoothSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
-      window.JT_STATE.pose = pose;
-      jtDebug("MediaPipe Pose instance created and configured.");
-      // Camera instance
-      if (!window.Camera) throw new Error("MediaPipe Camera not loaded!");
-      const camera = new window.Camera(videoElement, {
-        onFrame: async () => {
-          jtDebug("Camera onFrame - sending image to pose...");
-          await pose.send({ image: videoElement });
-        },
-        width: 640,
-        height: 480
-      });
-      window.JT_STATE.camera = camera;
-      jtDebug("MediaPipe Camera instance created.");
-      // Attach pose.onResults
-      pose.onResults(results => {
-        jtDebug("pose.onResults", {
-          time: Date.now(),
-          poseLandmarks: results.poseLandmarks ? results.poseLandmarks.length : 0,
-          poseWorldLandmarks: results.poseWorldLandmarks ? results.poseWorldLandmarks.length : 0
-        });
-        window.JT_STATE.lastPoseResults = results;
-        window.JT_STATE.poseSerial++;
-      });
-      camera.start();
-      jtDebug("Camera started.");
-    } catch (e) {
-      jtDebug("FATAL: Camera/Pose setup failed", e);
-      window.JT_DOM.trampolineNotice.textContent = "Camera or pose setup failed. See debug log.";
-      window.JT_DOM.trampolineNotice.style.color = "#f00";
-    }
-  }
-
-  /* ==========================================================================
-     PART 3: UI Event Handlers and Calibration Button
-     ========================================================================== */
-  function setupUIHandlers() {
-    const { calibrateBtn, trampolineNotice, depthScaleFactorInput } = window.JT_DOM;
-    calibrateBtn.addEventListener('click', function() {
-      jtDebug("CALIBRATE BUTTON CLICKED", {
-        currentPhase: window.JT_STATE.currentCalibrationPhase
-      });
-      trampolineNotice.textContent = "Calibration started (see debug log for flow).";
-      trampolineNotice.style.color = "#ff0";
-      // Insert calibration logic here (part 4+)
-    });
-    depthScaleFactorInput.addEventListener('change', function() {
-      jtDebug("Depth scale factor changed", depthScaleFactorInput.value);
-    });
-    jtDebug("UI handlers attached.");
-  }
-})();
-/* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 4: Landmark Math, Calibration Stand-Still, Jump Calculation, UI Feedback
-   ========================================================================== */
-
-/* Part 4A: Landmark Math, Pixel-To-World, and Math Utils */
-
-// Math helpers for 3D
-function jtNormalize(v) {
-  const m = Math.hypot(v[0], v[1], v[2]);
-  return m === 0 ? [0, 0, 0] : v.map(x => x / m);
 }
-function jtDot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-function jtSub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
-function jtAdd(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
-function jtScale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
 
-// Find the lowest visible body landmark (for Z)
+// -- Widget State Variables --
+const switchCameraBtn  = document.getElementById('switchCameraBtn');
+const loadingIndicator = document.getElementById('loadingIndicator');
+const trampolineNotice = document.getElementById('trampolineNotice');
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const calibrateBtn = document.getElementById('calibrateBtn');
+const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
+const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
+const debugValuesDisplay = document.getElementById('debugValuesDisplay');
+const frameRateDisplay = document.getElementById('frameRateDisplay');
+const zoomInBtn = document.getElementById('zoomInBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
+const debugModeCheckbox = document.getElementById('debugMode');
+const restartDrawBtn = document.getElementById('restartDrawBtn');
+const settingsBtn  = document.getElementById('settingsBtn');
+const settingsPopover = document.getElementById('settingsPopover');
+const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
+const cameraDistanceInput = document.getElementById('cameraDistance');
+const cameraHeightInput   = document.getElementById('cameraHeight');
+const depthScaleFactorInput = document.getElementById('depthScaleFactor');
+let poseLoaded = false;
+let currentStream = null;
+let useFrontCamera = false;
+let trampolineCorners = [];
+let trampolinePolygon = null;
+let trampolineCenter = null;
+let calibrationReady = false;
+let lastPoseResults = null;
+let animationFrameId = null;
+let baselineZ = null;
+let debugMode = false;
+let videoTrack = null;
+let zoomCapabilities = null;
+const JUMP_STATE_ON_TRAMPOLINE = 'on_trampoline';
+const JUMP_STATE_AIRBORNE = 'airborne';
+const JUMP_STATE_DESCENDING = 'descending';
+let jumpState = JUMP_STATE_ON_TRAMPOLINE;
+let takeOffTime = 0;
+let flightTime = 0;
+let highestPointZ = -Infinity;
+let lastZPos = null;
+let lastZTime = null;
+let zHistory = [];
+let velocityHistory = [];
+let currentZSmoothed = null;
+let verticalVelocitySmoothed = null;
+const CALIBRATION_PHASE_MARK_CORNERS = 'mark_corners';
+const CALIBRATION_PHASE_STAND_STILL = 'stand_still';
+const CALIBRATION_PHASE_JUMP_CALIBRATION = 'jump_calibration';
+const CALIBRATION_PHASE_COMPLETE = 'complete';
+let currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
+let calibrationJumpsData = [];
+const REQUIRED_CALIBRATION_JUMPS = 3;
+let frameCount = 0;
+let lastFpsUpdateTime = 0;
+let dirtyFrame = true;
+const { drawConnectors, drawLandmarks } = window;
+const POSE_CONNECTIONS = window.POSE_CONNECTIONS || (window.Pose && window.Pose.POSE_CONNECTIONS);
+let pose = null;
+let lastPoseTime = 0;
+let poseSerial = 0;
+let poseLoopActive = false;
+
+// Widget Initialization
+window.addEventListener('DOMContentLoaded', () => {
+  try {
+    if (typeof window.Pose !== "function") {
+      jtError("pose", "MediaPipe Pose not loaded. Check your internet connection or the CDN.");
+      throw new Error("MediaPipe Pose not loaded.");
+    }
+    pose = new window.Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+    pose.setOptions({
+      modelComplexity: 0,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+    pose.onResults(results => {
+      try {
+        lastPoseResults = results;
+        poseSerial++;
+      } catch (e) {
+        jtError("pose.onResults", "Unhandled error in pose result callback", e);
+      }
+    });
+    poseLoaded = true;
+    startCamera().then(() => {
+      resizeCanvasToVideo();
+      drawLoop();
+      poseLoop();
+    }).catch(e => jtError("camera", "Camera failed to start", e));
+  } catch (e) {
+    poseLoaded = false;
+    trampolineNotice.textContent = "Failed to initialize pose detection. Ensure your browser supports MediaPipe.";
+    trampolineNotice.style.color = "#f00";
+    jtError("pose", "Pose initialization error", e);
+  }
+});
+
+// Camera Initialization
+async function startCamera() {
+  loadingIndicator.style.display = 'block';
+  if (currentStream) {
+    try {
+      currentStream.getTracks().forEach(t => t.stop());
+    } catch (e) {
+      jtError("camera", "Failed to stop previous camera tracks", e);
+    }
+    videoTrack = null;
+    zoomCapabilities = null;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: useFrontCamera ? 'user' : 'environment',
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      }
+    });
+    currentStream = stream;
+    video.srcObject = stream;
+    await video.play();
+    loadingIndicator.style.display = 'none';
+    resizeCanvasToVideo();
+    videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      zoomCapabilities = videoTrack.getCapabilities().zoom;
+      zoomInBtn.disabled = !zoomCapabilities;
+      zoomOutBtn.disabled = !zoomCapabilities;
+      const settings = videoTrack.getSettings();
+      if (settings.frameRate < 30) {
+        trampolineNotice.style.color = '#ff0';
+        trampolineNotice.textContent = `Warning: Low camera frame rate (${settings.frameRate.toFixed(0)} FPS). For best accuracy, use a device with 30+ FPS.`;
+      } else if (settings.frameRate < 60 && debugMode) {
+        trampolineNotice.style.color = '#fff';
+        trampolineNotice.textContent = `Camera FPS: ${settings.frameRate.toFixed(0)}. Higher FPS (e.g., 60) can improve jump detection.`;
+      }
+    }
+  } catch (err) {
+    loadingIndicator.style.display = 'none';
+    trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
+    trampolineNotice.style.color = '#f00';
+    zoomInBtn.disabled = true;
+    zoomOutBtn.disabled = true;
+    jtError("camera", "Unable to access camera", err);
+    throw err;
+  }
+}
+
+// Canvas Resize
+function resizeCanvasToVideo() {
+  try {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.width = "100vw";
+    canvas.style.height = "100vh";
+    dirtyFrame = true;
+  } catch (e) {
+    jtError("canvas", "Failed to resize canvas", e);
+  }
+}
+window.addEventListener('resize', resizeCanvasToVideo);
+
+// Frame Draw Loop
+function drawLoop() {
+  try {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (video.readyState >= 2) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (lastPoseResults && lastPoseResults.poseLandmarks && drawConnectors && drawLandmarks && POSE_CONNECTIONS) {
+      drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: '#0f0', lineWidth: 2 });
+      drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: '#ff0', lineWidth: 1 });
+    }
+    if (trampolineCorners.length > 0 && !trampolinePolygon) drawTrampolineArea(ctx, trampolineCorners);
+    if (trampolinePolygon) drawTrampolineArea(ctx, trampolinePolygon);
+    if (window._lastCalibrationPhase !== currentCalibrationPhase) {
+      updateCalibrationUI();
+      window._lastCalibrationPhase = currentCalibrationPhase;
+    }
+    updateRestartDrawBtnVisibility();
+    frameCount++;
+    const now = performance.now();
+    if (!window._lastFpsUpdateTime || now - window._lastFpsUpdateTime >= 500) {
+      const fps = (frameCount / (now - (window._lastFpsUpdateTime || now))) * 1000;
+      frameRateDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
+      frameCount = 0;
+      window._lastFpsUpdateTime = now;
+    }
+    animationFrameId = requestAnimationFrame(drawLoop);
+  } catch (e) {
+    jtError("drawLoop", "Unhandled error in draw loop", e);
+  }
+}
+
+// Pose Processing Loop
+async function poseLoop() {
+  if (poseLoopActive) return;
+  poseLoopActive = true;
+  const minPoseInterval = 1000 / 10;
+  let lastPoseRequestTime = 0;
+  while (poseLoaded) {
+    try {
+      const now = performance.now();
+      if (video.readyState === 4 && now - lastPoseRequestTime >= minPoseInterval) {
+        await pose.send({ image: video });
+        lastPoseRequestTime = now;
+        dirtyFrame = true;
+      }
+    } catch (e) {
+      jtError("poseLoop", "Unhandled error in pose loop", e);
+    }
+    await new Promise(r => setTimeout(r, 10));
+  }
+  poseLoopActive = false;
+}
+video.addEventListener('play', () => { dirtyFrame = true; });
+video.addEventListener('seeked', () => { dirtyFrame = true; });
+window.addEventListener('resize', () => { dirtyFrame = true; });
+calibrateBtn.addEventListener('click', () => { dirtyFrame = true; });
+switchCameraBtn.addEventListener('click', () => { dirtyFrame = true; });
+
+// Calibration and UI
+function updateCalibrationUI() {
+  try {
+    if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS || currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
+      calibrateBtn.style.display = "none";
+    } else {
+      calibrateBtn.style.display = "block";
+      const canEnableCalibrate =
+        currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL &&
+        lastPoseResults &&
+        lastPoseResults.poseLandmarks &&
+        lastPoseResults.poseLandmarks.length > 0;
+      calibrateBtn.disabled = !canEnableCalibrate;
+    }
+    if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
+      trampolineNotice.textContent = "Tap the four corners of the trampoline to mark its boundaries.";
+      trampolineNotice.style.color = '#0f0';
+    } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
+      if (calibrateBtn.disabled) {
+        trampolineNotice.textContent = "Trampoline area set. Stand on the trampoline and ensure your body is fully visible, then press Calibrate.";
+        trampolineNotice.style.color = '#ff0';
+      } else {
+        trampolineNotice.textContent = "Trampoline area set! Stand still on the trampoline and press Calibrate.";
+        trampolineNotice.style.color = '#0f0';
+      }
+    } else if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
+      trampolineNotice.textContent = `Perform ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more jump${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length === 1 ? '' : 's'} for calibration.`;
+      trampolineNotice.style.color = '#0f0';
+    } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
+      trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
+      trampolineNotice.style.color = '#0f0';
+    }
+  } catch (e) {
+    jtError("ui", "Failed to update calibration UI", e);
+  }
+}
+function updateRestartDrawBtnVisibility() {
+  try {
+    restartDrawBtn.style.display = (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) ? "block" : "none";
+  } catch (e) {
+    jtError("ui", "Failed to update restart draw button visibility", e);
+  }
+}
+restartDrawBtn.addEventListener('click', () => {
+  try {
+    trampolineCorners = [];
+    trampolinePolygon = null;
+    trampolineNotice.textContent = "Corner selection reset. Tap the four corners of the trampoline.";
+    dirtyFrame = true;
+    window._JT_intrinsics = null;
+    window._JT_extrinsics = null;
+    window._JT_plane = null;
+    updateCalibrationUI();
+  } catch (e) {
+    jtError("ui", "Failed to reset trampoline corners", e);
+  }
+});
+canvas.addEventListener('click', function(e) {
+  try {
+    if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
+    if (trampolinePolygon) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    trampolineCorners.push([x, y]);
+    dirtyFrame = true;
+    if (trampolineCorners.length === 4) {
+      try {
+        trampolinePolygon = trampolineCorners.slice();
+        trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
+        setupWorldCalibration();
+        trampolineCorners = [];
+        currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
+        dirtyFrame = true;
+        updateCalibrationUI();
+      } catch (err) {
+        trampolineNotice.textContent = "Error calculating trampoline center. Please try again.";
+        trampolineNotice.style.color = "#f00";
+        trampolineCorners = [];
+        trampolinePolygon = null;
+        dirtyFrame = true;
+        updateCalibrationUI();
+        jtError("calibration", "Error calculating trampoline center", err);
+      }
+    }
+  } catch (e) {
+    jtError("calibration", "Unhandled error in canvas click handler", e);
+  }
+});
+function setupWorldCalibration() {
+  try {
+    window._JT_intrinsics = {
+      fx: canvas.width / 2,
+      fy: canvas.height / 2,
+      cx: canvas.width / 2,
+      cy: canvas.height / 2
+    };
+    const cameraZ = parseFloat(cameraHeightInput.value) || 1.0;
+    const cameraDistance = parseFloat(cameraDistanceInput.value) || 2.0;
+    window._JT_extrinsics = {
+      C: [trampolineCenter[0], trampolineCenter[1] - cameraDistance * (canvas.height / 3), cameraZ * (canvas.height / 3)]
+    };
+    window._JT_plane = {
+      normal: [0, 0, 1],
+      point: [trampolineCenter[0], trampolineCenter[1], 0]
+    };
+  } catch (e) {
+    jtError("calibration", "Failed to setup world calibration", e);
+  }
+}
 function getLowestBodyLandmark(landmarks) {
-  if (!landmarks || !Array.isArray(landmarks)) {
-    jtDebug("getLowestBodyLandmark: landmarks missing/invalid", landmarks);
+  try {
+    const indicesByPriority = [
+      [27, 28], [25, 26], [23, 24], [11, 12, 0]
+    ];
+    for (let group of indicesByPriority) {
+      let best = null, bestY = -Infinity;
+      for (let idx of group) {
+        const lm = landmarks[idx];
+        if (lm && (typeof lm.score === "undefined" || lm.score > 0.45)) {
+          if (lm.y > bestY) {
+            bestY = lm.y;
+            best = lm;
+          }
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  } catch (e) {
+    jtError("pose", "Failed in getLowestBodyLandmark", e);
     return null;
   }
-  const indicesByPriority = [
-    [27, 28], [25, 26], [23, 24], [11, 12, 0]
-  ];
-  for (let group of indicesByPriority) {
-    let best = null, bestY = -Infinity;
-    for (let idx of group) {
-      const lm = landmarks[idx];
-      if (lm && (typeof lm.score === "undefined" || lm.score > 0.45)) {
-        if (lm.y > bestY) {
-          bestY = lm.y;
-          best = lm;
-        }
-      }
-    }
-    if (best) {
-      jtDebug("getLowestBodyLandmark found idx", best, "Y:", bestY);
-      return best;
-    }
-  }
-  jtDebug("getLowestBodyLandmark found nothing!");
-  return null;
 }
-
-// Pixel to world coordinates (dummy implementation for demo)
+function normalize(v) {
+  const m = Math.hypot(v[0], v[1], v[2]);
+  return v.map(x => x / m);
+}
+function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function subtract(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function scale(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
+function add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 function pixelToWorld(u, v, mpZ) {
-  // For demo, just return [u, v, mpZ] with some math
-  // Replace with real math if plane/camera solved
-  const scale = Number(document.getElementById('depthScaleFactorInput').value) || 5.0;
-  const worldPt = [u, v, (1 - mpZ) * scale];
-  jtDebug("pixelToWorld:", {u, v, mpZ, worldPt});
-  return worldPt;
+  try {
+    if (!window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane) {
+      jtError("calibration", "pixelToWorld: Calibration math not set");
+      return null;
+    }
+    const {fx, fy, cx, cy} = window._JT_intrinsics;
+    const {C} = window._JT_extrinsics;
+    const N = window._JT_plane.normal, P0 = window._JT_plane.point;
+    const xCam = (u - cx) / fx, yCam = (v - cy) / fy, zCamBase = 1;
+    const rayCamBase = [xCam, yCam, zCamBase];
+    const ray = normalize(rayCamBase);
+    const numerator = -dot(N, subtract(C, P0));
+    const denominator = dot(N, ray);
+    let t = Math.abs(denominator) < 1e-8 ? 0 : numerator / -denominator;
+    const worldPtBase = add(C, scale(ray, t));
+    const depthScaleFactor = parseFloat(depthScaleFactorInput.value) || 5.0;
+    const worldPt = [
+      worldPtBase[0],
+      worldPtBase[1],
+      worldPtBase[2] + (1 - mpZ) * depthScaleFactor
+    ];
+    return worldPt;
+  } catch (e) {
+    jtError("calibration", "Failed in pixelToWorld", e);
+    return null;
+  }
+}
+function drawTrampolineArea(ctx, points) {
+  try {
+    if (!Array.isArray(points) || points.length < 1) return;
+    ctx.save(); ctx.strokeStyle = '#00f'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+    ctx.closePath(); ctx.stroke(); ctx.restore();
+  } catch (e) {
+    jtError("ui", "Failed to draw trampoline area", e);
+  }
+}
+function getQuadrilateralCenter(points) {
+  let cx = 0, cy = 0;
+  for (const [x, y] of points) { cx += x; cy += y; }
+  return [cx / points.length, cy / points.length];
 }
 
-/* Part 4B: Calibration Stand-Still, Jump Detection, and Real-Time UI */
-
-// Calibration Stand-Still Phase
-function startCalibrationStandStill() {
-  const { trampolineNotice } = window.JT_DOM;
-  window.JT_STATE.currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-  trampolineNotice.style.color = "#ff0";
-  trampolineNotice.textContent = "Calibrating... Stand still for 3 seconds.";
-
-  let stableStart = null, lastZs = [], medianZ = null;
-  const stableDuration = 3000, poseCheckInterval = 100;
-
-  function getCurrentZ() {
-    const pose = window.JT_STATE.lastPoseResults;
-    if (!pose || !pose.poseLandmarks) {
-      jtDebug("getCurrentZ: No pose results");
-      return null;
-    }
-    const lm = getLowestBodyLandmark(pose.poseLandmarks);
-    if (!lm) {
-      jtDebug("getCurrentZ: No lowest landmark found");
-      return null;
-    }
-    const lx = lm.x * window.JT_DOM.canvas.width, ly = lm.y * window.JT_DOM.canvas.height;
-    const worldPt = pixelToWorld(lx, ly, lm.z);
-    if (!worldPt || isNaN(worldPt[2]) || Math.abs(worldPt[2]) > 1000) {
-      jtDebug("getCurrentZ: Bad Z", worldPt && worldPt[2], worldPt);
-      return null;
-    }
-    jtDebug("getCurrentZ: Success", worldPt[2], "from", worldPt);
-    return worldPt[2];
-  }
-
-  function checkStability() {
-    const z = getCurrentZ();
-    if (z === null) {
-      jtDebug("checkStability: getCurrentZ returned null");
-      stableStart = null;
-      trampolineNotice.textContent = "Pose not detected. Stand still and stay visible.";
-      setTimeout(checkStability, poseCheckInterval);
+// Calibration Stand-Still & Jump Calculation
+calibrateBtn.addEventListener('click', async function() {
+  try {
+    if (currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL) return;
+    if (!trampolinePolygon) {
+      trampolineNotice.style.color = '#f00';
+      trampolineNotice.textContent = "Error: Please mark the 4 corners of the trampoline first.";
+      jtError("calibration", "Calibration: trampolinePolygon missing");
       return;
     }
-    lastZs.push(z); if (lastZs.length > 15) lastZs.shift();
-    medianZ = lastZs.slice().sort((a, b) => a - b)[Math.floor(lastZs.length / 2)];
-    const fluctuation = Math.max(...lastZs) - Math.min(...lastZs);
-    jtDebug("checkStability: fluctuation", fluctuation, "lastZs", lastZs);
-    if (lastZs.length >= 10 && fluctuation > 0.015) {
-      jtDebug("checkStability: Not stable enough");
-      stableStart = null;
-    } else if (!stableStart) {
-      stableStart = Date.now();
-      jtDebug("checkStability: Started stability timer");
-    }
-    if (stableStart && (Date.now() - stableStart) >= stableDuration) {
-      jtDebug("checkStability: Calibration complete, baselineZ", medianZ);
-      window.JT_STATE.baselineZ = medianZ;
-      window.JT_STATE.currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
-      trampolineNotice.style.color = '#0f0';
-      trampolineNotice.textContent = "Step off, then perform 3 calibration jumps.";
-      window.JT_DOM.calibrateBtn.style.display = "none";
+    if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
+      trampolineNotice.style.color = '#f00';
+      trampolineNotice.textContent = "Error: No pose detected. Please ensure your body is fully visible and try again.";
+      jtError("calibration", "Calibration: No pose detected");
       return;
     }
-    setTimeout(checkStability, poseCheckInterval);
-  }
-  checkStability();
-}
-
-// Jump Detection and Height
-function computeAndSendJump() {
-  const { baselineZ, currentCalibrationPhase, calibrationJumpsData, REQUIRED_CALIBRATION_JUMPS } = window.JT_STATE;
-  if (currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) {
-    return;
-  }
-  const pose = window.JT_STATE.lastPoseResults;
-  if (!pose || !pose.poseLandmarks) return;
-  const lowestLandmark = getLowestBodyLandmark(pose.poseLandmarks);
-  if (!lowestLandmark) return;
-  const lx = lowestLandmark.x * window.JT_DOM.canvas.width, ly = lowestLandmark.y * window.JT_DOM.canvas.height;
-  const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
-  if (!worldPt || isNaN(worldPt[2])) return;
-  const currentZRaw = worldPt[2];
-  // Simple smoothing
-  if (window.JT_STATE.currentZSmoothed === null) window.JT_STATE.currentZSmoothed = currentZRaw;
-  window.JT_STATE.currentZSmoothed = 0.4 * currentZRaw + 0.6 * window.JT_STATE.currentZSmoothed;
-  window.JT_STATE.zHistory.push(window.JT_STATE.currentZSmoothed); if (window.JT_STATE.zHistory.length > 6) window.JT_STATE.zHistory.shift();
-
-  // Dummy jump detection for demo (replace with real jump logic)
-  const jumpHeight = Math.max(0, window.JT_STATE.currentZSmoothed - (baselineZ || 0));
-  window.JT_DOM.widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m`;
-  jtDebug("computeAndSendJump: height", jumpHeight, "rawZ", currentZRaw, "smoothedZ", window.JT_STATE.currentZSmoothed);
-
-  // For calibration phase, count jumps (simple example)
-  if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
-    if (jumpHeight > 0.1) { // Arbitrary threshold
-      calibrationJumpsData.push(jumpHeight);
-      jtDebug("Calibration jump detected! Height:", jumpHeight, "Jumps so far:", calibrationJumpsData.length);
-      if (calibrationJumpsData.length >= REQUIRED_CALIBRATION_JUMPS) {
-        window.JT_STATE.currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-        window.JT_DOM.trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
-        window.JT_DOM.trampolineNotice.style.color = "#0f0";
-      } else {
-        window.JT_DOM.trampolineNotice.textContent = `Jump detected! ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more...`;
+    if (!window._JT_intrinsics || !window._JT_extrinsics || !window._JT_plane) {
+      trampolineNotice.style.color = '#f00';
+      trampolineNotice.textContent = "Error: Calibration math not set. Please reselect trampoline corners.";
+      jtError("calibration", "Calibration: calibration math not set");
+      return;
+    }
+    trampolineNotice.style.color = '#ff0';
+    trampolineNotice.textContent = "Calibrating... Stand still on the trampoline for 3 seconds.";
+    const stableDuration = 3000, poseCheckInterval = 100;
+    let stableStart = null, lastZs = [], medianZ = null;
+    function getCurrentZ() {
+      try {
+        if (!lastPoseResults || !lastPoseResults.poseLandmarks) return null;
+        const lm = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
+        if (!lm) return null;
+        const lx = lm.x * canvas.width, ly = lm.y * canvas.height;
+        const worldPt = pixelToWorld(lx, ly, lm.z);
+        if (!worldPt) return null;
+        if (isNaN(worldPt[2]) || Math.abs(worldPt[2]) > 1000) return null;
+        return worldPt[2];
+      } catch (e) {
+        jtError("calibration", "Failed in getCurrentZ", e);
+        return null;
       }
     }
+    function checkStability() {
+      try {
+        if (!lastPoseResults || !lastPoseResults.poseLandmarks || lastPoseResults.poseLandmarks.length === 0) {
+          stableStart = null;
+          trampolineNotice.textContent = "No pose detected. Please ensure your body is visible and stand still.";
+          setTimeout(checkStability, poseCheckInterval); return;
+        }
+        const z = getCurrentZ();
+        if (z === null) {
+          stableStart = null;
+          trampolineNotice.textContent = "Pose detected, but couldn't read vertical position. Stand Still.";
+          setTimeout(checkStability, poseCheckInterval); return;
+        }
+        lastZs.push(z); if (lastZs.length > 15) lastZs.shift();
+        medianZ = lastZs.slice().sort((a, b) => a - b)[Math.floor(lastZs.length / 2)];
+        const fluctuation = Math.max(...lastZs) - Math.min(...lastZs);
+        if (lastZs.length >= 10 && fluctuation > 0.015) { stableStart = null; }
+        else if (!stableStart) { stableStart = Date.now(); }
+        if (stableStart && (Date.now() - stableStart) >= stableDuration) {
+          baselineZ = medianZ;
+          currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
+          trampolineNotice.style.color = '#0f0';
+          trampolineNotice.textContent = "Step off, then perform 3 calibration jumps.";
+          calibrateBtn.style.display = "none";
+          updateCalibrationUI();
+          return;
+        }
+        setTimeout(checkStability, poseCheckInterval);
+      } catch (e) {
+        jtError("calibration", "Unhandled error in checkStability", e);
+      }
+    }
+    checkStability();
+  } catch (e) {
+    jtError("calibration", "Unhandled error in calibrateBtn click handler", e);
   }
-}
+});
 
-// Attach continuous jump computation loop
+// Jump Calculation Interval
+let lastZPosRaw = null;
+let lastTimeRaw = null;
 setInterval(() => {
   try {
-    computeAndSendJump();
-  } catch (e) {
-    jtDebug("Error in computeAndSendJump", e);
-  }
-}, 100);
-
-// Attach calibration to button
-if (window.JT_DOM && window.JT_DOM.calibrateBtn) {
-  window.JT_DOM.calibrateBtn.onclick = function() {
-    jtDebug("Calibrate button triggers stand-still calibration logic.");
-    startCalibrationStandStill();
-  };
-} else {
-  // Wait for full DOM ready
-  window.addEventListener('DOMContentLoaded', function() {
-    if (window.JT_DOM && window.JT_DOM.calibrateBtn) {
-      window.JT_DOM.calibrateBtn.onclick = function() {
-        jtDebug("Calibrate button triggers stand-still calibration logic.");
-        startCalibrationStandStill();
-      };
+    if (
+      lastPoseResults &&
+      lastPoseResults.poseLandmarks &&
+      (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE || currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION)
+    ) {
+      computeAndSendJump(lastPoseResults.poseLandmarks);
     }
-  });
-}
-/* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 5: Drawing Landmarks, Canvas Visualization, Real-Time Debug Stats
-   ========================================================================== */
-
-/* Part 5A: Drawing Utilities and Canvas Rendering */
-
-// Draw pose landmarks and skeleton
-function drawPoseOnCanvas() {
-  const { canvas } = window.JT_DOM;
-  const ctx = canvas.getContext('2d');
-  const results = window.JT_STATE.lastPoseResults;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (!results || !results.poseLandmarks) {
-    jtDebug("drawPoseOnCanvas: No pose landmarks to draw.");
-    return;
+  } catch (e) {
+    jtError("jump", "Unhandled error in jump height interval", e);
   }
+}, 33);
 
-  // Draw lines (simple skeleton)
-  const adjacentPairs = [
-    [11, 13], [13, 15], [12, 14], [14, 16], // Arms
-    [11, 12], [23, 24], // Shoulders/Hips
-    [23, 25], [25, 27], [24, 26], [26, 28], // Legs
-    [27, 31], [28, 32] // Ankles to feet
-  ];
-  ctx.save();
-  ctx.strokeStyle = "#44c";
-  ctx.lineWidth = 3;
-  for (let [a, b] of adjacentPairs) {
-    const lma = results.poseLandmarks[a], lmb = results.poseLandmarks[b];
-    if (!lma || !lmb) continue;
-    ctx.beginPath();
-    ctx.moveTo(lma.x * canvas.width, lma.y * canvas.height);
-    ctx.lineTo(lmb.x * canvas.width, lmb.y * canvas.height);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Draw landmarks
-  ctx.save();
-  for (let i = 0; i < results.poseLandmarks.length; ++i) {
-    const lm = results.poseLandmarks[i];
-    if (!lm) continue;
-    ctx.beginPath();
-    ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 6, 0, 2 * Math.PI);
-    ctx.fillStyle = i < 11 ? "#aa3" : "#3ac";
-    ctx.globalAlpha = 0.7;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.font = "12px monospace";
-    ctx.fillStyle = "#222";
-    ctx.fillText(i, lm.x * canvas.width + 7, lm.y * canvas.height - 7);
-  }
-  ctx.restore();
-  jtDebug("drawPoseOnCanvas: drew", results.poseLandmarks.length, "landmarks.");
-}
-
-/* Part 5B: Real-Time Debug Display and UI Stats */
-
-function updateDebugDisplays() {
-  // Show pose serial, Z, etc.
-  const { debugValuesDisplay, rawHeightDebugDisplay, frameRateDisplay } = window.JT_DOM;
-  const state = window.JT_STATE;
-  const lastPose = state.lastPoseResults;
-  debugValuesDisplay.textContent =
-    `Pose#: ${state.poseSerial} | CalibPhase: ${state.currentCalibrationPhase || "-"} | baselineZ: ${state.baselineZ !== null ? state.baselineZ.toFixed(3) : '-'}`;
-  rawHeightDebugDisplay.textContent =
-    lastPose && lastPose.poseLandmarks
-      ? (getLowestBodyLandmark(lastPose.poseLandmarks)?.z ?? "-")
-      : "-";
-  // Estimate FPS (very rough)
-  if (!state._lastUpdateTime) state._lastUpdateTime = Date.now();
-  if (!state._framesThisSecond) state._framesThisSecond = 0;
-  const now = Date.now();
-  state._framesThisSecond++;
-  if (!state._fps) state._fps = 0;
-  if (now - state._lastUpdateTime > 1000) {
-    state._fps = state._framesThisSecond;
-    state._framesThisSecond = 0;
-    state._lastUpdateTime = now;
-  }
-  frameRateDisplay.textContent = state._fps;
-}
-
-/* Part 5C: Animation Loop */
-
-function mainAnimationLoop() {
+function computeAndSendJump(landmarks) {
   try {
-    drawPoseOnCanvas();
-    updateDebugDisplays();
-  } catch (e) {
-    jtDebug("Error in mainAnimationLoop", e);
-  }
-  requestAnimationFrame(mainAnimationLoop);
-}
-if (window.JT_DOM && window.JT_DOM.canvas) {
-  mainAnimationLoop();
-} else {
-  window.addEventListener('DOMContentLoaded', function() {
-    mainAnimationLoop();
-  });
-}    
-    /* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 6: Advanced Calibration, Error Handling, Robustness Improvements
-   ========================================================================== */
-
-/* Part 6A: Advanced Calibration (Robust Jump Counting, Outlier Filtering) */
-
-function median(arr) {
-  const s = arr.slice().sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
-// Enhance calibration jump logic to avoid double-counting and to reject outliers
-function handleCalibrationJumps() {
-  const { calibrationJumpsData, REQUIRED_CALIBRATION_JUMPS, currentCalibrationPhase } = window.JT_STATE;
-  const { trampolineNotice } = window.JT_DOM;
-  if (currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) return;
-
-  // Only count a jump if the Z rises above a threshold then falls back below
-  const jumpMinHeight = 0.08; // Minimum Z gain to count as a jump (meters)
-  if (!window.JT_STATE._jumpInProgress) window.JT_STATE._jumpInProgress = false;
-  if (!window.JT_STATE._lastJumpZ) window.JT_STATE._lastJumpZ = 0;
-
-  const z = window.JT_STATE.currentZSmoothed;
-  if (typeof z !== "number") return;
-
-  if (!window.JT_STATE._jumpInProgress && z - (window.JT_STATE.baselineZ || 0) > jumpMinHeight) {
-    window.JT_STATE._jumpInProgress = true;
-    window.JT_STATE._lastJumpPeak = z;
-    jtDebug("Calibration jump START detected", z);
-  }
-  if (window.JT_STATE._jumpInProgress) {
-    if (z > window.JT_STATE._lastJumpPeak) {
-      window.JT_STATE._lastJumpPeak = z;
+    const currentTime = performance.now();
+    if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || baselineZ === null) {
+      sendJumpHeight(0, false); return;
     }
-    // When user lands (drops back to baseline)
-    if (z - (window.JT_STATE.baselineZ || 0) < jumpMinHeight / 3) {
-      // Only count jump if not too close to last (debounce)
-      if (!calibrationJumpsData.length || Date.now() - (window.JT_STATE._lastJumpTime || 0) > 600) {
-        let jumpHeight = window.JT_STATE._lastJumpPeak - (window.JT_STATE.baselineZ || 0);
-        // Outlier rejection (ignore if < 5cm or > 2m)
-        if (jumpHeight > 0.05 && jumpHeight < 2) {
-          calibrationJumpsData.push(jumpHeight);
-          window.JT_STATE._lastJumpTime = Date.now();
-          jtDebug("Calibration jump ENDED, counted height:", jumpHeight, "Total:", calibrationJumpsData.length);
+    const lowestLandmark = getLowestBodyLandmark(landmarks);
+    if (!lowestLandmark) { sendJumpHeight(0, true); return; }
+    const lx = lowestLandmark.x * canvas.width, ly = lowestLandmark.y * canvas.height;
+    const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
+    if (!worldPt || isNaN(worldPt[2])) { sendJumpHeight(0, true); return; }
+    const currentZRaw = worldPt[2];
+    let verticalVelocityRaw = 0;
+    if (lastZPosRaw !== null && lastTimeRaw !== null) {
+      const deltaTime = (currentTime - lastTimeRaw) / 1000;
+      if (deltaTime > 0) verticalVelocityRaw = (currentZRaw - lastZPosRaw) / deltaTime;
+    }
+    lastZPosRaw = currentZRaw; lastTimeRaw = currentTime;
+    if (currentZSmoothed === null) currentZSmoothed = currentZRaw;
+    currentZSmoothed = 0.4 * currentZRaw + 0.6 * currentZSmoothed;
+    zHistory.push(currentZSmoothed); if (zHistory.length > 6) zHistory.shift();
+    if (verticalVelocitySmoothed === null) verticalVelocitySmoothed = verticalVelocityRaw;
+    verticalVelocitySmoothed = 0.3 * verticalVelocityRaw + 0.7 * verticalVelocitySmoothed;
+    velocityHistory.push(verticalVelocitySmoothed); if (velocityHistory.length > 6) velocityHistory.shift();
+    if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
+      let airborne = (currentZSmoothed - baselineZ) > 0.05;
+      if (jumpState === JUMP_STATE_ON_TRAMPOLINE && airborne) {
+        jumpState = JUMP_STATE_AIRBORNE;
+        takeOffTime = currentTime;
+        highestPointZ = currentZSmoothed;
+      } else if (jumpState === JUMP_STATE_AIRBORNE) {
+        if (currentZSmoothed > highestPointZ) highestPointZ = currentZSmoothed;
+        if ((currentZSmoothed - baselineZ) < 0.03) {
+          jumpState = JUMP_STATE_DESCENDING;
+          flightTime = (currentTime - takeOffTime) / 1000;
+          calibrationJumpsData.push({
+            peakZ: highestPointZ,
+            baselineZ,
+            jumpHeight: highestPointZ - baselineZ,
+            flightTime
+          });
           if (calibrationJumpsData.length >= REQUIRED_CALIBRATION_JUMPS) {
-            // Compute median as calibration value
-            const jumpsMedian = median(calibrationJumpsData);
-            window.JT_STATE.calibratedJumpMedian = jumpsMedian;
-            window.JT_STATE.currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-            trampolineNotice.textContent = "Calibration complete!\nJump height tracking active.";
+            currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
+            trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
             trampolineNotice.style.color = "#0f0";
-            jtDebug("Calibration finalized. Median jump height:", jumpsMedian);
+            updateCalibrationUI();
           } else {
-            trampolineNotice.textContent = `Jump detected! ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more...`;
+            trampolineNotice.textContent = `Jump detected! ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more to go...`;
           }
-        } else {
-          jtDebug("Rejected jump (bad height)", jumpHeight);
+          calibrateBtn.style.display = "none";
+          jumpState = JUMP_STATE_ON_TRAMPOLINE;
+          highestPointZ = -Infinity;
         }
       }
-      window.JT_STATE._jumpInProgress = false;
-      window.JT_STATE._lastJumpPeak = null;
+      sendJumpHeight(0, true); return;
     }
-  }
-}
-
-/* Part 6B: Integration into Continuous Loop */
-
-setInterval(() => {
-  try {
-    if (window.JT_STATE.currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
-      handleCalibrationJumps();
+    if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
+      const jumpHeight = Math.max(0, currentZSmoothed - baselineZ);
+      widgetJumpHeightDisplay.textContent = jumpHeight > 0.05
+        ? `Jump: ${jumpHeight.toFixed(2)} m` : `Jump: 0.00 m`;
+      sendJumpHeight(jumpHeight, true);
     }
   } catch (e) {
-    jtDebug("Error in handleCalibrationJumps", e);
-  }
-}, 50);
-
-/* Part 6C: Error Handling, Fallbacks, and Defensive Programming */
-
-// Defensive: If MediaPipe or camera fails, show error in UI
-function checkMediaPipeStatus() {
-  if (!window.Pose || !window.Camera) {
-    jtDebug("MediaPipe libraries not loaded! Widget cannot function.");
-    if (window.JT_DOM && window.JT_DOM.trampolineNotice)
-      window.JT_DOM.trampolineNotice.textContent = "MediaPipe library load error. Check your connection.";
-    return false;
-  }
-  return true;
-}
-if (!checkMediaPipeStatus()) {
-  // Stop further initialization
-  throw new Error("MediaPipe not loaded");
-}
-
-// Defensive: Prevent runaway debug log
-setInterval(() => {
-  const logElem = document.getElementById('jtDebugLog');
-  if (logElem && logElem.textContent.length > 20000) {
-    logElem.textContent = "(Truncated)\n" + logElem.textContent.slice(-18000);
-  }
-}, 4000);
-
-/* Part 6D: Final Initialization Log */
-jtDebug("JumpTek Widget initialization complete. All systems nominal.");
-    /* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 7: User Experience, Reset/Restart, and Final Touches
-   ========================================================================== */
-
-/* Part 7A: Reset/Restart Calibration Button and State */
-
-function resetCalibration() {
-  jtDebug("RESETTING CALIBRATION: All calibration data and state cleared.");
-  window.JT_STATE.currentCalibrationPhase = null;
-  window.JT_STATE.trampolinePolygon = null;
-  window.JT_STATE.baselineZ = null;
-  window.JT_STATE.currentZSmoothed = null;
-  window.JT_STATE.verticalVelocitySmoothed = null;
-  window.JT_STATE.zHistory = [];
-  window.JT_STATE.velocityHistory = [];
-  window.JT_STATE.calibrationJumpsData = [];
-  window.JT_STATE.jumpState = null;
-  window.JT_STATE.takeOffTime = null;
-  window.JT_STATE.flightTime = null;
-  window.JT_STATE.highestPointZ = null;
-  window.JT_STATE._jumpInProgress = false;
-  window.JT_STATE._lastJumpZ = 0;
-  window.JT_STATE._lastJumpPeak = null;
-  window.JT_STATE._lastJumpTime = null;
-  window.JT_STATE.calibratedJumpMedian = null;
-  if (window.JT_DOM) {
-    window.JT_DOM.trampolineNotice.textContent = "Calibration reset. Click Calibrate to begin again.";
-    window.JT_DOM.trampolineNotice.style.color = "#5ad";
-    window.JT_DOM.calibrateBtn.style.display = "";
-    window.JT_DOM.widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
+    jtError("jump", "Error in computeAndSendJump", e);
   }
 }
+function sendJumpHeight(jumpHeight, hasTracking) {
+  // For integration: window.parent.postMessage({ type: "jumpHeight", value: jumpHeight, tracking: hasTracking }, "*");
+}
 
-// Attach reset button for user convenience if not already present
-(function addResetButton() {
-  if (!window.JT_DOM || !window.JT_DOM.calibrateBtn) {
-    window.addEventListener('DOMContentLoaded', addResetButton);
-    return;
+// Settings and Controls
+function applyDebugMode() {
+  try {
+    debugMode = debugModeCheckbox.checked;
+    debugValuesDisplay.style.display = debugMode ? "block" : "none";
+    rawHeightDebugDisplay.style.display = debugMode ? "block" : "none";
+    frameRateDisplay.style.display = debugMode ? "block" : "none";
+  } catch (e) {
+    jtError("settings", "Failed to apply debug mode", e);
   }
-  let resetBtn = document.getElementById('jtResetBtn');
-  if (!resetBtn) {
-    resetBtn = document.createElement('button');
-    resetBtn.id = 'jtResetBtn';
-    resetBtn.textContent = 'Reset Calibration';
-    resetBtn.style.marginLeft = '12px';
-    window.JT_DOM.calibrateBtn.parentNode.appendChild(resetBtn);
-    jtDebug("Added Reset Calibration button to UI.");
+}
+function saveSettingsToStorage() {
+  try {
+    localStorage.setItem("jt_cameraDistance", cameraDistanceInput.value);
+    localStorage.setItem("jt_cameraHeight", cameraHeightInput.value);
+    localStorage.setItem("jt_depthScaleFactor", depthScaleFactorInput.value);
+    localStorage.setItem("jt_debugMode", debugModeCheckbox.checked ? "1" : "0");
+  } catch (e) {
+    jtError("settings", "Failed to save settings to storage", e);
   }
-  resetBtn.onclick = resetCalibration;
-})();
-
-/* Part 7B: Help Tooltip and UI Guidance */
-
-(function addHelpTooltip() {
-  if (!window.JT_DOM || !window.JT_DOM.calibrateBtn) {
-    window.addEventListener('DOMContentLoaded', addHelpTooltip);
-    return;
+}
+function loadSettingsFromStorage() {
+  try {
+    if (localStorage.getItem("jt_cameraDistance")) cameraDistanceInput.value = localStorage.getItem("jt_cameraDistance");
+    if (localStorage.getItem("jt_cameraHeight")) cameraHeightInput.value = localStorage.getItem("jt_cameraHeight");
+    if (localStorage.getItem("jt_depthScaleFactor")) depthScaleFactorInput.value = localStorage.getItem("jt_depthScaleFactor");
+    debugModeCheckbox.checked = localStorage.getItem("jt_debugMode") === "1";
+    applyDebugMode();
+  } catch (e) {
+    jtError("settings", "Failed to load settings from storage", e);
   }
-  let helpBtn = document.getElementById('jtHelpBtn');
-  if (!helpBtn) {
-    helpBtn = document.createElement('button');
-    helpBtn.id = 'jtHelpBtn';
-    helpBtn.textContent = '?';
-    helpBtn.style.marginLeft = '12px';
-    helpBtn.title = 'Show help and usage instructions';
-    window.JT_DOM.calibrateBtn.parentNode.appendChild(helpBtn);
+}
+settingsBtn.addEventListener('click', e => {
+  try {
+    settingsPopover.classList.add('open');
+    settingsPopover.style.display = 'flex';
+    e.stopPropagation();
+  } catch (e) {
+    jtError("settings", "Failed to open settings popover", e);
   }
-  helpBtn.onclick = function() {
-    alert(
-      "JumpTek Widget Help:\n\n" +
-      "1. Click 'Calibrate' and stand still on the trampoline until prompted.\n" +
-      "2. Step off, then perform 3 calibration jumps when asked.\n" +
-      "3. After calibration, your jump height will display live.\n\n" +
-      "Use 'Reset Calibration' if you want to restart the process at any time.\n\n" +
-      "For troubleshooting, check the Debug Log at the bottom!"
-    );
-  };
-})();
-
-/* Part 7C: Final Defensive Code and Clean-Up */
-
-// If the user reloads or resets, ensure all intervals/timeouts are cleared where possible
-window.addEventListener('beforeunload', function() {
-  jtDebug("Page unloading, cleaning up...");
 });
-
-/* Part 7D: Ready Message */
-jtDebug("JumpTek Widget: All UI, handlers, and user experience features loaded. Ready for use!");
-    /* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 8: Custom Event Hooks, Extensibility, and Advanced Debug Features
-   ========================================================================== */
-
-/* Part 8A: Custom Event Hooks for Extensibility */
-
-// Allow other scripts to register hooks for jump/calibration events
-window.JT_EVENTS = {
-  onCalibrationComplete: [],
-  onJumpDetected: []
-};
-
-function jtDispatchEvent(eventType, eventData) {
-  if (!window.JT_EVENTS[eventType]) return;
-  for (const fn of window.JT_EVENTS[eventType]) {
-    try { fn(eventData); } catch (e) { jtDebug(`JT_EVENTS[${eventType}] handler error:`, e); }
+closeSettingsBtn.addEventListener('click', () => {
+  try {
+    settingsPopover.classList.remove('open');
+    settingsPopover.style.display = 'none';
+  } catch (e) {
+    jtError("settings", "Failed to close settings popover", e);
   }
-}
-
-// Modify calibration completion to dispatch event
-const originalCalibrationComplete = window.JT_STATE.currentCalibrationPhase;
-Object.defineProperty(window.JT_STATE, 'currentCalibrationPhase', {
-  get: function() { return this._calibPhaseReal; },
-  set: function(val) {
-    this._calibPhaseReal = val;
-    if (val === CALIBRATION_PHASE_COMPLETE) {
-      jtDebug("Dispatching onCalibrationComplete event.");
-      jtDispatchEvent('onCalibrationComplete', {
-        median: this.calibratedJumpMedian,
-        jumps: this.calibrationJumpsData.slice()
-      });
-    }
-  },
-  configurable: true
 });
-
-// Modify jump detection logic to dispatch event (copy from jump handler in previous part)
-const originalHandleCalibrationJumps = handleCalibrationJumps;
-window.handleCalibrationJumps = function() {
-  const prevJumps = window.JT_STATE.calibrationJumpsData.length;
-  originalHandleCalibrationJumps();
-  if (window.JT_STATE.calibrationJumpsData.length > prevJumps) {
-    const lastJumpHeight = window.JT_STATE.calibrationJumpsData[window.JT_STATE.calibrationJumpsData.length - 1];
-    jtDebug("Dispatching onJumpDetected event.", lastJumpHeight);
-    jtDispatchEvent('onJumpDetected', { height: lastJumpHeight });
-  }
-};
-
-/* Part 8B: Advanced Debug Features (Export, Download, and Filtering) */
-
-// Export debug log to file
-function jtExportDebugLog() {
-  const logElem = document.getElementById('jtDebugLog');
-  let text = logElem ? logElem.textContent : "";
-  let url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  let a = document.createElement('a');
-  a.href = url;
-  a.download = `JumpTek_DebugLog_${new Date().toISOString().replace(/:/g,'-')}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 1000);
-}
-
-// Add Export Log button to UI
-(function addExportDebugLogButton() {
-  if (!document.getElementById('jtExportDebugLogBtn')) {
-    const btn = document.createElement('button');
-    btn.id = 'jtExportDebugLogBtn';
-    btn.textContent = 'Export Debug Log';
-    btn.style.marginLeft = '12px';
-    btn.onclick = jtExportDebugLog;
-    const debugSection = document.querySelector('.jt-debug-section');
-    if (debugSection) debugSection.appendChild(btn);
-    jtDebug("Added Export Debug Log button to UI.");
-  }
-})();
-
-/* Part 8C: Debug Filtering (Show Only Errors/Warnings) */
-
-(function addDebugFilterControls() {
-  const debugSection = document.querySelector('.jt-debug-section');
-  if (!debugSection) return;
-  let filterBtn = document.getElementById('jtDebugFilterBtn');
-  if (!filterBtn) {
-    filterBtn = document.createElement('button');
-    filterBtn.id = 'jtDebugFilterBtn';
-    filterBtn.textContent = 'Show Only Errors';
-    filterBtn.style.marginLeft = '12px';
-    debugSection.appendChild(filterBtn);
-  }
-  let filterMode = false;
-  filterBtn.onclick = function() {
-    filterMode = !filterMode;
-    filterBtn.textContent = filterMode ? "Show All Logs" : "Show Only Errors";
-    const logElem = document.getElementById('jtDebugLog');
-    if (!logElem) return;
-    if (filterMode) {
-      const lines = logElem.textContent.split('\n');
-      logElem.textContent = lines.filter(line =>
-        /\b(error|fatal|fail|warn)\b/i.test(line)
-      ).join('\n');
-    } else {
-      // Force refresh of full log
-      window.JT_DEBUG_CLEAR && window.JT_DEBUG_CLEAR();
-      for (const line of window.JT_DEBUG_HISTORY) {
-        jtDebug(line.replace(/^\[JTDEBUG [^]]+\] /, ''));
-      }
-    }
-  };
-  jtDebug("Added Debug Filter button to UI.");
-})();
-
-/* Part 8D: Extensibility Ready Message */
-jtDebug("JumpTek Widget: Custom events and advanced debug features loaded. Extensibility hooks active.");
-    /* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 9: Accessibility, Mobile Responsiveness, and Final Polish
-   ========================================================================== */
-
-/* Part 9A: Accessibility Improvements */
-
-// Add ARIA labels and roles where appropriate
-(function enhanceAccessibility() {
+document.addEventListener('mousedown', e => {
   try {
-    const { calibrateBtn, widgetJumpHeightDisplay, trampolineNotice, canvas } = window.JT_DOM || {};
-    if (calibrateBtn) calibrateBtn.setAttribute('aria-label', 'Start Calibration');
-    if (widgetJumpHeightDisplay) {
-      widgetJumpHeightDisplay.setAttribute('role', 'status');
-      widgetJumpHeightDisplay.setAttribute('aria-live', 'polite');
-    }
-    if (trampolineNotice) {
-      trampolineNotice.setAttribute('role', 'alert');
-      trampolineNotice.setAttribute('aria-live', 'assertive');
-    }
-    if (canvas) {
-      canvas.setAttribute('aria-label', 'Live pose visualization');
-      canvas.setAttribute('tabindex', '0');
-    }
-    jtDebug("Accessibility features applied.");
-  } catch (e) {
-    jtDebug("Accessibility enhancement failed.", e);
-  }
-})();
-
-/* Part 9B: Responsive Design Tweaks */
-(function responsiveDesign() {
-  const style = document.createElement('style');
-  style.textContent = `
-    @media (max-width: 700px) {
-      .jt-container { padding: 8px; }
-      .jt-row { flex-direction: column; gap: 8px; }
-      #outputCanvas { width: 100vw !important; max-width: 98vw; height: auto !important; }
-    }
-  `;
-  document.head.appendChild(style);
-  jtDebug("Responsive design CSS injected.");
-})();
-
-/* Part 9C: Final Defensive Check and Ready Event */
-(function finalReadyCheck() {
-  if (!window.JT_READY) {
-    jtDebug("Warning: Widget mainInit did not complete in time.");
-  } else {
-    jtDebug("JumpTek Widget: FINAL READY! All systems nominal.");
-    // Fire a custom DOM event for external integrations
-    try {
-      window.dispatchEvent(new CustomEvent('jumptek-ready', { detail: { JT_STATE: window.JT_STATE }}));
-      jtDebug("Dispatched 'jumptek-ready' event on window.");
-    } catch (e) {
-      jtDebug("Failed to dispatch custom ready event.", e);
-    }
-  }
-})();
-
-/* ==========================================================================
-   END OF JumpTek-Widget.js EXTREME DEBUG VERSION
-   ========================================================================== */
-    /* ==========================================================================
-   JumpTek-Widget.js - EXTREME DEBUG VERSION
-   PART 10: Final HTML Cleanup, Widget Self-Integrity, and Closing Tags
-   ========================================================================== */
-
-/* Part 10A: Widget Self-Integrity and DOM Validation */
-
-(function finalWidgetCheck() {
-  try {
-    // Check all required DOM elements exist
-    const required = [
-      'calibrateBtn',
-      'trampolineNotice',
-      'outputCanvas',
-      'debugValuesDisplay',
-      'rawHeightDebugDisplay',
-      'frameRateDisplay',
-      'depthScaleFactorInput',
-      'widgetJumpHeightDisplay',
-      'inputVideo',
-      'jtDebugLog'
-    ];
-    const missing = required.filter(id => !document.getElementById(id));
-    if (missing.length) {
-      jtDebug("FATAL: Missing critical DOM elements at closeout:", missing);
-      alert(
-        "JumpTek Widget Error:\nCritical DOM elements missing: " +
-        missing.join(', ') +
-        "\nWidget may not operate correctly."
-      );
-    } else {
-      jtDebug("Final DOM validation successful. All widget elements present.");
-    }
-
-    // Check for duplicate or orphaned widgets (prevent double init)
-    const widgets = document.querySelectorAll('.jt-container');
-    if (widgets.length > 1) {
-      jtDebug("Warning: Multiple JumpTek widgets detected on page.", widgets.length);
-    } else if (widgets.length === 0) {
-      jtDebug("ERROR: No .jt-container found at closeout.");
-    } else {
-      jtDebug("Widget container integrity check passed.");
+    if (settingsPopover.classList.contains('open') && !settingsPopover.contains(e.target) && e.target !== settingsBtn) {
+      settingsPopover.classList.remove('open');
+      settingsPopover.style.display = 'none';
     }
   } catch (e) {
-    jtDebug("Widget self-integrity check failed.", e);
+    jtError("settings", "Failed in document mousedown for settings popover", e);
   }
-})();
-
-/* Part 10B: Safe Widget Shutdown Handler (Optional) */
-
-window.JumpTekSafeShutdown = function() {
-  jtDebug("JumpTek Widget: Safe shutdown requested. Cleaning up...");
-  // Stop all intervals, timeouts, and video streams if needed
-  if (window.JT_STATE && window.JT_STATE.camera && typeof window.JT_STATE.camera.stop === 'function') {
-    try { window.JT_STATE.camera.stop(); jtDebug("Camera stopped."); } catch (e) {}
+});
+saveSettingsBtn.addEventListener('click', () => {
+  try {
+    saveSettingsToStorage();
+    applyDebugMode();
+    settingsPopover.classList.remove('open');
+    settingsPopover.style.display = 'none';
+    trampolineNotice.textContent = "Settings saved! If camera position changed, restart calibration.";
+  } catch (e) {
+    jtError("settings", "Failed to save settings", e);
   }
-  // Clear debug log (optional)
-  if (window.JT_DEBUG_CLEAR) window.JT_DEBUG_CLEAR();
-  // Remove event listeners if any were added globally
-  jtDebug("Widget cleanup complete. Bye!");
+});
+window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
+cameraDistanceInput.addEventListener('input', () => { try { saveSettingsToStorage(); setupWorldCalibration(); } catch (e) { jtError("settings", "Failed to update camera distance", e); } });
+cameraHeightInput.addEventListener('input', () => { try { saveSettingsToStorage(); setupWorldCalibration(); } catch (e) { jtError("settings", "Failed to update camera height", e); } });
+depthScaleFactorInput.addEventListener('input', () => { try { saveSettingsToStorage(); } catch (e) { jtError("settings", "Failed to update depth scale factor", e); } });
+
+switchCameraBtn.addEventListener('click', async () => {
+  try {
+    useFrontCamera = !useFrontCamera;
+    await startCamera();
+    trampolineCorners = [];
+    trampolinePolygon = null;
+    trampolineCenter = null;
+    currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
+    baselineZ = null;
+    calibrationJumpsData = [];
+    jumpState = JUMP_STATE_ON_TRAMPOLINE;
+    currentZSmoothed = null;
+    verticalVelocitySmoothed = null;
+    dirtyFrame = true;
+    trampolineNotice.textContent = "Camera switched! Mark trampoline corners.";
+    updateCalibrationUI();
+  } catch (e) {
+    jtError("camera", "Failed to switch camera", e);
+  }
+});
+const resetCalibrationForZoom = () => {
+  try {
+    trampolineCorners = [];
+    trampolinePolygon = null;
+    trampolineCenter = null;
+    currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
+    baselineZ = null;
+    calibrationJumpsData = [];
+    jumpState = JUMP_STATE_ON_TRAMPOLINE;
+    currentZSmoothed = null;
+    verticalVelocitySmoothed = null;
+    dirtyFrame = true;
+    trampolineNotice.textContent = "Zoom changed! Mark trampoline corners again.";
+    updateCalibrationUI();
+  } catch (e) {
+    jtError("camera", "Failed to reset calibration for zoom", e);
+  }
 };
-
-window.addEventListener('beforeunload', window.JumpTekSafeShutdown);
-
-/* Part 10C: Final Footer and HTML Closeout */
-
-// Optionally, you could inject a discreet footer for credit/versioning:
-(function addFooter() {
-  if (!document.querySelector('.jt-container')) return;
-  let footer = document.getElementById('jtFooter');
-  if (!footer) {
-    footer = document.createElement('div');
-    footer.id = 'jtFooter';
-    footer.style = "font-size:0.9em;color:#888;text-align:right;margin-top:22px;";
-    footer.innerHTML = 'JumpTek Widget &copy; 2025 | Extreme Debug Mode | <a href="https://github.com/Tibbles1996" target="_blank" style="color:#5ad;">by Tibbles1996</a>';
-    document.querySelector('.jt-container').appendChild(footer);
-    jtDebug("Footer injected.");
+zoomInBtn.addEventListener('click', async () => {
+  try {
+    if (!videoTrack || !zoomCapabilities) return;
+    const settings = videoTrack.getSettings();
+    const max = videoTrack.getCapabilities().zoom.max;
+    const step = videoTrack.getCapabilities().zoom.step || 0.1;
+    let newZoom = Math.min((settings.zoom || 1) + step, max);
+    await videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] });
+    resetCalibrationForZoom();
+  } catch (e) {
+    jtError("camera", "Failed to zoom in", e);
   }
-})();
-
-/* ==========================================================================
-   END OF JumpTek-Widget.js PART 10: HTML Closure/Finalization
-   ========================================================================== */
-      </script>
+});
+zoomOutBtn.addEventListener('click', async () => {
+  try {
+    if (!videoTrack || !zoomCapabilities) return;
+    const settings = videoTrack.getSettings();
+    const min = videoTrack.getCapabilities().zoom.min;
+    const step = videoTrack.getCapabilities().zoom.step || 0.1;
+    let newZoom = Math.max((settings.zoom || 1) - step, min);
+    await videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] });
+    resetCalibrationForZoom();
+  } catch (e) {
+    jtError("camera", "Failed to zoom out", e);
+  }
+});
+  </script>
 </body>
 </html>
