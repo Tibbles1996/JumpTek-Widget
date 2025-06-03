@@ -7,7 +7,7 @@
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; box-sizing: border-box; }
     #container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
-    #canvas { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; border: none; z-index: 1; }
+    #canvas { display: block; position: absolute; top: 0; left: 0; background: #000; border: none; z-index: 1; width: 100vw; height: 100vh; }
     #video { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; opacity: 0; pointer-events: none; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
     #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn {
@@ -98,10 +98,7 @@
   </div>
   <video id="video" autoplay playsinline style="display:none;"></video>
   <script>
-/**
- * RIDICULOUSLY ROBUST ERROR LOGGER. Logs all errors (not debug/info) in any area of the code.
- * All error logs go to the console (never to the UI).
- */
+/* ----------- Robust Error Logger ----------- */
 function jtError(area, message, errObj) {
   try {
     let msg = `[JTERROR][${area}] ${message}`;
@@ -110,12 +107,11 @@ function jtError(area, message, errObj) {
     }
     console.error(msg);
   } catch (e) {
-    // Failsafe
     console.error("[JTERROR][jtError] Logging failure", e);
   }
 }
 
-// -- Widget State Variables --
+/* ----------- State & DOM refs ----------- */
 const switchCameraBtn  = document.getElementById('switchCameraBtn');
 const loadingIndicator = document.getElementById('loadingIndicator');
 const trampolineNotice = document.getElementById('trampolineNotice');
@@ -138,6 +134,8 @@ const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
 const cameraDistanceInput = document.getElementById('cameraDistance');
 const cameraHeightInput   = document.getElementById('cameraHeight');
 const depthScaleFactorInput = document.getElementById('depthScaleFactor');
+
+/* ----------- Widget State ----------- */
 let poseLoaded = false;
 let currentStream = null;
 let useFrontCamera = false;
@@ -177,15 +175,53 @@ let dirtyFrame = true;
 const { drawConnectors, drawLandmarks } = window;
 const POSE_CONNECTIONS = window.POSE_CONNECTIONS || (window.Pose && window.Pose.POSE_CONNECTIONS);
 let pose = null;
-let lastPoseTime = 0;
-let poseSerial = 0;
 let poseLoopActive = false;
 
-// Widget Initialization
+/* ----------- Canvas/Video Aspect Ratio Sync ----------- */
+function resizeCanvasToMatchVideo() {
+  try {
+    if (video.videoWidth && video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.style.width = video.videoWidth + "px";
+      canvas.style.height = video.videoHeight + "px";
+    } else {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.width = "100vw";
+      canvas.style.height = "100vh";
+    }
+    dirtyFrame = true;
+  } catch (e) { jtError("canvas", "Error resizing canvas", e); }
+}
+function resizeVideoAndCanvas() {
+  try {
+    if (video.videoWidth && video.videoHeight) {
+      video.style.width = video.videoWidth + "px";
+      video.style.height = video.videoHeight + "px";
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.style.width = video.videoWidth + "px";
+      canvas.style.height = video.videoHeight + "px";
+    }
+  } catch (e) { jtError("canvas", "resizeVideoAndCanvas", e); }
+}
+video.addEventListener('loadedmetadata', () => {
+  resizeVideoAndCanvas();
+});
+window.addEventListener('resize', () => {
+  if (video.videoWidth && video.videoHeight) {
+    resizeVideoAndCanvas();
+  } else {
+    resizeCanvasToMatchVideo();
+  }
+});
+
+/* ----------- Initialization ----------- */
 window.addEventListener('DOMContentLoaded', () => {
   try {
     if (typeof window.Pose !== "function") {
-      jtError("pose", "MediaPipe Pose not loaded. Check your internet connection or the CDN.");
+      jtError("pose", "MediaPipe Pose not loaded.");
       throw new Error("MediaPipe Pose not loaded.");
     }
     pose = new window.Pose({
@@ -202,14 +238,12 @@ window.addEventListener('DOMContentLoaded', () => {
     pose.onResults(results => {
       try {
         lastPoseResults = results;
-        poseSerial++;
       } catch (e) {
         jtError("pose.onResults", "Unhandled error in pose result callback", e);
       }
     });
     poseLoaded = true;
     startCamera().then(() => {
-      resizeCanvasToVideo();
       drawLoop();
       poseLoop();
     }).catch(e => jtError("camera", "Camera failed to start", e));
@@ -221,15 +255,12 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Camera Initialization
+/* ----------- Camera Setup ----------- */
 async function startCamera() {
   loadingIndicator.style.display = 'block';
   if (currentStream) {
-    try {
-      currentStream.getTracks().forEach(t => t.stop());
-    } catch (e) {
-      jtError("camera", "Failed to stop previous camera tracks", e);
-    }
+    try { currentStream.getTracks().forEach(t => t.stop()); }
+    catch (e) { jtError("camera", "Failed to stop previous camera tracks", e); }
     videoTrack = null;
     zoomCapabilities = null;
   }
@@ -245,8 +276,8 @@ async function startCamera() {
     currentStream = stream;
     video.srcObject = stream;
     await video.play();
+    resizeVideoAndCanvas();
     loadingIndicator.style.display = 'none';
-    resizeCanvasToVideo();
     videoTrack = stream.getVideoTracks()[0];
     if (videoTrack) {
       zoomCapabilities = videoTrack.getCapabilities().zoom;
@@ -272,21 +303,7 @@ async function startCamera() {
   }
 }
 
-// Canvas Resize
-function resizeCanvasToVideo() {
-  try {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    canvas.style.width = "100vw";
-    canvas.style.height = "100vh";
-    dirtyFrame = true;
-  } catch (e) {
-    jtError("canvas", "Failed to resize canvas", e);
-  }
-}
-window.addEventListener('resize', resizeCanvasToVideo);
-
-// Frame Draw Loop
+/* ----------- Draw Loop ----------- */
 function drawLoop() {
   try {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -316,7 +333,25 @@ function drawLoop() {
   }
 }
 
-// Pose Processing Loop
+function drawTrampolineArea(ctx, points) {
+  try {
+    if (!Array.isArray(points) || points.length < 1) return;
+    ctx.save(); ctx.strokeStyle = '#00f'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+    ctx.closePath(); ctx.stroke(); ctx.restore();
+  } catch (e) {
+    jtError("ui", "Failed to draw trampoline area", e);
+  }
+}
+
+function getQuadrilateralCenter(points) {
+  let cx = 0, cy = 0;
+  for (const [x, y] of points) { cx += x; cy += y; }
+  return [cx / points.length, cy / points.length];
+}
+
+/* ----------- Pose Loop ----------- */
 async function poseLoop() {
   if (poseLoopActive) return;
   poseLoopActive = true;
@@ -339,11 +374,65 @@ async function poseLoop() {
 }
 video.addEventListener('play', () => { dirtyFrame = true; });
 video.addEventListener('seeked', () => { dirtyFrame = true; });
-window.addEventListener('resize', () => { dirtyFrame = true; });
 calibrateBtn.addEventListener('click', () => { dirtyFrame = true; });
 switchCameraBtn.addEventListener('click', () => { dirtyFrame = true; });
 
-// Calibration and UI
+/* ----------- Marking and Calibration ----------- */
+canvas.addEventListener('click', function(e) {
+  try {
+    if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
+    if (trampolinePolygon) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (video.videoWidth / rect.width);
+    const y = (e.clientY - rect.top) * (video.videoHeight / rect.height);
+    trampolineCorners.push([x, y]);
+    dirtyFrame = true;
+    if (trampolineCorners.length === 4) {
+      try {
+        trampolinePolygon = trampolineCorners.slice();
+        trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
+        setupWorldCalibration();
+        trampolineCorners = [];
+        currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
+        dirtyFrame = true;
+        updateCalibrationUI();
+      } catch (err) {
+        trampolineNotice.textContent = "Error calculating trampoline center. Please try again.";
+        trampolineNotice.style.color = "#f00";
+        trampolineCorners = [];
+        trampolinePolygon = null;
+        dirtyFrame = true;
+        updateCalibrationUI();
+        jtError("calibration", "Error calculating trampoline center", err);
+      }
+    }
+  } catch (e) {
+    jtError("calibration", "Unhandled error in canvas click handler", e);
+  }
+});
+
+function setupWorldCalibration() {
+  try {
+    window._JT_intrinsics = {
+      fx: video.videoWidth / 2,
+      fy: video.videoHeight / 2,
+      cx: video.videoWidth / 2,
+      cy: video.videoHeight / 2
+    };
+    const cameraZ = parseFloat(cameraHeightInput.value) || 1.0;
+    const cameraDistance = parseFloat(cameraDistanceInput.value) || 2.0;
+    window._JT_extrinsics = {
+      C: [trampolineCenter[0], trampolineCenter[1] - cameraDistance * (video.videoHeight / 3), cameraZ * (video.videoHeight / 3)]
+    };
+    window._JT_plane = {
+      normal: [0, 0, 1],
+      point: [trampolineCenter[0], trampolineCenter[1], 0]
+    };
+  } catch (e) {
+    jtError("calibration", "Failed to setup world calibration", e);
+  }
+}
+
 function updateCalibrationUI() {
   try {
     if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS || currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
@@ -379,6 +468,7 @@ function updateCalibrationUI() {
     jtError("ui", "Failed to update calibration UI", e);
   }
 }
+
 function updateRestartDrawBtnVisibility() {
   try {
     restartDrawBtn.style.display = (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) ? "block" : "none";
@@ -400,59 +490,8 @@ restartDrawBtn.addEventListener('click', () => {
     jtError("ui", "Failed to reset trampoline corners", e);
   }
 });
-canvas.addEventListener('click', function(e) {
-  try {
-    if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
-    if (trampolinePolygon) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    trampolineCorners.push([x, y]);
-    dirtyFrame = true;
-    if (trampolineCorners.length === 4) {
-      try {
-        trampolinePolygon = trampolineCorners.slice();
-        trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
-        setupWorldCalibration();
-        trampolineCorners = [];
-        currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-        dirtyFrame = true;
-        updateCalibrationUI();
-      } catch (err) {
-        trampolineNotice.textContent = "Error calculating trampoline center. Please try again.";
-        trampolineNotice.style.color = "#f00";
-        trampolineCorners = [];
-        trampolinePolygon = null;
-        dirtyFrame = true;
-        updateCalibrationUI();
-        jtError("calibration", "Error calculating trampoline center", err);
-      }
-    }
-  } catch (e) {
-    jtError("calibration", "Unhandled error in canvas click handler", e);
-  }
-});
-function setupWorldCalibration() {
-  try {
-    window._JT_intrinsics = {
-      fx: canvas.width / 2,
-      fy: canvas.height / 2,
-      cx: canvas.width / 2,
-      cy: canvas.height / 2
-    };
-    const cameraZ = parseFloat(cameraHeightInput.value) || 1.0;
-    const cameraDistance = parseFloat(cameraDistanceInput.value) || 2.0;
-    window._JT_extrinsics = {
-      C: [trampolineCenter[0], trampolineCenter[1] - cameraDistance * (canvas.height / 3), cameraZ * (canvas.height / 3)]
-    };
-    window._JT_plane = {
-      normal: [0, 0, 1],
-      point: [trampolineCenter[0], trampolineCenter[1], 0]
-    };
-  } catch (e) {
-    jtError("calibration", "Failed to setup world calibration", e);
-  }
-}
+
+/* --- Math helpers and pose landmark logic --- */
 function getLowestBodyLandmark(landmarks) {
   try {
     const indicesByPriority = [
@@ -513,24 +552,8 @@ function pixelToWorld(u, v, mpZ) {
     return null;
   }
 }
-function drawTrampolineArea(ctx, points) {
-  try {
-    if (!Array.isArray(points) || points.length < 1) return;
-    ctx.save(); ctx.strokeStyle = '#00f'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(points[0][0], points[0][1]);
-    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
-    ctx.closePath(); ctx.stroke(); ctx.restore();
-  } catch (e) {
-    jtError("ui", "Failed to draw trampoline area", e);
-  }
-}
-function getQuadrilateralCenter(points) {
-  let cx = 0, cy = 0;
-  for (const [x, y] of points) { cx += x; cy += y; }
-  return [cx / points.length, cy / points.length];
-}
 
-// Calibration Stand-Still & Jump Calculation
+/* --- Calibration Stand-Still & Jump Calculation --- */
 calibrateBtn.addEventListener('click', async function() {
   try {
     if (currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL) return;
@@ -561,7 +584,7 @@ calibrateBtn.addEventListener('click', async function() {
         if (!lastPoseResults || !lastPoseResults.poseLandmarks) return null;
         const lm = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
         if (!lm) return null;
-        const lx = lm.x * canvas.width, ly = lm.y * canvas.height;
+        const lx = lm.x * video.videoWidth, ly = lm.y * video.videoHeight;
         const worldPt = pixelToWorld(lx, ly, lm.z);
         if (!worldPt) return null;
         if (isNaN(worldPt[2]) || Math.abs(worldPt[2]) > 1000) return null;
@@ -609,7 +632,7 @@ calibrateBtn.addEventListener('click', async function() {
   }
 });
 
-// Jump Calculation Interval
+/* --- Jump Calculation Interval --- */
 let lastZPosRaw = null;
 let lastTimeRaw = null;
 setInterval(() => {
@@ -634,7 +657,7 @@ function computeAndSendJump(landmarks) {
     }
     const lowestLandmark = getLowestBodyLandmark(landmarks);
     if (!lowestLandmark) { sendJumpHeight(0, true); return; }
-    const lx = lowestLandmark.x * canvas.width, ly = lowestLandmark.y * canvas.height;
+    const lx = lowestLandmark.x * video.videoWidth, ly = lowestLandmark.y * video.videoHeight;
     const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
     if (!worldPt || isNaN(worldPt[2])) { sendJumpHeight(0, true); return; }
     const currentZRaw = worldPt[2];
@@ -693,10 +716,10 @@ function computeAndSendJump(landmarks) {
   }
 }
 function sendJumpHeight(jumpHeight, hasTracking) {
-  // For integration: window.parent.postMessage({ type: "jumpHeight", value: jumpHeight, tracking: hasTracking }, "*");
+  // Placeholder for integration (postMessage etc.)
 }
 
-// Settings and Controls
+/* --- Settings and Controls --- */
 function applyDebugMode() {
   try {
     debugMode = debugModeCheckbox.checked;
