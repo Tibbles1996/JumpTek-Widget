@@ -47,6 +47,7 @@
     #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;}
     #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 0.9rem; z-index: 20; pointer-events: none; text-align: left; display: none;}
     #rawHeightDebugDisplay.positive { color: #0f0; }
+    #debugValuesDisplay { top: 120px; max-width: 300px; white-space: pre-line; }
     #frameRateDisplay { top: 80px; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
@@ -85,6 +86,11 @@
         <input type="number" step="0.1" min="0.1" max="50" value="5.0" id="depthScaleFactor">
         <div class="desc">Adjusts how MediaPipe's relative Z-coordinate (depth) is scaled into real-world meters. This is fine-tuned automatically after initial calibration jumps.</div>
       </div>
+      <div>
+        <label for="jumpThreshold">Minimum Jump Threshold (meters):</label><br>
+        <input type="number" step="0.01" min="0.01" max="0.5" value="0.08" id="jumpThreshold">
+        <div class="desc">Minimum height difference to be considered a jump (reduces false positives from minor movements).</div>
+      </div>
       <div class="checkbox-container">
         <label for="debugMode">Enable Debug Mode (show raw data):</label>
         <input type="checkbox" id="debugMode">
@@ -104,6 +110,11 @@
   </div>
   <video id="video" autoplay playsinline style="display:none;"></video>
   <script>
+// -------- Constants for jump detection --------
+const GRAVITY = 9.81; // m/s²
+let JUMP_THRESHOLD = 0.08; // 8cm minimum to be considered a jump
+const MIN_PIXEL_TRAVEL = 15; // Minimum pixels to move to be considered a jump
+
 // -------- Robust Error Logger --------
 function jtError(area, message, errObj) {
   try {
@@ -139,6 +150,8 @@ const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
 const cameraDistanceInput = document.getElementById('cameraDistance');
 const cameraHeightInput   = document.getElementById('cameraHeight');
 const depthScaleFactorInput = document.getElementById('depthScaleFactor');
+const jumpThresholdInput = document.getElementById('jumpThreshold');
+
 let poseLoaded = false;
 let currentStream = null;
 let useFrontCamera = false;
@@ -152,15 +165,28 @@ let baselineZ = null;
 let debugMode = false;
 let videoTrack = null;
 let zoomCapabilities = null;
+
+// Original jump states for calibration
 const JUMP_STATE_ON_TRAMPOLINE = 'on_trampoline';
 const JUMP_STATE_AIRBORNE = 'airborne';
 const JUMP_STATE_DESCENDING = 'descending';
 let jumpState = JUMP_STATE_ON_TRAMPOLINE;
+
+// New jump tracking state variables
+let newJumpState = 'on_ground'; // 'on_ground', 'ascending', 'descending'
+let jumpStartTime = 0;
+let jumpEndTime = 0;
+let highestPointZ = 0;
+let jumpStartY = 0; // Pixel position for verification
+let jumpHighestY = 0;
+let lastReportedJumpHeight = 0;
+
 let takeOffTime = 0;
 let flightTime = 0;
-let highestPointZ = -Infinity;
 let lastZPos = null;
 let lastZTime = null;
+let lastZPosRaw = null;
+let lastTimeRaw = null;
 let zHistory = [];
 let velocityHistory = [];
 let currentZSmoothed = null;
@@ -235,6 +261,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
     poseLoaded = true;
+    loadSettingsFromStorage();
     startCamera().then(() => {
       drawLoop();
       poseLoop();
@@ -577,6 +604,8 @@ calibrateBtn.addEventListener('click', async function() {
     // Failsafe: allow after 6 seconds regardless
     if (stableStart && (Date.now() - stableStart) >= stableDuration || (Date.now() - forceCalibStart) > 6000) {
       baselineZ = medianZ;
+      jumpState = JUMP_STATE_ON_TRAMPOLINE; // For calibration phase
+      newJumpState = 'on_ground'; // For real jump detection
       currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
       trampolineNotice.style.color = '#0f0';
       trampolineNotice.textContent = "Step off, then perform 3 calibration jumps.";
@@ -589,8 +618,6 @@ calibrateBtn.addEventListener('click', async function() {
   checkStability();
 });
 
-let lastZPosRaw = null;
-let lastTimeRaw = null;
 setInterval(() => {
   if (
     lastPoseResults &&
@@ -603,28 +630,58 @@ setInterval(() => {
 
 function computeAndSendJump(landmarks) {
   const currentTime = performance.now();
-  if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || baselineZ === null) {
-    sendJumpHeight(0, false); return;
+  
+  // Load current jump threshold from settings
+  JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
+  
+  if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && 
+       currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || 
+       baselineZ === null) {
+    sendJumpHeight(0, false);
+    return;
   }
+  
   const lowestLandmark = getLowestBodyLandmark(landmarks);
-  if (!lowestLandmark) { sendJumpHeight(0, true); return; }
-  const lx = lowestLandmark.x * video.videoWidth, ly = lowestLandmark.y * video.videoHeight;
+  if (!lowestLandmark) { 
+    sendJumpHeight(0, true); 
+    return; 
+  }
+  
+  const lx = lowestLandmark.x * video.videoWidth;
+  const ly = lowestLandmark.y * video.videoHeight;
   const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
-  if (!worldPt || isNaN(worldPt[2])) { sendJumpHeight(0, true); return; }
+  
+  if (!worldPt || isNaN(worldPt[2])) { 
+    sendJumpHeight(0, true); 
+    return; 
+  }
+  
   const currentZRaw = worldPt[2];
+  
+  // Calculate vertical velocity
   let verticalVelocityRaw = 0;
   if (lastZPosRaw !== null && lastTimeRaw !== null) {
     const deltaTime = (currentTime - lastTimeRaw) / 1000;
     if (deltaTime > 0) verticalVelocityRaw = (currentZRaw - lastZPosRaw) / deltaTime;
   }
-  lastZPosRaw = currentZRaw; lastTimeRaw = currentTime;
+  lastZPosRaw = currentZRaw;
+  lastTimeRaw = currentTime;
+  
+  // Apply smoothing
   if (currentZSmoothed === null) currentZSmoothed = currentZRaw;
   currentZSmoothed = 0.4 * currentZRaw + 0.6 * currentZSmoothed;
-  zHistory.push(currentZSmoothed); if (zHistory.length > 6) zHistory.shift();
+  
+  // Record history
+  zHistory.push(currentZSmoothed);
+  if (zHistory.length > 6) zHistory.shift();
+  
   if (verticalVelocitySmoothed === null) verticalVelocitySmoothed = verticalVelocityRaw;
   verticalVelocitySmoothed = 0.3 * verticalVelocityRaw + 0.7 * verticalVelocitySmoothed;
-  velocityHistory.push(verticalVelocitySmoothed); if (velocityHistory.length > 6) velocityHistory.shift();
+  velocityHistory.push(verticalVelocitySmoothed);
+  if (velocityHistory.length > 6) velocityHistory.shift();
+  
   if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
+    // Keep your existing calibration phase code
     let airborne = (currentZSmoothed - baselineZ) > 0.05;
     if (jumpState === JUMP_STATE_ON_TRAMPOLINE && airborne) {
       jumpState = JUMP_STATE_AIRBORNE;
@@ -654,33 +711,120 @@ function computeAndSendJump(landmarks) {
         highestPointZ = -Infinity;
       }
     }
-    sendJumpHeight(0, true); return;
+    sendJumpHeight(0, true);
+    return;
   }
+  
   if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
-    const jumpHeight = Math.max(0, currentZSmoothed - baselineZ);
-    widgetJumpHeightDisplay.textContent = jumpHeight > 0.05
-      ? `Jump: ${jumpHeight.toFixed(2)} m` : `Jump: 0.00 m`;
-    sendJumpHeight(jumpHeight, true);
+    // NEW JUMP DETECTION LOGIC
+    const heightDifference = currentZSmoothed - baselineZ;
+    
+    switch(newJumpState) {
+      case 'on_ground':
+        // Only start a jump if we exceed the threshold AND have positive velocity
+        if (heightDifference > JUMP_THRESHOLD && verticalVelocitySmoothed > 0.3) {
+          newJumpState = 'ascending';
+          jumpStartTime = currentTime;
+          highestPointZ = currentZSmoothed;
+          jumpStartY = ly; // Store starting Y pixel position
+          
+          // Display but don't report yet
+          widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+          sendJumpHeight(0, true, 'takeoff');
+        } else {
+          // Not jumping - display 0
+          widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+          sendJumpHeight(0, true, 'ground');
+        }
+        break;
+        
+      case 'ascending':
+        // Track the highest point
+        if (currentZSmoothed > highestPointZ) {
+          highestPointZ = currentZSmoothed;
+          jumpHighestY = ly;
+        }
+        
+        // Detect if we've reached peak and started descending
+        if (verticalVelocitySmoothed < -0.2) {
+          newJumpState = 'descending';
+        }
+        
+        // Display current height but don't finalize
+        const currentHeight = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
+        widgetJumpHeightDisplay.textContent = `Jump: ${currentHeight.toFixed(2)} m`;
+        sendJumpHeight(currentHeight, true, 'ascending');
+        break;
+        
+      case 'descending':
+        // Check if we've landed
+        if (heightDifference < JUMP_THRESHOLD/2) {
+          newJumpState = 'on_ground';
+          jumpEndTime = currentTime;
+          
+          // Calculate flight time
+          const flightTime = (jumpEndTime - jumpStartTime) / 1000; // seconds
+          
+          // Calculate height using multiple methods
+          
+          // Method 1: Direct Z-coordinate difference
+          const zDiffHeight = highestPointZ - baselineZ;
+          
+          // Method 2: Flight time formula
+          const flightTimeHeight = (GRAVITY * Math.pow(flightTime, 2)) / 8;
+          
+          // Method 3: Pixel movement
+          const pixelTravel = Math.abs(jumpStartY - jumpHighestY);
+          const pixelToMeters = (baselineZ / 100) * 0.5; // Rough conversion
+          const pixelHeight = pixelTravel * pixelToMeters;
+          
+          // Weighted average with flight time weighted more heavily
+          const jumpHeight = (
+            (0.3 * zDiffHeight) + 
+            (0.5 * flightTimeHeight) + 
+            (0.2 * pixelHeight)
+          );
+          
+          // Only report if it was a real jump
+          const finalHeight = jumpHeight > JUMP_THRESHOLD ? jumpHeight : 0;
+          widgetJumpHeightDisplay.textContent = `Jump: ${finalHeight.toFixed(2)} m`;
+          sendJumpHeight(finalHeight, true, 'landed');
+          
+          // Debug info
+          if (debugMode) {
+            debugValuesDisplay.textContent = `Z-diff: ${zDiffHeight.toFixed(2)}m
+Flight: ${flightTimeHeight.toFixed(2)}m
+Pixel: ${pixelHeight.toFixed(2)}m
+Final: ${finalHeight.toFixed(2)}m`;
+          }
+        } else {
+          // Still descending, show current height
+          const currentHeight = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
+          widgetJumpHeightDisplay.textContent = `Jump: ${currentHeight.toFixed(2)} m`;
+          sendJumpHeight(currentHeight, true, 'descending');
+        }
+        break;
+    }
   }
 }
 
-function sendJumpHeight(jumpHeight, hasTracking) {
-  // Send jump height data to the parent window/Lovable UI
-  console.log('Sending jump height:', jumpHeight, 'Tracking status:', hasTracking);
+function sendJumpHeight(jumpHeight, hasTracking, jumpState = 'unknown') {
+  console.log('Sending jump height:', jumpHeight, 'Tracking status:', hasTracking, 'State:', jumpState);
   
   window.parent.postMessage({
     type: 'jumpHeight',
     data: {
       height: jumpHeight,
       hasValidTracking: hasTracking,
+      jumpState: jumpState,
       timestamp: Date.now()
     }
   }, '*');
   
-  // For debugging - log to console
+  // For debugging
   if (debugMode) {
-    rawHeightDebugDisplay.textContent = `Raw Jump Height: ${jumpHeight.toFixed(3)}m`;
-    if (jumpHeight > 0.05) {
+    rawHeightDebugDisplay.textContent = `Raw Jump Height: ${jumpHeight.toFixed(3)}m (${jumpState})`;
+    if (jumpHeight > JUMP_THRESHOLD) {
       rawHeightDebugDisplay.classList.add('positive');
     } else {
       rawHeightDebugDisplay.classList.remove('positive');
@@ -699,12 +843,17 @@ function saveSettingsToStorage() {
   localStorage.setItem("jt_cameraDistance", cameraDistanceInput.value);
   localStorage.setItem("jt_cameraHeight", cameraHeightInput.value);
   localStorage.setItem("jt_depthScaleFactor", depthScaleFactorInput.value);
+  localStorage.setItem("jt_jumpThreshold", jumpThresholdInput.value);
   localStorage.setItem("jt_debugMode", debugModeCheckbox.checked ? "1" : "0");
 }
-function loadSettingsFromStorage() {
+  function loadSettingsFromStorage() {
   if (localStorage.getItem("jt_cameraDistance")) cameraDistanceInput.value = localStorage.getItem("jt_cameraDistance");
   if (localStorage.getItem("jt_cameraHeight")) cameraHeightInput.value = localStorage.getItem("jt_cameraHeight");
   if (localStorage.getItem("jt_depthScaleFactor")) depthScaleFactorInput.value = localStorage.getItem("jt_depthScaleFactor");
+  if (localStorage.getItem("jt_jumpThreshold")) {
+    jumpThresholdInput.value = localStorage.getItem("jt_jumpThreshold");
+    JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
+  }
   debugModeCheckbox.checked = localStorage.getItem("jt_debugMode") === "1";
   applyDebugMode();
 }
@@ -734,6 +883,10 @@ window.addEventListener('DOMContentLoaded', loadSettingsFromStorage);
 cameraDistanceInput.addEventListener('input', () => { saveSettingsToStorage(); setupWorldCalibration(); });
 cameraHeightInput.addEventListener('input', () => { saveSettingsToStorage(); setupWorldCalibration(); });
 depthScaleFactorInput.addEventListener('input', () => { saveSettingsToStorage(); });
+jumpThresholdInput.addEventListener('input', () => { 
+  saveSettingsToStorage();
+  JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
+});
 
 switchCameraBtn.addEventListener('click', async () => {
   useFrontCamera = !useFrontCamera;
@@ -745,6 +898,7 @@ switchCameraBtn.addEventListener('click', async () => {
   baselineZ = null;
   calibrationJumpsData = [];
   jumpState = JUMP_STATE_ON_TRAMPOLINE;
+  newJumpState = 'on_ground';
   currentZSmoothed = null;
   verticalVelocitySmoothed = null;
   dirtyFrame = true;
@@ -759,6 +913,7 @@ const resetCalibrationForZoom = () => {
   baselineZ = null;
   calibrationJumpsData = [];
   jumpState = JUMP_STATE_ON_TRAMPOLINE;
+  newJumpState = 'on_ground';
   currentZSmoothed = null;
   verticalVelocitySmoothed = null;
   dirtyFrame = true;
