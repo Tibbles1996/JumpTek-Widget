@@ -663,8 +663,29 @@ function computeAndSendJump(landmarks) {
     sendJumpHeight(jumpHeight, true);
   }
 }
+
 function sendJumpHeight(jumpHeight, hasTracking) {
-  // Placeholder for integration (postMessage etc.)
+  // Send jump height data to the parent window/Lovable UI
+  console.log('Sending jump height:', jumpHeight, 'Tracking status:', hasTracking);
+  
+  window.parent.postMessage({
+    type: 'jumpHeight',
+    data: {
+      height: jumpHeight,
+      hasValidTracking: hasTracking,
+      timestamp: Date.now()
+    }
+  }, '*');
+  
+  // For debugging - log to console
+  if (debugMode) {
+    rawHeightDebugDisplay.textContent = `Raw Jump Height: ${jumpHeight.toFixed(3)}m`;
+    if (jumpHeight > 0.05) {
+      rawHeightDebugDisplay.classList.add('positive');
+    } else {
+      rawHeightDebugDisplay.classList.remove('positive');
+    }
+  }
 }
 
 // -- Settings and Controls --
