@@ -8,7 +8,8 @@
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; box-sizing: border-box; }
     #container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
     #canvas, #video {
-      position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
       display: block; z-index: 1; background: #000; border: none;
       pointer-events: none;
     }
@@ -103,7 +104,7 @@
   </div>
   <video id="video" autoplay playsinline style="display:none;"></video>
   <script>
-/* -------- Robust Error Logger -------- */
+// -------- Robust Error Logger --------
 function jtError(area, message, errObj) {
   try {
     let msg = `[JTERROR][${area}] ${message}`;
@@ -115,8 +116,7 @@ function jtError(area, message, errObj) {
     console.error("[JTERROR][jtError] Logging failure", e);
   }
 }
-
-// -- DOM refs and state --
+// DOM/State refs
 const switchCameraBtn  = document.getElementById('switchCameraBtn');
 const loadingIndicator = document.getElementById('loadingIndicator');
 const trampolineNotice = document.getElementById('trampolineNotice');
@@ -139,7 +139,6 @@ const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
 const cameraDistanceInput = document.getElementById('cameraDistance');
 const cameraHeightInput   = document.getElementById('cameraHeight');
 const depthScaleFactorInput = document.getElementById('depthScaleFactor');
-
 let poseLoaded = false;
 let currentStream = null;
 let useFrontCamera = false;
@@ -180,8 +179,7 @@ const { drawConnectors, drawLandmarks } = window;
 const POSE_CONNECTIONS = window.POSE_CONNECTIONS || (window.Pose && window.Pose.POSE_CONNECTIONS);
 let pose = null;
 let poseLoopActive = false;
-
-// -- Aspect ratio helpers (aspect-fill) --
+// Aspect fill helpers
 function getVideoAspectFillDrawRect(videoW, videoH, canvasW, canvasH) {
   const videoAspect = videoW / videoH;
   const canvasAspect = canvasW / canvasH;
@@ -211,8 +209,7 @@ function getVideoRelativeToCanvas(x, y, videoW, videoH, canvasW, canvasH) {
   const scaleY = videoH / drawH;
   return [(x - drawX) * scaleX, (y - drawY) * scaleY];
 }
-
-// -- Initialization & camera startup --
+// Initialization
 window.addEventListener('DOMContentLoaded', () => {
   try {
     if (typeof window.Pose !== "function") {
@@ -258,7 +255,7 @@ function resizeCanvasToScreen() {
   canvas.height = window.innerHeight;
 }
 resizeCanvasToScreen();
-
+// Camera setup
 async function startCamera() {
   loadingIndicator.style.display = 'block';
   if (currentStream) {
@@ -305,7 +302,7 @@ async function startCamera() {
     throw err;
   }
 }
-
+// Draw loop
 function drawLoop() {
   try {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -352,7 +349,6 @@ function drawLoop() {
     jtError("drawLoop", "Unhandled error in draw loop", e);
   }
 }
-
 function drawTrampolineArea(ctx, points) {
   try {
     if (!Array.isArray(points) || points.length < 1) return;
@@ -364,13 +360,11 @@ function drawTrampolineArea(ctx, points) {
     jtError("ui", "Failed to draw trampoline area", e);
   }
 }
-
 function getQuadrilateralCenter(points) {
   let cx = 0, cy = 0;
   for (const [x, y] of points) { cx += x; cy += y; }
   return [cx / points.length, cy / points.length];
 }
-    
 canvas.addEventListener('click', function(e) {
   try {
     if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
@@ -406,7 +400,7 @@ canvas.addEventListener('click', function(e) {
 });
 
 function setupWorldCalibration() {
-  // Dummy setup for pose-to-world, you can expand with your calibration math as needed.
+  // You can expand this with your calibration math as needed.
   // Here, just storing the center.
   window._JT_intrinsics = {
     fx: video.videoWidth / 2,
@@ -425,7 +419,6 @@ function updateCalibrationUI() {
     calibrateBtn.style.display = "none";
   } else {
     calibrateBtn.style.display = "block";
-    // Only enable calibrate if we have a pose
     const canEnableCalibrate =
       currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL &&
       lastPoseResults &&
@@ -543,7 +536,7 @@ calibrateBtn.addEventListener('click', async function() {
   trampolineNotice.style.color = '#ff0';
   trampolineNotice.textContent = "Calibrating... Stand still on the trampoline for 3 seconds.";
   const stableDuration = 3000, poseCheckInterval = 100;
-  let stableStart = null, lastZs = [], medianZ = null;
+  let stableStart = null, lastZs = [], medianZ = null, forceCalibStart = Date.now();
   function getCurrentZ() {
     if (!lastPoseResults || !lastPoseResults.poseLandmarks) return null;
     const lm = getLowestBodyLandmark(lastPoseResults.poseLandmarks);
@@ -561,7 +554,7 @@ calibrateBtn.addEventListener('click', async function() {
       setTimeout(checkStability, poseCheckInterval); return;
     }
     const z = getCurrentZ();
-    if (z === null) {
+    if (z === null || isNaN(z) || Math.abs(z) > 1000) {
       stableStart = null;
       trampolineNotice.textContent = "Pose detected, but couldn't read vertical position. Stand Still.";
       setTimeout(checkStability, poseCheckInterval); return;
@@ -569,9 +562,20 @@ calibrateBtn.addEventListener('click', async function() {
     lastZs.push(z); if (lastZs.length > 15) lastZs.shift();
     medianZ = lastZs.slice().sort((a, b) => a - b)[Math.floor(lastZs.length / 2)];
     const fluctuation = Math.max(...lastZs) - Math.min(...lastZs);
-    if (lastZs.length >= 10 && fluctuation > 0.03) { stableStart = null; }
-    else if (!stableStart) { stableStart = Date.now(); }
-    if (stableStart && (Date.now() - stableStart) >= stableDuration) {
+
+    // Show fluctuation for debugging
+    trampolineNotice.textContent = `Calibrating... Stand still. Fluctuation: ${fluctuation.toFixed(4)}`;
+
+    // Debug log
+    if (debugMode) console.log("Z Fluctuation:", fluctuation, "Zs:", lastZs);
+
+    // If fluctuation is too large, reset stability timer
+    if (lastZs.length >= 10 && fluctuation > 0.05) { // More tolerant threshold
+      stableStart = null;
+    } else if (!stableStart) { stableStart = Date.now(); }
+
+    // Failsafe: allow after 6 seconds regardless
+    if (stableStart && (Date.now() - stableStart) >= stableDuration || (Date.now() - forceCalibStart) > 6000) {
       baselineZ = medianZ;
       currentCalibrationPhase = CALIBRATION_PHASE_JUMP_CALIBRATION;
       trampolineNotice.style.color = '#0f0';
@@ -785,7 +789,6 @@ video.addEventListener('seeked', () => { dirtyFrame = true; });
 calibrateBtn.addEventListener('click', () => { dirtyFrame = true; });
 switchCameraBtn.addEventListener('click', () => { dirtyFrame = true; });
 
-/* ---------- END FULL JS LOGIC ---------- */
   </script>
 </body>
 </html>
