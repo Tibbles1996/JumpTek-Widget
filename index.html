@@ -10,35 +10,98 @@
     #canvas, #video {
       position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
       display: block; z-index: 1; background: #000; border: none;
-      pointer-events: none;
+      pointer-events: none; /* Make video/canvas non-interactive so clicks go through if desired */
     }
-    #canvas { z-index: 2; pointer-events: auto; }
+    #canvas { z-index: 2; pointer-events: auto; /* Canvas can receive clicks for trampoline corner selection */ }
     #video { z-index: 1; opacity: 0; }
+
+    /* --- Buttons and Controls Styling --- */
     #buttonRow {
       position: absolute;
       top: 20px;
       left: 50%;
       transform: translateX(-50%);
-      display: flex; /* Ensure the button row is always displayed */
+      display: flex; /* Ensure it's always a flex container */
       gap: 20px;
-      z-index: 20;
+      z-index: 20; /* Ensure it's above the canvas */
     }
     #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn {
-      position: static; margin: 0; padding: 10px 18px; color: #fff;
-      border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
-      display: flex; align-items: center; justify-content: center; font-weight: bold;
+      position: static; /* Let flexbox handle positioning within buttonRow/zoomControls */
+      margin: 0;
+      padding: 10px 18px;
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      font-size: 1.3rem;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
       background: #27ae60;
     }
     #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
-    #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
-    #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
-    #restartDrawBtn { display: none; position: absolute; top: 20px; left: 20px; z-index: 21; padding: 10px 22px; border-radius: 14px; background: #e74c3c; color: #fff; border: none; font-size: 1.1rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.15); cursor: pointer;}
+
+    #zoomControls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 20; /* Ensure it's above the canvas */
+    }
+    #zoomInBtn, #zoomOutBtn {
+      font-size: 2rem;
+      padding: 5px 15px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: rgba(39, 174, 96, 0.8);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
+    #restartDrawBtn {
+      display: none; /* Controlled by JS */
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 21; /* Higher than other buttons */
+      padding: 10px 22px;
+      border-radius: 14px;
+      background: #e74c3c;
+      color: #fff;
+      border: none;
+      font-size: 1.1rem;
+      font-weight: bold;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      cursor: pointer;
+    }
     #restartDrawBtn:hover { background: #b53224; }
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; display: none; pointer-events: none;}
-    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; width: auto; max-width: 90vw; text-align: center; pointer-events: none; z-index: 30;}
-    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 30px rgba(0,0,0,0.35), 0 1.5px 3px #222; padding: 24px 28px 18px 28px; z-index: 100; color: #fff; flex-direction: column; gap: 12px;}
+
+    #loadingIndicator {
+      position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+      z-index: 30; /* Ensure it's on top */
+      color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px;
+      border-radius: 12px; font-size: 1.1rem; display: none; pointer-events: none;
+    }
+    #trampolineNotice {
+      position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+      color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px;
+      border-radius: 16px; font-size: 1.2rem; width: auto; max-width: 90vw;
+      text-align: center; pointer-events: none; z-index: 30; /* Ensure it's on top */
+    }
+
+    #settingsPopover {
+      display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+      min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px;
+      box-shadow: 0 6px 30px rgba(0,0,0,0.35), 0 1.5px 3px #222; padding: 24px 28px 18px 28px;
+      z-index: 100; /* Highest z-index for popovers */
+      color: #fff; flex-direction: column; gap: 12px;
+    }
     #settingsPopover.open { display: flex; animation: popIn 0.18s; }
     @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
@@ -51,10 +114,20 @@
     #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s; align-self: flex-end;}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;}
-    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 0.9rem; z-index: 20; pointer-events: none; text-align: left; display: none;}
+
+    #widgetJumpHeightDisplay {
+      display: block; position: absolute; top: 60px; right: 30px;
+      background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px;
+      font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;
+    }
+    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px;
+      font-size: 0.9rem; z-index: 20; pointer-events: none; text-align: left;
+      display: none; /* Controlled by debugMode */
+    }
     #rawHeightDebugDisplay.positive { color: #0f0; }
-    #frameRateDisplay { top: 80px; }
+    #frameRateDisplay { top: 80px; } /* Adjust position to not overlap rawHeightDebugDisplay */
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
