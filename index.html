@@ -416,8 +416,7 @@ restartDrawBtn.addEventListener('click', () => {
   window._JT_extrinsics = null;
   window._JT_plane = null;
 });
-    /* -- Part 7: (Landmark, Math & Pixel-to-World) -- */
-/* -- Part 7: (Landmark, Math & Pixel-to-World) -- */
+  /* -- Part 7: (Landmark, Math & Pixel-to-World) -- */
 /* -- With Enhanced Debugging -- */
 
 // Debug helper
@@ -450,7 +449,7 @@ function getLowestBodyLandmark(landmarks) {
   return null;
 }
 
-// Math helpers (unchanged)
+// Math helpers
 function normalize(v) {
   const m = Math.hypot(v[0], v[1], v[2]);
   return v.map(x => x / m);
@@ -501,21 +500,18 @@ function getQuadrilateralCenter(points) {
   for (const [x, y] of points) { cx += x; cy += y; }
   return [cx / points.length, cy / points.length];
 }
-
     /* -- Part 8: (Calibration Stand-Still & Jump Calculation) -- */
-/* -- Part 8: (Calibration Stand-Still & Jump Calculation) -- */
-/* -- With Enhanced Debugging -- */
+/* -- With Enhanced Debugging and Safe pose.onResults usage -- */
 
-// Pose results debug logging
-if (typeof pose !== "undefined" && pose.onResults) {
-  pose.onResults(results => {
-    lastPoseResults = results;
-    poseSerial++;
-    jtDebug("Pose update at", Date.now(), "landmarks:", results.poseLandmarks ? results.poseLandmarks.length : 0);
-  });
-}
+// NOTE: Add jtDebug logging inside your existing pose.onResults handler, not here!
+// Example (in your main setup):
+// pose.onResults(results => {
+//   lastPoseResults = results;
+//   poseSerial++;
+//   jtDebug("Pose update at", Date.now(), "landmarks:", results.poseLandmarks ? results.poseLandmarks.length : 0);
+//   // ...rest of your code...
+// });
 
-// Calibrate Button Click Handler (with debug)
 calibrateBtn.addEventListener('click', async function() {
   if (currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL) return;
   if (!trampolinePolygon) {
@@ -602,7 +598,87 @@ calibrateBtn.addEventListener('click', async function() {
   checkStability();
 });
 
-// Function: computeAndSendJump (unchanged except for debug wrappers if wanted)
+// Function: computeAndSendJump
+let lastZPosRaw = null;
+let lastTimeRaw = null;
+function computeAndSendJump(landmarks) {
+  const currentTime = performance.now();
+  if ((currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE && currentCalibrationPhase !== CALIBRATION_PHASE_JUMP_CALIBRATION) || baselineZ === null) {
+    sendJumpHeight(0, false); return;
+  }
+  const lowestLandmark = getLowestBodyLandmark(landmarks);
+  if (!lowestLandmark) {
+    sendJumpHeight(0, true); return;
+  }
+  const lx = lowestLandmark.x * canvas.width, ly = lowestLandmark.y * canvas.height;
+  const worldPt = pixelToWorld(lx, ly, lowestLandmark.z);
+  if (!worldPt || isNaN(worldPt[2])) {
+    sendJumpHeight(0, true); return;
+  }
+  const currentZRaw = worldPt[2];
+  let verticalVelocityRaw = 0;
+  if (lastZPosRaw !== null && lastTimeRaw !== null) {
+    const deltaTime = (currentTime - lastTimeRaw) / 1000;
+    if (deltaTime > 0) verticalVelocityRaw = (currentZRaw - lastZPosRaw) / deltaTime;
+  }
+  lastZPosRaw = currentZRaw; lastTimeRaw = currentTime;
+  if (currentZSmoothed === null) currentZSmoothed = currentZRaw;
+  currentZSmoothed = 0.4 * currentZRaw + 0.6 * currentZSmoothed;
+  zHistory.push(currentZSmoothed); if (zHistory.length > 6) zHistory.shift();
+  if (verticalVelocitySmoothed === null) verticalVelocitySmoothed = verticalVelocityRaw;
+  verticalVelocitySmoothed = 0.3 * verticalVelocityRaw + 0.7 * verticalVelocitySmoothed;
+  velocityHistory.push(verticalVelocitySmoothed); if (velocityHistory.length > 6) velocityHistory.shift();
+  if (currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION) {
+    let airborne = (currentZSmoothed - baselineZ) > 0.05;
+    if (jumpState === JUMP_STATE_ON_TRAMPOLINE && airborne) {
+      jumpState = JUMP_STATE_AIRBORNE;
+      takeOffTime = currentTime;
+      highestPointZ = currentZSmoothed;
+    } else if (jumpState === JUMP_STATE_AIRBORNE) {
+      if (currentZSmoothed > highestPointZ) highestPointZ = currentZSmoothed;
+      if ((currentZSmoothed - baselineZ) < 0.03) {
+        jumpState = JUMP_STATE_DESCENDING;
+        flightTime = (currentTime - takeOffTime) / 1000;
+        calibrationJumpsData.push({
+          peakZ: highestPointZ,
+          baselineZ,
+          jumpHeight: highestPointZ - baselineZ,
+          flightTime
+        });
+        if (calibrationJumpsData.length >= REQUIRED_CALIBRATION_JUMPS) {
+          currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
+          trampolineNotice.textContent = "Calibration complete! Jump height tracking active.";
+          trampolineNotice.style.color = "#0f0";
+        } else {
+          trampolineNotice.textContent = `Jump detected! ${REQUIRED_CALIBRATION_JUMPS - calibrationJumpsData.length} more to go...`;
+        }
+        calibrateBtn.style.display = "none";
+        jumpState = JUMP_STATE_ON_TRAMPOLINE;
+        highestPointZ = -Infinity;
+        currentZSmoothed = null;
+        verticalVelocitySmoothed = null;
+      }
+    }
+    sendJumpHeight(0, true); return;
+  }
+  if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
+    const jumpHeight = Math.max(0, currentZSmoothed - baselineZ);
+    widgetJumpHeightDisplay.textContent = jumpHeight > 0.05
+      ? `Jump: ${jumpHeight.toFixed(2)} m` : `Jump: 0.00 m`;
+    sendJumpHeight(jumpHeight, true);
+  }
+}
+
+// Interval: Compute Jump Height at 30Hz
+setInterval(() => {
+  if (
+    lastPoseResults &&
+    lastPoseResults.poseLandmarks &&
+    (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE || currentCalibrationPhase === CALIBRATION_PHASE_JUMP_CALIBRATION)
+  ) {
+    computeAndSendJump(lastPoseResults.poseLandmarks);
+  }
+}, 33);
 
     /* -- Part 9: (Settings, Save/Load, Camera/Zoom Reset) -- */
 
