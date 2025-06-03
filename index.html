@@ -852,7 +852,7 @@ function computeAndSendJump(landmarks) {
       highestPointZ = currentZSmoothed;
     } else if (jumpState === JUMP_STATE_AIRBORNE) {
       if (currentZSmoothed > highestPointZ) highestPointZ = currentZSmoothed;
-      if ((currentZSmoothed - baselineZ) < 0.03) {
+      if ((currentZSmoothed - baselineZ) < 0.05) {
         jumpState = JUMP_STATE_DESCENDING;
         flightTime = (currentTime - takeOffTime) / 1000;
         calibrationJumpsData.push({
