@@ -114,9 +114,9 @@
 // PART 1: SETUP AND CONSTANTS
 //===================================
 const GRAVITY = 9.81; // m/s²
-let JUMP_THRESHOLD = 0.08; // 8cm minimum to be considered a jump
+let JUMP_THRESHOLD = 0.05; // 5cm minimum to be considered a jump
 const MIN_PIXEL_TRAVEL = 15; // Minimum pixels to move to be considered a jump
-const VELOCITY_THRESHOLD = 0.5; // Minimum velocity to start jump detection
+const VELOCITY_THRESHOLD = 0.3; // Minimum velocity to start jump detection
 const ARM_HISTORY_LENGTH = 10; // Number of frames to track arm positions
 const SAMPLING_INTERVAL = 33; // ~30fps interval for jump detection
 
@@ -376,14 +376,15 @@ function getLowestBodyLandmark(landmarks) {
   const lowerBodyIndices = [
     [27, 28], // Ankles
     [25, 26]  // Knees
+    [23, 24]  // Hips (fallback)
   ];
   
   for (let group of lowerBodyIndices) {
     let best = null, bestY = -Infinity;
     for (let idx of group) {
       const lm = landmarks[idx];
-      // Require higher confidence score
-      if (lm && (typeof lm.score === "undefined" || lm.score > 0.65)) {
+     // Lower confidence threshold
+      if (lm && (typeof lm.score === "undefined" || lm.score > 0.5)) { // Reduced from 0.65 to 0.5
         if (lm.y > bestY) {
           bestY = lm.y;
           best = lm;
@@ -860,18 +861,17 @@ function computeAndSendJump(landmarks) {
     debugValuesDisplay.style.display = "block";
   }
   
-  switch(jumpState) {
-    case 'on_ground':
-      // Only start a jump if:
-      // 1. We exceed the height threshold
-      // 2. Have positive velocity above threshold
-      // 3. No significant arm movement is detected
-      // 4. Both feet are moving consistently
-      if (heightDifference > JUMP_THRESHOLD && 
-          verticalVelocitySmoothed > VELOCITY_THRESHOLD && 
-          !armMovement &&
-          consistentFootMovement &&
-          Math.abs(jumpStartY - ly) > MIN_PIXEL_TRAVEL) {
+switch(jumpState) {
+  case 'on_ground':
+    // More lenient jump detection:
+    // 1. Lower velocity threshold
+    // 2. Only require consistent foot movement if we can see both feet
+    // 3. Don't strictly filter arm movements
+    if (heightDifference > JUMP_THRESHOLD && 
+        verticalVelocitySmoothed > VELOCITY_THRESHOLD &&
+        // Only check foot consistency if we have data for both feet
+        (lastLeftAnkleY === null || lastRightAnkleY === null || consistentFootMovement) &&
+        Math.abs(jumpStartY - ly) > MIN_PIXEL_TRAVEL) {
         
         jumpState = 'ascending';
         jumpStartTime = currentTime;
