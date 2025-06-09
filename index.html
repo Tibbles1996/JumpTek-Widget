@@ -5,8 +5,8 @@
   <title>JumpTek MediaPipe AI Tracker Widget</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-    body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; box-sizing: border-box; }
-    #container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+    body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
+    #container { position: relative; width: 100vw; height: 100vh; background: #000; }
     #canvas, #video {
       position: absolute; top: 0; left: 0;
       width: 100vw; height: 100vh;
@@ -17,7 +17,7 @@
     #video { z-index: 1; opacity: 0; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
     #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn {
-      position: static; margin: 0; padding: 10px 18px; color: #fff;
+      padding: 10px 18px; color: #fff;
       border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
       display: flex; align-items: center; justify-content: center; font-weight: bold;
@@ -27,37 +27,34 @@
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
     #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
     #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
-    #restartDrawBtn { display: none; position: absolute; top: 20px; left: 20px; z-index: 21; padding: 10px 22px; border-radius: 14px; background: #e74c3c; color: #fff; border: none; font-size: 1.1rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.15); cursor: pointer;}
+    #restartDrawBtn { display: none; position: absolute; top: 20px; left: 20px; z-index: 21; padding: 10px 22px; border-radius: 14px; background: #e74c3c; color: #fff; border: none; font-size: 1.1rem;}
     #restartDrawBtn:hover { background: #b53224; }
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; display: none; pointer-events: none;}
-    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; width: auto; max-width: 90vw; text-align: center; pointer-events: none; z-index: 30;}
-    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 30px rgba(0,0,0,0.35), 0 1.5px 3px #222; padding: 24px 28px 18px 28px; z-index: 100; color: #fff; flex-direction: column; gap: 12px;}
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem;}
+    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem;}
+    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.4); flex-direction: column; z-index: 40; padding: 24px 28px; }
     #settingsPopover.open { display: flex; animation: popIn 0.18s; }
     @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"] { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; background: #222; color: #fff;}
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"] { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; background: #222; color: #fff; }
     #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
     #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
     #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
     #settingsPopover .close-btn { position: absolute; top: 10px; right: 16px; background: none; border: none; color: #aaa; font-size: 1.35rem; cursor: pointer; padding: 0; line-height: 1;}
     #settingsPopover .close-btn:hover { color: #fff; }
-    #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s; align-self: flex-end;}
+    #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2);}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;}
-    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 0.9rem; z-index: 20; pointer-events: none; text-align: left; display: none;}
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25;}
+    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 1rem; z-index: 30;}
     #rawHeightDebugDisplay.positive { color: #0f0; }
     #debugValuesDisplay { top: 120px; max-width: 300px; white-space: pre-line; }
     #frameRateDisplay { top: 80px; }
+    #widgetJumpHeightDisplay, #debugValuesDisplay, #rawHeightDebugDisplay { visibility: visible !important; opacity: 1 !important; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
 </head>
 <body>
   <div id="container">
-    <button id="restartDrawBtn">Restart Draw</button>
+    <button id="restartDrawBtn" style="display:none;">Restart Draw</button>
     <canvas id="canvas"></canvas>
     <div id="buttonRow">
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
@@ -70,7 +67,7 @@
         <img src="https://creazilla-store.fra1.digitaloceanspaces.com/icons/3430447/ruler-icon-md.png" alt="Calibration Settings" />
       </button>
     </div>
-    <div id="settingsPopover">
+    <div id="settingsPopover" aria-modal="true" role="dialog">
       <button class="close-btn" id="closeSettingsBtn" aria-label="Close settings">&times;</button>
       <div>
         <label for="cameraDistance">Camera distance from trampoline center (meters):</label><br>
@@ -100,7 +97,7 @@
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
-    <div id="widgetJumpHeightDisplay">Jump: 0.00 m</div>
+    <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
     <div id="rawHeightDebugDisplay">Raw Z-Delta: 0.000m</div>
     <div id="debugValuesDisplay"></div>
     <div id="frameRateDisplay">FPS: 0</div>
@@ -109,21 +106,68 @@
       <button id="zoomOutBtn">-</button>
     </div>
   </div>
-  <video id="video" autoplay playsinline muted></video>
+  <video id="video" autoplay playsinline muted style="opacity:0;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:0;"></video>
+  <!-- Dependency loading -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
-//===================================
-// PART 1: SETUP AND CONSTANTS
-//===================================
-const GRAVITY = 9.81; // m/s²
-const TRAMPOLINE_WIDTH_M = 3.048;  // 10ft in meters
-const TRAMPOLINE_HEIGHT_M = 5.1816; // 17ft in meters
-let JUMP_THRESHOLD = 0.05; // 5cm minimum to be considered a jump
-const MIN_PIXEL_TRAVEL = 15;
-const VELOCITY_THRESHOLD = 0.3;
-const ARM_HISTORY_LENGTH = 10;
-const SAMPLING_INTERVAL = 33;
+    // All robust state, error handling, full UI, pose, camera, calibration, and jump detection logic
+    // ==== Robust JumpTek Widget Full Logic ====
 
-// Error logger
+/** --- Constants and State --- **/
+const TRAMPOLINE_WIDTH_M = 3.048;
+const TRAMPOLINE_HEIGHT_M = 5.1816;
+const worldCorners = [
+  [0, 0],
+  [TRAMPOLINE_WIDTH_M, 0],
+  [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M],
+  [0, TRAMPOLINE_HEIGHT_M]
+];
+const ARM_HISTORY_LENGTH = 10;
+
+let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
+let currentStream = null, useFrontCamera = false, videoTrack = null, zoomCapabilities = null, animationFrameId = null, dirtyFrame = true;
+let trampolineCorners = [], trampolinePolygon = null, trampolineCenter = null, baselineZ = null, debugMode = false;
+let homography = null;
+let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointZ = 0, lastZPosRaw = null, lastTimeRaw = null, currentZSmoothed = null, verticalVelocitySmoothed = null;
+let zHistory = [], velocityHistory = [], armPositionHistory = [];
+let frameCount = 0, lastFpsUpdateTime = 0;
+let currentCalibrationPhase = 'mark_corners';
+let baselineCalibrated = false, baselineCalibrating = false;
+let calibrationSamples = [], calibrationSampleCount = 45;
+let overlayDebug = false;
+
+// Defensive DOM access
+function getEl(id) {
+  return document.getElementById(id) || { style: {}, textContent: "", addEventListener:()=>{}, removeEventListener:()=>{} };
+}
+const canvas = getEl('canvas');
+const ctx = canvas.getContext('2d');
+const video = getEl('video');
+const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
+const switchCameraBtn = getEl('switchCameraBtn');
+const calibrateBtn = getEl('calibrateBtn');
+const settingsBtn = getEl('settingsBtn');
+const loadingIndicator = getEl('loadingIndicator');
+const trampolineNotice = getEl('trampolineNotice');
+const rawHeightDebugDisplay = getEl('rawHeightDebugDisplay');
+const debugValuesDisplay = getEl('debugValuesDisplay');
+const frameRateDisplay = getEl('frameRateDisplay');
+const zoomInBtn = getEl('zoomInBtn');
+const zoomOutBtn = getEl('zoomOutBtn');
+const restartDrawBtn = getEl('restartDrawBtn');
+const settingsPopover = getEl('settingsPopover');
+const closeSettingsBtn = getEl('closeSettingsBtn');
+const saveSettingsBtn = getEl('saveSettingsBtn');
+const cameraDistanceInput = getEl('cameraDistance');
+const cameraHeightInput = getEl('cameraHeight');
+const depthScaleFactorInput = getEl('depthScaleFactor');
+const jumpThresholdInput = getEl('jumpThreshold');
+const debugModeCheckbox = getEl('debugMode');
+
+// --- Utility functions ---
 function jtError(area, message, errObj) {
   try {
     let msg = `[JTERROR][${area}] ${message}`;
@@ -131,582 +175,190 @@ function jtError(area, message, errObj) {
       msg += (typeof errObj === "object" ? " " + (errObj.stack || JSON.stringify(errObj)) : " " + String(errObj));
     }
     console.error(msg);
-  } catch (e) {
-    console.error("[JTERROR][jtError] Logging failure", e);
-  }
+    debugValuesDisplay.textContent = msg;
+    debugValuesDisplay.style.display = "block";
+  } catch (e) { console.error("[JTERROR][jtError] Logging failure", e); }
+}
+function show(el) { if (el) el.style.display = ""; }
+function hide(el) { if (el) el.style.display = "none"; }
+function safeParseFloat(val, fallback) {
+  const n = Number.parseFloat(val);
+  return isNaN(n) ? fallback : n;
 }
 
-// DOM references
-const switchCameraBtn  = document.getElementById('switchCameraBtn');
-const loadingIndicator = document.getElementById('loadingIndicator');
-const trampolineNotice = document.getElementById('trampolineNotice');
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const calibrateBtn = document.getElementById('calibrateBtn');
-const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
-const rawHeightDebugDisplay = document.getElementById('rawHeightDebugDisplay');
-const debugValuesDisplay = document.getElementById('debugValuesDisplay');
-const frameRateDisplay = document.getElementById('frameRateDisplay');
-const zoomInBtn = document.getElementById('zoomInBtn');
-const zoomOutBtn = document.getElementById('zoomOutBtn');
-const debugModeCheckbox = document.getElementById('debugMode');
-const restartDrawBtn = document.getElementById('restartDrawBtn');
-const settingsBtn  = document.getElementById('settingsBtn');
-const settingsPopover = document.getElementById('settingsPopover');
-const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-const saveSettingsBtn  = document.getElementById('saveSettingsBtn');
-const cameraDistanceInput = document.getElementById('cameraDistance');
-const cameraHeightInput   = document.getElementById('cameraHeight');
-const depthScaleFactorInput = document.getElementById('depthScaleFactor');
-const jumpThresholdInput = document.getElementById('jumpThreshold');
-
-//===================================
-// PART 2: STATE VARIABLES & CALIBRATION FUNCTIONS
-//===================================
-
-// --- Core system state ---
-let poseLoaded = false, currentStream = null, useFrontCamera = false, videoTrack = null, zoomCapabilities = null;
-let lastPoseResults = null, animationFrameId = null, pose = null, poseLoopActive = false, dirtyFrame = true;
-
-// --- Calibration and geometry ---
-let trampolineCorners = [], trampolinePolygon = null, trampolineCenter = null, baselineZ = null, debugMode = false;
-const CALIBRATION_PHASE_MARK_CORNERS = 'mark_corners', CALIBRATION_PHASE_STAND_STILL = 'stand_still', CALIBRATION_PHASE_COMPLETE = 'complete';
-let currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
-let homography = null;
-let worldCorners = [
-  [0, 0],
-  [TRAMPOLINE_WIDTH_M, 0],
-  [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M],
-  [0, TRAMPOLINE_HEIGHT_M]
-];
-let camExtrinsics = {};
-
-// --- Jump detection state (single declaration, used by detection logic) ---
-let jumpState = 'on_ground';
-let jumpStartTime = 0;
-let jumpEndTime = 0;
-let highestPointZ = 0;
-let jumpStartY = 0;
-let jumpHighestY = 0;
-let lastReportedJumpHeight = 0;
-let lastLeftAnkleY = null;
-let lastRightAnkleY = null;
-let lastZPosRaw = null;
-let lastTimeRaw = null;
-let zHistory = [];
-let velocityHistory = [];
-let currentZSmoothed = null;
-let verticalVelocitySmoothed = null;
-let armPositionHistory = [];
-let frameCount = 0;
-let lastFpsUpdateTime = 0;
-
-//===================================
-// CALIBRATION UTILITY FUNCTIONS
-//===================================
-
-// Compute homography matrix from four video corners to four real-world corners
+// --- Homography ---
 function computeHomography(src, dst) {
-  const X = [], Y = [];
-  for (let i = 0; i < 4; i++) {
-    X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0] * src[i][0], -dst[i][0] * src[i][1]]);
-    X.push([0, 0, 0, src[i][0], src[i][1], 1, -dst[i][1] * src[i][0], -dst[i][1] * src[i][1]]);
-    Y.push(dst[i][0]);
-    Y.push(dst[i][1]);
-  }
-  const Xt = numeric.transpose(X);
-  const XtX = numeric.dot(Xt, X);
-  const XtY = numeric.dot(Xt, Y);
-  const h = numeric.solve(XtX, XtY);
-  return [
-    [h[0], h[1], h[2]],
-    [h[3], h[4], h[5]],
-    [h[6], h[7], 1]
-  ];
-}
-
-// Apply homography to a point (x, y) in video space, returns [X, Y] in real-world meters
-function applyHomography(H, x, y) {
-  const d = H[2][0] * x + H[2][1] * y + H[2][2];
-  const u = (H[0][0] * x + H[0][1] * y + H[0][2]) / d;
-  const v = (H[1][0] * x + H[1][1] * y + H[1][2]) / d;
-  return [u, v];
-}
-
-// Get the center of a quadrilateral (average of all corners)
-function getQuadrilateralCenter(points) {
-  let cx = 0, cy = 0;
-  for (const [x, y] of points) { cx += x; cy += y; }
-  return [cx / points.length, cy / points.length];
-}
-
-// Set up world calibration after 4 corners marked
-function setupWorldCalibration() {
-  if (trampolineCorners.length !== 4) {
-    jtError("calibration", "setupWorldCalibration called with less than four corners");
-    return;
-  }
-  homography = computeHomography(trampolineCorners, worldCorners);
-  trampolinePolygon = trampolineCorners.slice();
-  trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
-  // Move to the next calibration phase: stand still for baseline
-  currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-  baselineCalibrated = false;
-  baselineCalibrating = false;
-  updateCalibrationUI();
-}
-
-//===================================
-// PART 3: UTILITY FUNCTIONS
-//===================================
-// Homography
-function computeHomography(src, dst) {
-  const X = [], Y = [];
-  for (let i = 0; i < 4; i++) {
-    X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0] * src[i][0], -dst[i][0] * src[i][1]]);
-    X.push([0, 0, 0, src[i][0], src[i][1], 1, -dst[i][1] * src[i][0], -dst[i][1] * src[i][1]]);
-    Y.push(dst[i][0]);
-    Y.push(dst[i][1]);
-  }
-  const Xt = numeric.transpose(X);
-  const XtX = numeric.dot(Xt, X);
-  const XtY = numeric.dot(Xt, Y);
-  const h = numeric.solve(XtX, XtY);
-  return [
-    [h[0], h[1], h[2]],
-    [h[3], h[4], h[5]],
-    [h[6], h[7], 1]
-  ];
-}
-function applyHomography(H, x, y) {
-  const d = H[2][0] * x + H[2][1] * y + H[2][2];
-  const u = (H[0][0] * x + H[0][1] * y + H[0][2]) / d;
-  const v = (H[1][0] * x + H[1][1] * y + H[1][2]) / d;
-  return [u, v];
-}
-function getQuadrilateralCenter(points) {
-  let cx = 0, cy = 0;
-  for (const [x, y] of points) { cx += x; cy += y; }
-  return [cx / points.length, cy / points.length];
-}
-function getVideoAspectFillDrawRect(videoW, videoH, canvasW, canvasH) {
-  const videoAspect = videoW / videoH, canvasAspect = canvasW / canvasH;
-  let drawW, drawH, drawX, drawY;
-  if (videoAspect > canvasAspect) {
-    drawH = canvasH; drawW = videoW * (canvasH / videoH); drawX = (canvasW - drawW) / 2; drawY = 0;
-  } else {
-    drawW = canvasW; drawH = videoH * (canvasW / videoW); drawX = 0; drawY = (canvasH - drawH) / 2;
-  }
-  return {drawX, drawY, drawW, drawH};
-}
-function resizeCanvasToScreen() {
-  canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-}
-
-//===================================
-// PART 4: CAMERA AND VIDEO HANDLING
-//===================================
-function getCanvasRelativeToVideo(x, y, videoW, videoH, canvasW, canvasH) {
-  const {drawX, drawY, drawW, drawH} = getVideoAspectFillDrawRect(videoW, videoH, canvasW, canvasH);
-  const scaleX = drawW / videoW;
-  const scaleY = drawH / videoH;
-  return [drawX + x * scaleX, drawY + y * scaleY];
-}
-function getVideoRelativeToCanvas(x, y, videoW, videoH, canvasW, canvasH) {
-  const {drawX, drawY, drawW, drawH} = getVideoAspectFillDrawRect(videoW, videoH, canvasW, canvasH);
-  const scaleX = videoW / drawW;
-  const scaleY = videoH / drawH;
-  return [(x - drawX) * scaleX, (y - drawY) * scaleY];
-}
-
-async function startCamera() {
-  loadingIndicator.style.display = 'block';
-  if (currentStream) {
-    try { currentStream.getTracks().forEach(t => t.stop()); }
-    catch (e) { jtError("camera", "Failed to stop previous camera tracks", e); }
-    videoTrack = null;
-    zoomCapabilities = null;
-  }
   try {
+    const X = [], Y = [];
+    for (let i = 0; i < 4; i++) {
+      X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0] * src[i][0], -dst[i][0] * src[i][1]]);
+      X.push([0, 0, 0, src[i][0], src[i][1], 1, -dst[i][1] * src[i][0], -dst[i][1] * src[i][1]]);
+      Y.push(dst[i][0]); Y.push(dst[i][1]);
+    }
+    const Xt = numeric.transpose(X);
+    const XtX = numeric.dot(Xt, X);
+    const XtY = numeric.dot(Xt, Y);
+    const h = numeric.solve(XtX, XtY);
+    return [
+      [h[0], h[1], h[2]],
+      [h[3], h[4], h[5]],
+      [h[6], h[7], 1]
+    ];
+  } catch (e) {
+    jtError("homography", "Failed to compute homography", e);
+    return [[1,0,0],[0,1,0],[0,0,1]];
+  }
+}
+function applyHomography(H, x, y) {
+  try {
+    const d = H[2][0] * x + H[2][1] * y + H[2][2];
+    const u = (H[0][0] * x + H[0][1] * y + H[0][2]) / d;
+    const v = (H[1][0] * x + H[1][1] * y + H[1][2]) / d;
+    return [u, v];
+  } catch (e) {
+    jtError("homography", "Failed to apply homography", e);
+    return [x, y];
+  }
+}
+
+// --- Canvas resizing ---
+function resizeCanvasToScreen() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvasToScreen);
+
+// --- Camera/Video logic ---
+async function startCamera() {
+  show(loadingIndicator);
+  try {
+    if (currentStream) {
+      try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      videoTrack = null; zoomCapabilities = null;
+    }
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: {
-        facingMode: useFrontCamera ? 'user' : 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 60, max: 90 }
-      }
+      video: { facingMode: useFrontCamera ? 'user' : 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, max: 90 } }
     });
     currentStream = stream;
     video.srcObject = stream;
     await video.play();
-    loadingIndicator.style.display = 'none';
+    hide(loadingIndicator);
     videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack) {
-      zoomCapabilities = videoTrack.getCapabilities().zoom;
-      zoomInBtn.disabled = !zoomCapabilities;
-      zoomOutBtn.disabled = !zoomCapabilities;
-      const settings = videoTrack.getSettings();
-      if (settings.frameRate < 30) {
-        trampolineNotice.style.color = '#ff0';
-        trampolineNotice.textContent = `Warning: Low camera frame rate (${settings.frameRate.toFixed(0)} FPS). For best accuracy, use a device with 30+ FPS.`;
-      } else if (settings.frameRate < 60 && debugMode) {
-        trampolineNotice.style.color = '#fff';
-        trampolineNotice.textContent = `Camera FPS: ${settings.frameRate.toFixed(0)}. Higher FPS (e.g., 60) can improve jump detection.`;
-      }
-    }
+    zoomCapabilities = (videoTrack && videoTrack.getCapabilities && videoTrack.getCapabilities().zoom) ? videoTrack.getCapabilities().zoom : null;
+    zoomInBtn.disabled = !zoomCapabilities;
+    zoomOutBtn.disabled = !zoomCapabilities;
     resizeCanvasToScreen();
   } catch (err) {
-    loadingIndicator.style.display = 'none';
-    trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
+    hide(loadingIndicator);
+    trampolineNotice.textContent = 'Unable to access camera. Check permissions and HTTPS.';
     trampolineNotice.style.color = '#f00';
-    zoomInBtn.disabled = true;
-    zoomOutBtn.disabled = true;
+    zoomInBtn.disabled = true; zoomOutBtn.disabled = true;
     jtError("camera", "Unable to access camera", err);
     throw err;
   }
 }
 
-//===================================
-// PART 5: POSE PROCESSING (3D)
-//===================================
-async function poseLoop() {
-  if (poseLoopActive) return;
-  poseLoopActive = true;
-  while (poseLoaded) {
-    try {
-      if (video.readyState === 4) {
-        await pose.send({ image: video });
-        dirtyFrame = true;
-      }
-    } catch (e) {
-      jtError("poseLoop", "Unhandled error in pose loop", e);
-    }
-    await new Promise(r => setTimeout(r, 5));
-  }
-  poseLoopActive = false;
-}
-
-//===================================
-// PART 6: ARM/LEG UTILS (unchanged, but using 3D where needed)
-//===================================
-function getLowestBodyWorldLandmark(worldLandmarks) {
-  // Look for the lowest "y" in world coordinates (y is up in MediaPipe world)
-  let minY = Infinity, best = null;
-  for (let idx of [27, 28, 25, 26, 23, 24]) {
-    const lm = worldLandmarks[idx];
-    if (lm && (typeof lm.visibility === "undefined" || lm.visibility > 0.5)) {
-      if (lm.y < minY) {
-        minY = lm.y;
-        best = lm;
-      }
-    }
-  }
-  return best;
-}
-
-function getAnkles(worldLandmarks) {
-  const leftAnkle = worldLandmarks[27];
-  const rightAnkle = worldLandmarks[28];
-  return {
-    leftAnkle: leftAnkle && leftAnkle.visibility > 0.65 ? leftAnkle : null,
-    rightAnkle: rightAnkle && rightAnkle.visibility > 0.65 ? rightAnkle : null
-  };
-}
-function updateArmPositionHistory(worldLandmarks) {
-  if (!worldLandmarks) return;
-  const leftWrist = worldLandmarks[15];
-  const rightWrist = worldLandmarks[16];
-  const leftElbow = worldLandmarks[13];
-  const rightElbow = worldLandmarks[14];
-  const leftShoulder = worldLandmarks[11];
-  const rightShoulder = worldLandmarks[12];
-  if (!leftWrist || !rightWrist || !leftElbow || !rightElbow || 
-      !leftShoulder || !rightShoulder) return;
-  const armPositions = {
-    timestamp: Date.now(),
-    leftWristY: leftWrist.y - leftShoulder.y,
-    rightWristY: rightWrist.y - rightShoulder.y,
-    leftElbowY: leftElbow.y - leftShoulder.y,
-    rightElbowY: rightElbow.y - rightShoulder.y
-  };
-  armPositionHistory.push(armPositions);
-  if (armPositionHistory.length > ARM_HISTORY_LENGTH) {
-    armPositionHistory.shift();
-  }
-}
-function hasSignificantArmMovement(worldLandmarks) {
-  updateArmPositionHistory(worldLandmarks);
-  if (armPositionHistory.length < 5) return false;
-  const leftWrist = worldLandmarks[15];
-  const rightWrist = worldLandmarks[16];
-  const leftShoulder = worldLandmarks[11];
-  const rightShoulder = worldLandmarks[12];
-  if (!leftWrist || !rightWrist || !leftShoulder || !rightShoulder) return false;
-  const armsRaised = (leftWrist.y < leftShoulder.y) || (rightWrist.y < rightShoulder.y);
-  const oldestPosition = armPositionHistory[0];
-  const newestPosition = armPositionHistory[armPositionHistory.length - 1];
-  const timeChange = (newestPosition.timestamp - oldestPosition.timestamp) / 1000;
-  if (timeChange <= 0) return false;
-  const leftWristVelocity = Math.abs(newestPosition.leftWristY - oldestPosition.leftWristY) / timeChange;
-  const rightWristVelocity = Math.abs(newestPosition.rightWristY - oldestPosition.rightWristY) / timeChange;
-  const hasHighArmVelocity = (leftWristVelocity > 0.3 || rightWristVelocity > 0.3);
-  if (debugMode && (armsRaised && hasHighArmVelocity)) {
-    console.log("Detected arm movement:", {
-      armsRaised,
-      leftWristVelocity,
-      rightWristVelocity
-    });
-  }
-  return armsRaised && hasHighArmVelocity;
-}
-function hasBothFeetMoving(worldLandmarks) {
-  const ankles = getAnkles(worldLandmarks);
-  if (!ankles.leftAnkle || !ankles.rightAnkle) return true;
-  const leftAnkleY = ankles.leftAnkle.y;
-  const rightAnkleY = ankles.rightAnkle.y;
-  if (lastLeftAnkleY === null || lastRightAnkleY === null) {
-    lastLeftAnkleY = leftAnkleY;
-    lastRightAnkleY = rightAnkleY;
-    return true;
-  }
-  const leftAnkleMovement = Math.abs(leftAnkleY - lastLeftAnkleY);
-  const rightAnkleMovement = Math.abs(rightAnkleY - lastRightAnkleY);
-  lastLeftAnkleY = leftAnkleY;
-  lastRightAnkleY = rightAnkleY;
-  const movementDifference = Math.abs(leftAnkleMovement - rightAnkleMovement);
-  const maxMovement = Math.max(leftAnkleMovement, rightAnkleMovement);
-  if (maxMovement < 0.01) return false; // meters
-  return movementDifference < (maxMovement * 0.5);
-}
-
-//===================================
-// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION (REVISED & FIXED)
-//===================================
-
-window.addEventListener('DOMContentLoaded', () => {
-  try {
-    if (typeof window.Pose !== "function") {
-      jtError("pose", "MediaPipe Pose not loaded.");
-      throw new Error("MediaPipe Pose not loaded.");
-    }
-    pose = new window.Pose({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-    });
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      enableSegmentation: false,
-      smoothSegmentation: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-    pose.onResults(results => {
-      try {
-        lastPoseResults = results;
-        // --- FIX: Call jump detection on each result ---
-        if (results && results.poseWorldLandmarks) {
-          computeAndSendJump3D(results.poseWorldLandmarks);
-        }
-      } catch (e) {
-        jtError("pose.onResults", "Unhandled error in pose result callback", e);
-      }
-    });
-    poseLoaded = true;
-    trampolineNotice.textContent = "Tap the camera icon to start the camera.";
-    trampolineNotice.style.color = "#ff0";
-    switchCameraBtn.addEventListener('click', async () => {
-      trampolineNotice.textContent = "Starting camera...";
-      trampolineNotice.style.color = "#ff0";
-      try {
-        await startCamera();
-        drawLoop();
-        poseLoop();
-        trampolineNotice.textContent = "Camera started. Mark trampoline corners.";
-        trampolineNotice.style.color = "#0f0";
-        currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
-        updateCalibrationUI();
-      } catch (e) {
-        trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
-        trampolineNotice.style.color = "#f00";
-        jtError("camera", "Camera failed to start", e);
-      }
-    }, { once: true });
-  } catch (e) {
-    poseLoaded = false;
-    trampolineNotice.textContent = "Failed to initialize pose detection. Ensure your browser supports MediaPipe.";
+// --- Pose setup ---
+function setupPose() {
+  if (!window.Pose) {
+    jtError("pose", "MediaPipe Pose not loaded.");
+    trampolineNotice.textContent = "MediaPipe Pose not loaded. Cannot continue.";
     trampolineNotice.style.color = "#f00";
-    jtError("pose", "Pose initialization error", e);
-  }
-});
-
-//===================================
-// PART 8: FULLY AUTOMATED BASELINE CALIBRATION SYSTEM (NO BUTTON NEEDED)
-//===================================
-
-// Helper: Check if user is standing still (low velocity, both ankles detected)
-function isUserStandingStill(worldLandmarks, velocityThreshold = 0.015) {
-  const ankles = getAnkles(worldLandmarks);
-  if (!ankles.leftAnkle || !ankles.rightAnkle) return false;
-
-  // Use a short history to check for minimal movement
-  if (!window._ankleYHistory) window._ankleYHistory = [];
-  const currentAvgY = (ankles.leftAnkle.y + ankles.rightAnkle.y) / 2;
-  window._ankleYHistory.push(currentAvgY);
-  if (window._ankleYHistory.length > 15) window._ankleYHistory.shift();
-
-  if (window._ankleYHistory.length < 10) return false;
-
-  // Calculate velocity as max delta in history
-  const minY = Math.min(...window._ankleYHistory);
-  const maxY = Math.max(...window._ankleYHistory);
-  const deltaY = Math.abs(maxY - minY);
-
-  return deltaY < velocityThreshold;
-}
-
-// Automated baseline calibration logic
-let baselineCalibrated = false;
-let baselineCalibrating = false;
-
-function automatedCalibrationCheck(worldLandmarks) {
-  // Only run in 'stand_still' phase, after trampoline corners are marked and homography is set
-  if (
-    baselineCalibrated ||
-    currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL
-  ) return;
-
-  if (isUserStandingStill(worldLandmarks)) {
-    // Start calibrating if not already
-    if (!baselineCalibrating) {
-      baselineCalibrating = true;
-      trampolineNotice.textContent = "Calibrating baseline... Stand still.";
-      trampolineNotice.style.color = "#0ff";
-      window._baselineYSamples = [];
-    }
-    // Collect samples
-    const ankles = getAnkles(worldLandmarks);
-    if (ankles.leftAnkle && ankles.rightAnkle) {
-      const avgY = (ankles.leftAnkle.y + ankles.rightAnkle.y) / 2;
-      window._baselineYSamples.push(avgY);
-    }
-    // After enough samples, set baselineZ
-    if (window._baselineYSamples.length >= 20) {
-      baselineZ = window._baselineYSamples.reduce((a, b) => a + b, 0) / window._baselineYSamples.length;
-      currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-      baselineCalibrated = true;
-      trampolineNotice.textContent = "Calibration complete! Start jumping! Click 'Restart Draw' to recalibrate.";
-      trampolineNotice.style.color = "#0f0";
-      baselineCalibrating = false;
-      updateCalibrationUI();
-    }
-  } else {
-    // User isn't standing still
-    if (baselineCalibrating) {
-      baselineCalibrating = false;
-      window._baselineYSamples = [];
-      trampolineNotice.textContent = "Stand still in the trampoline center for baseline calibration.";
-      trampolineNotice.style.color = "#ff0";
-    }
-  }
-}
-
-// Modify pose.onResults to include auto-calibration step (patch this into pose setup section!)
-function onPoseResultsWithAutoCalibration(results) {
-  try {
-    lastPoseResults = results;
-    if (results && results.poseWorldLandmarks) {
-      // Only run auto-calibration if in the right phase
-      automatedCalibrationCheck(results.poseWorldLandmarks);
-      computeAndSendJump3D(results.poseWorldLandmarks);
-    }
-  } catch (e) {
-    jtError("pose.onResults", "Unhandled error in pose result callback", e);
-  }
-}
-
-// Patch (in your pose setup section) like:
-// pose.onResults(onPoseResultsWithAutoCalibration);
-
-// Update UI logic for calibration phases
-function updateCalibrationUI() {
-  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
-    calibrateBtn.style.display = 'none';
-    restartDrawBtn.style.display = 'none';
-    trampolineNotice.textContent = "Tap the four corners of the trampoline in order (1-4).";
-    trampolineNotice.style.color = "#ff0";
-  } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-    calibrateBtn.style.display = 'none';
-    restartDrawBtn.style.display = '';
-    trampolineNotice.textContent = "Stand still in the trampoline center for baseline calibration.";
-    trampolineNotice.style.color = "#ff0";
-  } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
-    calibrateBtn.style.display = 'none';
-    restartDrawBtn.style.display = '';
-    trampolineNotice.textContent = "Calibration complete! Start jumping! Click 'Restart Draw' to recalibrate.";
-    trampolineNotice.style.color = "#0f0";
-  }
-}
-
-//===================================
-// PART 9: ROBUST JUMP DETECTION LOGIC (3D) WITH sendJumpHeight() FOR HOST UI
-// Includes: sign fix, threshold checks, debug logging, safe initialization
-//===================================
-
-// ---- Host UI Communication ----
-function sendJumpHeight(value, isActive, phase) {
-  // 1. CustomEvent for in-page listeners
-  const event = new CustomEvent('jumptek:jumpHeight', {
-    detail: { value, isActive, phase }
-  });
-  window.dispatchEvent(event);
-
-  // 2. postMessage for parent frames/host UI
-  if (window.parent && window.parent !== window) {
-    window.parent.postMessage(
-      {
-        type: 'jumptek:jumpHeight',
-        value,
-        isActive,
-        phase
-      },
-      '*'
-    );
-  }
-}
-
-// ---- Jump Detection Core ----
-function computeAndSendJump3D(worldLandmarks) {
-  const currentTime = performance.now();
-  // Robust parse and default for JUMP_THRESHOLD
-  let JUMP_THRESHOLD = 0.03; // Lowered for easier testing
-  if (typeof jumpThresholdInput !== "undefined" && jumpThresholdInput && jumpThresholdInput.value) {
-    const parsed = parseFloat(jumpThresholdInput.value);
-    if (!isNaN(parsed)) JUMP_THRESHOLD = parsed;
-  }
-  const VELOCITY_THRESHOLD = 0.2;
-
-  // Check calibration and baseline
-  if (typeof currentCalibrationPhase === "undefined" || currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE || baselineZ === null) {
-    sendJumpHeight(0, false, 'uncalibrated');
-    if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
     return;
   }
+  pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    smoothSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  pose.onResults(results => {
+    try {
+      lastPoseResults = results;
+      if (results && results.poseWorldLandmarks) {
+        computeAndSendJump3D(results.poseWorldLandmarks);
+      }
+    } catch (e) {
+      jtError("pose.onResults", "Unhandled error in pose result callback", e);
+    }
+  });
+  poseLoaded = true;
+}
 
-  // Get the "lowest" body landmark (e.g., ankle). Defensive: check function exists.
-  let lowestLandmark = null;
-  if (typeof getLowestBodyWorldLandmark === "function") {
-    lowestLandmark = getLowestBodyWorldLandmark(worldLandmarks);
+// --- Main draw loop ---
+function drawLoop() {
+  if (!canvas || !ctx || !video) return;
+  if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Draw trampoline corners and polygon
+    if (trampolineCorners.length > 0) {
+      ctx.strokeStyle = "#0ff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      trampolineCorners.forEach(([x, y], idx) => {
+        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
+      });
+      ctx.closePath();
+      ctx.stroke();
+    }
+    // Draw calibration polygon
+    if (trampolinePolygon) {
+      ctx.strokeStyle = "#0f0";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      trampolinePolygon.forEach(([x, y], idx) => {
+        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+    }
+    // Draw pose skeleton
+    if (lastPoseResults && lastPoseResults.poseLandmarks) {
+      drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
+      drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
+    }
+    // Debug overlays
+    if (debugModeCheckbox.checked && lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+      ctx.save();
+      ctx.font = "18px monospace"; ctx.fillStyle = "#ff0";
+      let debugY = 30;
+      ctx.fillText("Jump State: " + jumpState, 10, debugY += 22);
+      ctx.fillText("BaselineZ: " + (baselineZ ?? "null"), 10, debugY += 22);
+      ctx.fillText("CurrentZ: " + (currentZSmoothed ?? "null"), 10, debugY += 22);
+      ctx.fillText("HeightDiff: " + ((baselineZ && currentZSmoothed) ? (baselineZ - currentZSmoothed).toFixed(3) : ""), 10, debugY += 22);
+      ctx.fillText("Velocity: " + (verticalVelocitySmoothed ?? "null"), 10, debugY += 22);
+      ctx.restore();
+    }
   }
+  requestAnimationFrame(drawLoop);
+}
+
+// --- Jump detection ---
+function computeAndSendJump3D(worldLandmarks) {
+  const currentTime = performance.now();
+  let JUMP_THRESHOLD = safeParseFloat(jumpThresholdInput.value, 0.03);
+  let VELOCITY_THRESHOLD = 0.2;
+  if (currentCalibrationPhase !== 'complete' || baselineZ === null) {
+    widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+    return;
+  }
+  // Get ankle landmarks
+  let lowestLandmark = null;
+  ['LEFT_ANKLE', 'RIGHT_ANKLE'].forEach(key => {
+    const idx = (window.POSE_LANDMARKS && window.POSE_LANDMARKS[key]) || (key === 'LEFT_ANKLE' ? 27 : 28);
+    const lm = worldLandmarks[idx];
+    if (lm && (!lowestLandmark || lm.y < lowestLandmark.y)) lowestLandmark = lm;
+  });
   if (!lowestLandmark) {
-    sendJumpHeight(0, true, 'no_landmarks');
-    if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+    widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
     return;
   }
   const currentY = lowestLandmark.y;
-
-  // Velocity calculation
   let verticalVelocityRaw = 0;
   if (lastZPosRaw !== null && lastTimeRaw !== null) {
     const deltaTime = (currentTime - lastTimeRaw) / 1000;
@@ -714,333 +366,182 @@ function computeAndSendJump3D(worldLandmarks) {
   }
   lastZPosRaw = currentY;
   lastTimeRaw = currentTime;
-
-  // Smoothing
-  if (currentZSmoothed === null || typeof currentZSmoothed === "undefined") currentZSmoothed = currentY;
+  if (currentZSmoothed === null) currentZSmoothed = currentY;
   currentZSmoothed = 0.4 * currentY + 0.6 * currentZSmoothed;
   zHistory.push(currentZSmoothed);
   if (zHistory.length > 6) zHistory.shift();
-
-  if (verticalVelocitySmoothed === null || typeof verticalVelocitySmoothed === "undefined") verticalVelocitySmoothed = verticalVelocityRaw;
+  if (verticalVelocitySmoothed === null) verticalVelocitySmoothed = verticalVelocityRaw;
   verticalVelocitySmoothed = 0.3 * verticalVelocityRaw + 0.7 * verticalVelocitySmoothed;
   velocityHistory.push(verticalVelocitySmoothed);
   if (velocityHistory.length > 6) velocityHistory.shift();
-
-  // --- SIGN FIX: baselineZ - currentZSmoothed (positive on jump up) ---
   const heightDifference = baselineZ - currentZSmoothed;
-
-  // --- Robust debug logging ---
-  if (typeof debugMode !== "undefined" && debugMode) {
-    let debugInfo = `Height: ${heightDifference.toFixed(3)}m\n`;
-    debugInfo += `Velocity: ${verticalVelocitySmoothed.toFixed(2)}m/s\n`;
-    debugInfo += `Landmark Y: ${currentY.toFixed(4)}\n`;
-    debugInfo += `baselineZ: ${baselineZ.toFixed(4)}\n`;
-    debugInfo += `State: ${jumpState}\n`;
-    debugInfo += `JUMP_THRESHOLD: ${JUMP_THRESHOLD}\n`;
-    debugInfo += `VELOCITY_THRESHOLD: ${VELOCITY_THRESHOLD}\n`;
-    if (typeof debugValuesDisplay !== "undefined" && debugValuesDisplay) {
-      debugValuesDisplay.textContent = debugInfo;
-      debugValuesDisplay.style.display = "block";
-    }
-    // Also log to browser console for deeper debugging
-    console.log(debugInfo);
-  }
-
-  // --- State Machine ---
   switch(jumpState) {
     case 'on_ground':
-      // Velocity negative = going up (Y decreasing), so check for negative velocity
       if (heightDifference > JUMP_THRESHOLD && verticalVelocitySmoothed < -VELOCITY_THRESHOLD) {
         jumpState = 'ascending';
         jumpStartTime = currentTime;
         highestPointZ = currentZSmoothed;
-        if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-        sendJumpHeight(0, true, 'takeoff');
+        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
       } else {
-        if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-        sendJumpHeight(0, true, 'ground');
+        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
       }
       break;
     case 'ascending':
-      // Track lowest (most negative) Y as highest point
-      if (currentZSmoothed < highestPointZ) {
-        highestPointZ = currentZSmoothed;
-      }
-      // Switch to descending if velocity becomes positive (moving down, Y increasing)
-      if (verticalVelocitySmoothed > VELOCITY_THRESHOLD) {
-        jumpState = 'descending';
-      }
-      {
-        const currentHeight = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
-        if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: ${currentHeight.toFixed(2)} m`;
-        sendJumpHeight(currentHeight, true, 'ascending');
-      }
+      if (currentZSmoothed < highestPointZ) { highestPointZ = currentZSmoothed; }
+      if (verticalVelocitySmoothed > VELOCITY_THRESHOLD) { jumpState = 'descending'; }
+      widgetJumpHeightDisplay.textContent = `Jump: ${(heightDifference > JUMP_THRESHOLD ? heightDifference : 0).toFixed(2)} m`;
       break;
     case 'descending':
-      // Landed if below threshold again
       if (heightDifference < JUMP_THRESHOLD/2) {
         jumpState = 'on_ground';
         jumpEndTime = currentTime;
-        // Final jump height: peak minus baseline
         const jumpHeight = baselineZ - highestPointZ;
-        const finalHeight = jumpHeight > JUMP_THRESHOLD ? jumpHeight : 0;
-        if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: ${finalHeight.toFixed(2)} m`;
-        sendJumpHeight(finalHeight, true, 'landed');
+        widgetJumpHeightDisplay.textContent = `Jump: ${(jumpHeight > JUMP_THRESHOLD ? jumpHeight : 0).toFixed(2)} m`;
       } else {
-        const currentHeightDesc = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
-        if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: ${currentHeightDesc.toFixed(2)} m`;
-        sendJumpHeight(currentHeightDesc, true, 'descending');
+        widgetJumpHeightDisplay.textContent = `Jump: ${(heightDifference > JUMP_THRESHOLD ? heightDifference : 0).toFixed(2)} m`;
       }
       break;
     default:
-      // Defensive: reset if state is not recognized
       jumpState = 'on_ground';
-      if (widgetJumpHeightDisplay) widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-      sendJumpHeight(0, true, 'reset');
+      widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
       break;
   }
 }
 
-//===================================
-// PART 10: DRAW LOOP & EVENTS (FULLY FIXED & ROBUST)
-//===================================
-
-// --- Robust Draw Loop ---
-function drawLoop() {
-  // Defensive: Only draw if video is ready and dimensions are set
-  if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-    // Fit video to canvas with aspect ratio
-    const {drawX, drawY, drawW, drawH} = getVideoAspectFillDrawRect(
-      video.videoWidth, video.videoHeight, canvas.width, canvas.height
-    );
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, drawX, drawY, drawW, drawH);
-
-    // --- Draw Overlays: Trampoline Corners/Polygon ---
-    if (trampolinePolygon && trampolinePolygon.length === 4) {
-      ctx.save();
-      ctx.strokeStyle = "#00ffff";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      for (let i = 0; i < 4; ++i) {
-        const [x, y] = trampolinePolygon[i];
-        const [cx, cy] = getCanvasRelativeToVideo(x, y, video.videoWidth, video.videoHeight, canvas.width, canvas.height);
-        if (i === 0) ctx.moveTo(cx, cy);
-        else ctx.lineTo(cx, cy);
-        // Draw corner dots
-        ctx.beginPath();
-        ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
-        ctx.fillStyle = "#ffff00";
-        ctx.fill();
-        ctx.font = "bold 18px Arial";
-        ctx.fillStyle = "#000";
-        ctx.fillText(String(i + 1), cx - 5, cy + 6); // Number corners
-      }
-      ctx.closePath();
-      ctx.stroke();
-      ctx.restore();
-    } else if (trampolineCorners.length > 0) {
-      // Draw in-progress corners as they are marked
-      ctx.save();
-      ctx.strokeStyle = "#888";
-      ctx.lineWidth = 2;
-      for (let i = 0; i < trampolineCorners.length; ++i) {
-        const [x, y] = trampolineCorners[i];
-        const [cx, cy] = getCanvasRelativeToVideo(x, y, video.videoWidth, video.videoHeight, canvas.width, canvas.height);
-        ctx.beginPath();
-        ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
-        ctx.fillStyle = "#ffff00";
-        ctx.fill();
-        ctx.font = "bold 18px Arial";
-        ctx.fillStyle = "#000";
-        ctx.fillText(String(i + 1), cx - 5, cy + 6);
-      }
-      ctx.restore();
-    }
-
-    // --- Draw Pose Landmarks (optional, if poseResults available) ---
-    if (lastPoseResults && lastPoseResults.poseLandmarks && typeof window.drawConnectors === "function" && window.POSE_CONNECTIONS) {
-      window.drawConnectors(
-        ctx,
-        lastPoseResults.poseLandmarks,
-        window.POSE_CONNECTIONS,
-        { color: "#00FF00", lineWidth: 4 }
-      );
-      // Draw 3D Z as color
-      for (let i = 0; i < lastPoseResults.poseLandmarks.length; ++i) {
-        const lm2d = lastPoseResults.poseLandmarks[i];
-        const lm3d = lastPoseResults.poseWorldLandmarks[i];
-        if (!lm2d || !lm3d) continue;
-        ctx.beginPath();
-        ctx.arc(lm2d.x * canvas.width, lm2d.y * canvas.height, 8, 0, 2 * Math.PI);
-        // Blue = closer to camera in Z (world meters), red = further
-        const zcol = Math.min(255, Math.max(0, Math.round(128 + 128 * lm3d.z)));
-        ctx.fillStyle = `rgb(${zcol},${255-zcol},255)`;
-        ctx.globalAlpha = 0.6;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-    }
-  }
-  requestAnimationFrame(drawLoop);
-}
-
-// --- Camera Initialization Guarding ---
-
-// Only allow canvas clicks for calibration if video is ready
-function isVideoReady() {
-  return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
-}
-
-// Calibration interaction: click 4 corners in correct phase and only if video is ready
+// --- Calibration ---
 canvas.addEventListener('click', function(e) {
-  try {
-    if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
-    if (!isVideoReady()) {
-      trampolineNotice.textContent = "Camera not ready. Wait for video to appear before marking corners.";
-      trampolineNotice.style.color = "#f00";
-      return;
-    }
-    if (trampolineCorners.length >= 4) return;
+  if (currentCalibrationPhase === 'mark_corners') {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    const [vx, vy] = getVideoRelativeToCanvas(x, y, video.videoWidth, video.videoHeight, canvas.width, canvas.height);
-    trampolineCorners.push([vx, vy]);
-    dirtyFrame = true;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    trampolineCorners.push([x, y]);
     if (trampolineCorners.length === 4) {
-      setupWorldCalibration();
-      // Only advance phase if homography succeeded
-      if (homography) {
-        trampolinePolygon = trampolineCorners.slice();
-        trampolineCorners = [];
-        currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
-        updateCalibrationUI();
-      }
+      homography = computeHomography(trampolineCorners, worldCorners.map(([mx,my]) => [mx * (canvas.width/TRAMPOLINE_WIDTH_M), my * (canvas.height/TRAMPOLINE_HEIGHT_M)]));
+      trampolinePolygon = trampolineCorners.slice();
+      trampolineCenter = getQuadrilateralCenter(trampolineCorners);
+      currentCalibrationPhase = 'stand_still';
+      trampolineNotice.textContent = "Stand still in the center for calibration, then press Calibrate.";
+      show(calibrateBtn); show(restartDrawBtn);
     }
-  } catch (e) {
-    trampolineNotice.textContent = "Error during calibration. Please try again.";
-    trampolineNotice.style.color = "#f00";
-    trampolineCorners = [];
-    trampolinePolygon = null;
-    dirtyFrame = true;
-    updateCalibrationUI();
-    jtError("calibration", "Unhandled error in canvas click handler", e);
   }
 });
-
-// --- Restart Draw button for recalibration ---
+calibrateBtn.addEventListener('click', function() {
+  if (currentCalibrationPhase === 'stand_still' && lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+    // Take several samples of ankle Z to average for baseline
+    calibrationSamples = [];
+    baselineCalibrating = true;
+    trampolineNotice.textContent = "Calibrating, please stand still...";
+    let count = 0;
+    let calibrationInterval = setInterval(() => {
+      if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+        const ankleIdx = (window.POSE_LANDMARKS && window.POSE_LANDMARKS.LEFT_ANKLE) || 27;
+        const lm = lastPoseResults.poseWorldLandmarks[ankleIdx];
+        if (lm && typeof lm.y === "number") calibrationSamples.push(lm.y);
+      }
+      count++;
+      if (count >= calibrationSampleCount) {
+        clearInterval(calibrationInterval);
+        if (calibrationSamples.length > 0) {
+          baselineZ = calibrationSamples.reduce((a,b) => a + b, 0) / calibrationSamples.length;
+          currentCalibrationPhase = 'complete';
+          trampolineNotice.textContent = "Calibration complete! Start jumping!";
+          hide(calibrateBtn);
+          show(restartDrawBtn);
+        } else {
+          trampolineNotice.textContent = "Calibration failed. Try again.";
+        }
+        baselineCalibrating = false;
+      }
+    }, 30);
+  }
+});
 restartDrawBtn.addEventListener('click', function() {
   trampolineCorners = [];
   trampolinePolygon = null;
   homography = null;
-  currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
+  currentCalibrationPhase = 'mark_corners';
   baselineZ = null;
   trampolineNotice.textContent = "Tap the four corners of the trampoline in order (1-4).";
-  trampolineNotice.style.color = "#ff0";
-  calibrateBtn.style.display = 'none';
-  restartDrawBtn.style.display = 'none';
-  updateCalibrationUI();
-  dirtyFrame = true;
+  hide(calibrateBtn); hide(restartDrawBtn);
 });
-
-// Show Restart button after calibration is complete
-function updateCalibrationUI() {
-  // Example: update UI based on calibration phase
-  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
-    calibrateBtn.style.display = 'none';
-    restartDrawBtn.style.display = 'none';
-  } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-    calibrateBtn.style.display = '';
-    restartDrawBtn.style.display = '';
-  } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
-    calibrateBtn.style.display = 'none';
-    restartDrawBtn.style.display = '';
-    trampolineNotice.textContent = "Calibration complete. Ready to jump! Click 'Restart Draw' to recalibrate.";
-    trampolineNotice.style.color = "#0f0";
-  }
+function getQuadrilateralCenter(points) {
+  let cx = 0, cy = 0;
+  for (const [x, y] of points) { cx += x; cy += y; }
+  return [cx / points.length, cy / points.length];
 }
 
-// --- Calibrate button handler (average baselineZ over several frames for stability) ---
-calibrateBtn.addEventListener('click', async function() {
-  if (!(lastPoseResults && lastPoseResults.poseWorldLandmarks)) {
-    trampolineNotice.textContent = "No pose detected. Stand fully on trampoline.";
-    trampolineNotice.style.color = "#f00";
-    return;
-  }
-  trampolineNotice.textContent = "Calibrating baseline... Stand still.";
-  trampolineNotice.style.color = "#0ff";
-  calibrateBtn.disabled = true;
-
-  // Collect 20 frames for baselineZ (about 0.6s at 30fps)
-  let zSamples = [];
-  for (let i = 0; i < 20; ++i) {
-    await new Promise(r => setTimeout(r, 30));
-    if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-      const ankles = getAnkles(lastPoseResults.poseWorldLandmarks);
-      let zSum = 0, count = 0;
-      if (ankles.leftAnkle) { zSum += ankles.leftAnkle.y; count++; }
-      if (ankles.rightAnkle) { zSum += ankles.rightAnkle.y; count++; }
-      if (count > 0) zSamples.push(zSum / count);
-    }
-  }
-  if (zSamples.length > 0) {
-    baselineZ = zSamples.reduce((a, b) => a + b, 0) / zSamples.length;
-    currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-    trampolineNotice.textContent = "Calibration complete! Start jumping!";
-    trampolineNotice.style.color = "#0f0";
-    calibrateBtn.style.display = 'none';
-    calibrateBtn.disabled = false;
-    updateCalibrationUI();
-  } else {
-    trampolineNotice.textContent = "Unable to detect feet. Stand fully on trampoline.";
-    trampolineNotice.style.color = "#f00";
-    calibrateBtn.disabled = false;
-  }
+// --- Settings UI ---
+settingsBtn.addEventListener('click', function() {
+  settingsPopover.classList.add('open');
+});
+closeSettingsBtn.addEventListener('click', function() {
+  settingsPopover.classList.remove('open');
+});
+saveSettingsBtn.addEventListener('click', function() {
+  settingsPopover.classList.remove('open');
+  debugMode = debugModeCheckbox.checked;
+});
+debugModeCheckbox.addEventListener('change', function() {
+  debugMode = debugModeCheckbox.checked;
+});
+zoomInBtn.addEventListener('click', function() {
+  if (!zoomCapabilities || !videoTrack) return;
+  let current = videoTrack.getSettings().zoom || zoomCapabilities.min;
+  let next = Math.min(zoomCapabilities.max, current + (zoomCapabilities.step || 0.1));
+  videoTrack.applyConstraints({ advanced: [{ zoom: next }] });
+});
+zoomOutBtn.addEventListener('click', function() {
+  if (!zoomCapabilities || !videoTrack) return;
+  let current = videoTrack.getSettings().zoom || zoomCapabilities.min;
+  let next = Math.max(zoomCapabilities.min, current - (zoomCapabilities.step || 0.1));
+  videoTrack.applyConstraints({ advanced: [{ zoom: next }] });
 });
 
-// --- Start drawLoop only after camera/video is ready ---
-async function startCameraAndDraw() {
-  await startCamera();
-  // Only start drawLoop if not already running
-  if (!window._drawLoopRunning) {
-    window._drawLoopRunning = true;
-    drawLoop();
-  }
-  poseLoop();
-}
-
-// --- Camera button event: robust, disables until camera ready ---
-switchCameraBtn.addEventListener('click', async () => {
-  if (switchCameraBtn.disabled) return;
-  switchCameraBtn.disabled = true;
+// --- Camera button and pose loop ---
+switchCameraBtn.addEventListener('click', async function() {
   trampolineNotice.textContent = "Starting camera...";
   trampolineNotice.style.color = "#ff0";
   try {
-    await startCameraAndDraw();
-    trampolineNotice.textContent = "Camera started. Mark trampoline corners in order (1-4).";
+    await startCamera();
+    drawLoop();
+    poseLoop();
+    trampolineNotice.textContent = "Camera started. Mark trampoline corners.";
     trampolineNotice.style.color = "#0f0";
-    currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
-    updateCalibrationUI();
-    switchCameraBtn.disabled = true; // Only allow once, or adjust logic if you want multi-camera support
+    currentCalibrationPhase = 'mark_corners';
   } catch (e) {
     trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
     trampolineNotice.style.color = "#f00";
     jtError("camera", "Camera failed to start", e);
-    switchCameraBtn.disabled = false;
   }
 }, { once: true });
 
-// --- Debug mode toggle ---
-debugModeCheckbox.addEventListener('change', () => {
+function poseLoop() {
+  if (poseLoopActive) return;
+  poseLoopActive = true;
+  (async function loop() {
+    while (poseLoaded) {
+      try {
+        if (video.readyState === 4) {
+          await pose.send({ image: video });
+          dirtyFrame = true;
+        }
+      } catch (e) {
+        jtError("poseLoop", "Unhandled error in pose loop", e);
+      }
+      await new Promise(r => setTimeout(r, 5));
+    }
+    poseLoopActive = false;
+  })();
+}
+
+// --- Initialization ---
+window.addEventListener('DOMContentLoaded', function() {
+  resizeCanvasToScreen();
+  setupPose();
+  trampolineNotice.textContent = "Tap the camera icon to start the camera.";
+  trampolineNotice.style.color = "#ff0";
+  hide(calibrateBtn); hide(restartDrawBtn);
   debugMode = debugModeCheckbox.checked;
 });
-
-// --- Resize canvas on window resize ---
-window.addEventListener('resize', () => {
-  resizeCanvasToScreen();
-  dirtyFrame = true;
-});
-</script>
+  </script>
 </body>
 </html>
