@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek AI Homography-Calibrated 3D Jump Height (MediaPipe)</title>
+  <title>JumpTek AI Homography-Calibrated 3D Jump Height (MediaPipe, Fixed)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; box-sizing: border-box; }
@@ -145,6 +145,11 @@
     const widgetJumpHeightDisplay = document.getElementById('widgetJumpHeightDisplay');
     const loadingIndicator = document.getElementById('loadingIndicator');
 
+    function showLoading(show, message = "Loading...") {
+      loadingIndicator.style.display = show ? 'block' : 'none';
+      loadingIndicator.textContent = message;
+    }
+
     function resizeCanvasToScreen() {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
@@ -197,7 +202,7 @@
     }
 
     async function startCamera() {
-      loadingIndicator.style.display = 'block';
+      showLoading(true, "Awaiting camera permission...");
       if (currentStream) {
         try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
       }
@@ -213,14 +218,14 @@
         currentStream = stream;
         video.srcObject = stream;
         await video.play();
-        loadingIndicator.style.display = 'none';
+        showLoading(false);
         videoTrack = stream.getVideoTracks()[0];
         zoomCapabilities = videoTrack && videoTrack.getCapabilities && videoTrack.getCapabilities().zoom;
         zoomInBtn.disabled = !zoomCapabilities;
         zoomOutBtn.disabled = !zoomCapabilities;
         resizeCanvasToScreen();
       } catch (err) {
-        loadingIndicator.style.display = 'none';
+        showLoading(false);
         trampolineNotice.textContent = 'Unable to access camera. Please check device settings and HTTPS.';
         trampolineNotice.style.color = '#f00';
         zoomInBtn.disabled = true; zoomOutBtn.disabled = true;
@@ -229,21 +234,28 @@
     }
 
     async function setupPoseLandmarker() {
-      loadingIndicator.style.display = 'block';
-      vision = await window.FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      );
-      poseLandmarker = await window.PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-assets/pose_landmarker_lite.task"
-        },
-        runningMode: "VIDEO",
-        numPoses: 1,
-        minPoseDetectionConfidence: 0.15,
-        minPosePresenceConfidence: 0.10,
-        minTrackingConfidence: 0.10
-      });
-      loadingIndicator.style.display = 'none';
+      showLoading(true, "Loading pose model...");
+      try {
+        vision = await window.FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+        poseLandmarker = await window.PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-assets/pose_landmarker_lite.task"
+          },
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.1,
+          minPosePresenceConfidence: 0.1,
+          minTrackingConfidence: 0.1
+        });
+        showLoading(false);
+      } catch (e) {
+        showLoading(false);
+        trampolineNotice.textContent = "Failed to load MediaPipe. Check your internet connection or try another browser.";
+        trampolineNotice.style.color = "#f00";
+        throw e;
+      }
     }
 
     function drawTrampolineArea(ctx, points, color = '#00f') {
@@ -305,12 +317,17 @@
       let poseInterval = 1000 / 30;
       let lastPoseRequestTime = 0;
       async function loop() {
-        if (video.readyState === 4) {
-          const now = performance.now();
-          if (now - lastPoseRequestTime > poseInterval) {
-            lastPoseRequestTime = now;
-            lastPoseResult = poseLandmarker.detectForVideo(video, now);
+        try {
+          if (video.readyState === 4 && !loadingIndicator.style.display) {
+            const now = performance.now();
+            if (now - lastPoseRequestTime > poseInterval) {
+              lastPoseRequestTime = now;
+              lastPoseResult = poseLandmarker.detectForVideo(video, now);
+            }
           }
+        } catch (e) {
+          trampolineNotice.textContent = "Pose inference error: " + e;
+          trampolineNotice.style.color = "#f00";
         }
         requestAnimationFrame(loop);
       }
@@ -322,6 +339,7 @@
         if (calibrationPhase !== "mark_corners") return;
         if (!lastPoseResult || !lastPoseResult.worldLandmarks || lastPoseResult.worldLandmarks.length === 0) {
           trampolineNotice.textContent = "Pose not detected, step into frame!";
+          trampolineNotice.style.color = "#ff0";
           return;
         }
         const rect = canvas.getBoundingClientRect();
@@ -355,7 +373,11 @@
           jumpState = 'on_ground';
           lastReportedJumpHeight = 0;
         }
-      } catch (e) { console.error("Calibration error", e); }
+      } catch (e) { 
+        trampolineNotice.textContent = "Calibration error: " + e;
+        trampolineNotice.style.color = "#f00";
+        console.error("Calibration error", e);
+      }
     });
 
     restartDrawBtn.addEventListener('click', function () {
@@ -443,6 +465,7 @@
       settingsPopover.classList.remove('open');
       settingsPopover.style.display = 'none';
       trampolineNotice.textContent = "Settings saved!";
+      trampolineNotice.style.color = "#0f0";
     });
 
     function getLowestAnkleWorld(landmarksWorld, landmarks2D) {
@@ -530,14 +553,35 @@
     }
 
     window.addEventListener('DOMContentLoaded', async () => {
-      await startCamera();
-      await setupPoseLandmarker();
-      calibrationPhase = "mark_corners";
-      trampolineNotice.textContent = "Click the four corners of the trampoline in the camera view (10x17 ft). Calibration will be automatic.";
-      trampolineNotice.style.color = "#0f0";
-      poseLoop();
-      masterLoop();
+      try {
+        await startCamera();
+        await setupPoseLandmarker();
+        calibrationPhase = "mark_corners";
+        trampolineNotice.textContent = "Click the four corners of the trampoline in the camera view (10x17 ft). Calibration will be automatic.";
+        trampolineNotice.style.color = "#0f0";
+        poseLoop();
+        masterLoop();
+      } catch (e) {
+        showLoading(false);
+        trampolineNotice.textContent = "Initialization failed: " + e;
+        trampolineNotice.style.color = "#f00";
+      }
     });
+
+    // Extra: Show error if WASM/MediaPipe fails to load after 10s
+    setTimeout(() => {
+      if (loadingIndicator.style.display === 'block') {
+        trampolineNotice.textContent = "Still loading... Check camera permission, internet, or try a different browser.";
+        trampolineNotice.style.color = "#f00";
+      }
+    }, 10000);
+
+    // Warn if running from file:// instead of http/https
+    if (location.protocol === "file:") {
+      trampolineNotice.textContent = "Please run this from a web server (not file://) for camera/MediaPipe to work.";
+      trampolineNotice.style.color = "#f00";
+      showLoading(false);
+    }
   </script>
 </body>
 </html>
