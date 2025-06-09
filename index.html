@@ -44,7 +44,7 @@
     #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s; align-self: flex-end;}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
-    #widgetJumpHeightDisplay { display: none; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;}
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 5px #000;}
     #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 0.9rem; z-index: 20; pointer-events: none; text-align: left; display: none;}
     #rawHeightDebugDisplay.positive { color: #0f0; }
     #debugValuesDisplay { top: 120px; max-width: 300px; white-space: pre-line; }
@@ -539,13 +539,36 @@ function updateCalibrationUI() {
 }
 
 //===================================
-// PART 9: JUMP DETECTION LOGIC (3D)
+// PART 9: JUMP DETECTION LOGIC (3D) WITH sendJumpHeight() FOR HOST UI
 //===================================
+
+// Sends jump height data to the host UI via CustomEvent and postMessage for maximum compatibility.
+function sendJumpHeight(value, isActive, phase) {
+  // 1. CustomEvent for in-page listeners
+  const event = new CustomEvent('jumptek:jumpHeight', {
+    detail: { value, isActive, phase }
+  });
+  window.dispatchEvent(event);
+
+  // 2. postMessage for parent frames/host UI
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage(
+      {
+        type: 'jumptek:jumpHeight',
+        value,
+        isActive,
+        phase
+      },
+      '*'
+    );
+  }
+}
+
 function computeAndSendJump3D(worldLandmarks) {
   const currentTime = performance.now();
   JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
   if (currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE || baselineZ === null) {
-    sendJumpHeight(0, false);
+    sendJumpHeight(0, false, 'uncalibrated');
     return;
   }
   const lowestLandmark = getLowestBodyWorldLandmark(worldLandmarks);
