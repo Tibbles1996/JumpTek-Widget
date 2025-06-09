@@ -162,7 +162,7 @@ const depthScaleFactorInput = document.getElementById('depthScaleFactor');
 const jumpThresholdInput = document.getElementById('jumpThreshold');
 
 //===================================
-// PART 2: STATE VARIABLES
+// PART 2: STATE VARIABLES & CALIBRATION FUNCTIONS
 //===================================
 
 // --- Core system state ---
@@ -201,6 +201,61 @@ let verticalVelocitySmoothed = null;
 let armPositionHistory = [];
 let frameCount = 0;
 let lastFpsUpdateTime = 0;
+
+//===================================
+// CALIBRATION UTILITY FUNCTIONS
+//===================================
+
+// Compute homography matrix from four video corners to four real-world corners
+function computeHomography(src, dst) {
+  const X = [], Y = [];
+  for (let i = 0; i < 4; i++) {
+    X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0] * src[i][0], -dst[i][0] * src[i][1]]);
+    X.push([0, 0, 0, src[i][0], src[i][1], 1, -dst[i][1] * src[i][0], -dst[i][1] * src[i][1]]);
+    Y.push(dst[i][0]);
+    Y.push(dst[i][1]);
+  }
+  const Xt = numeric.transpose(X);
+  const XtX = numeric.dot(Xt, X);
+  const XtY = numeric.dot(Xt, Y);
+  const h = numeric.solve(XtX, XtY);
+  return [
+    [h[0], h[1], h[2]],
+    [h[3], h[4], h[5]],
+    [h[6], h[7], 1]
+  ];
+}
+
+// Apply homography to a point (x, y) in video space, returns [X, Y] in real-world meters
+function applyHomography(H, x, y) {
+  const d = H[2][0] * x + H[2][1] * y + H[2][2];
+  const u = (H[0][0] * x + H[0][1] * y + H[0][2]) / d;
+  const v = (H[1][0] * x + H[1][1] * y + H[1][2]) / d;
+  return [u, v];
+}
+
+// Get the center of a quadrilateral (average of all corners)
+function getQuadrilateralCenter(points) {
+  let cx = 0, cy = 0;
+  for (const [x, y] of points) { cx += x; cy += y; }
+  return [cx / points.length, cy / points.length];
+}
+
+// Set up world calibration after 4 corners marked
+function setupWorldCalibration() {
+  if (trampolineCorners.length !== 4) {
+    jtError("calibration", "setupWorldCalibration called with less than four corners");
+    return;
+  }
+  homography = computeHomography(trampolineCorners, worldCorners);
+  trampolinePolygon = trampolineCorners.slice();
+  trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
+  // Move to the next calibration phase: stand still for baseline
+  currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
+  baselineCalibrated = false;
+  baselineCalibrating = false;
+  updateCalibrationUI();
+}
 
 //===================================
 // PART 3: UTILITY FUNCTIONS
