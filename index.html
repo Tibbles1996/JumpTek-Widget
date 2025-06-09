@@ -109,7 +109,7 @@
       <button id="zoomOutBtn">-</button>
     </div>
   </div>
-  <video id="video" autoplay playsinline style="display:none;"></video>
+  <video id="video" autoplay playsinline muted></video>
   <script>
 //===================================
 // PART 1: SETUP AND CONSTANTS
@@ -244,55 +244,7 @@ function getVideoAspectFillDrawRect(videoW, videoH, canvasW, canvasH) {
 function resizeCanvasToScreen() {
   canvas.width = window.innerWidth; canvas.height = window.innerHeight;
 }
-async function startCamera() {
-  loadingIndicator.style.display = 'block';
-  if (currentStream) {
-    try { currentStream.getTracks().forEach(t => t.stop()); }
-    catch (e) { jtError("camera", "Failed to stop previous camera tracks", e); }
-    videoTrack = null;
-    zoomCapabilities = null;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: useFrontCamera ? 'user' : 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 60, max: 90 }
-      }
-    });
-    currentStream = stream;
-    video.srcObject = stream;
-    await video.play();
-    loadingIndicator.style.display = 'none';
-    videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack) {
-      zoomCapabilities = videoTrack.getCapabilities().zoom;
-      zoomInBtn.disabled = !zoomCapabilities;
-      zoomOutBtn.disabled = !zoomCapabilities;
-      const settings = videoTrack.getSettings();
-      if (settings.frameRate < 30) {
-        trampolineNotice.style.color = '#ff0';
-        trampolineNotice.textContent = `Warning: Low camera frame rate (${settings.frameRate.toFixed(0)} FPS). For best accuracy, use a device with 30+ FPS.`;
-      } else if (settings.frameRate < 60 && debugMode) {
-        trampolineNotice.style.color = '#fff';
-        trampolineNotice.textContent = `Camera FPS: ${settings.frameRate.toFixed(0)}. Higher FPS (e.g., 60) can improve jump detection.`;
-      }
-    }
-    resizeCanvasToScreen();
-  } catch (err) {
-    loadingIndicator.style.display = 'none';
-    trampolineNotice.textContent = 'Unable to access camera. Please check your device settings and permissions, and make sure you are using HTTPS.';
-    trampolineNotice.style.color = '#f00';
-    zoomInBtn.disabled = true;
-    zoomOutBtn.disabled = true;
-    jtError("camera", "Unable to access camera", err);
-    throw err;
-  }
-}
 
-<script>
 //===================================
 // PART 4: CAMERA AND VIDEO HANDLING
 //===================================
@@ -471,12 +423,8 @@ function hasBothFeetMoving(worldLandmarks) {
 }
 
 //===================================
-// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION (FIXED FOR CAMERA INIT)
+// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION
 //===================================
-
-// --- MediaPipe Pose Setup for 3D Tracking ---
-// This version fixes camera init to only happen on user gesture (clicking the camera button)
-
 window.addEventListener('DOMContentLoaded', () => {
   try {
     if (typeof window.Pose !== "function") {
@@ -502,13 +450,12 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
     poseLoaded = true;
-    loadSettingsFromStorage();
+    // If you want to keep the settings, call loadSettingsFromStorage() here if it exists
+    // loadSettingsFromStorage();
 
-    // Prompt user to start camera
     trampolineNotice.textContent = "Tap the camera icon to start the camera.";
     trampolineNotice.style.color = "#ff0";
 
-    // Only start camera and pose after user gesture
     switchCameraBtn.addEventListener('click', async () => {
       trampolineNotice.textContent = "Starting camera...";
       trampolineNotice.style.color = "#ff0";
@@ -523,7 +470,7 @@ window.addEventListener('DOMContentLoaded', () => {
         trampolineNotice.style.color = "#f00";
         jtError("camera", "Camera failed to start", e);
       }
-    }, { once: true }); // Only allow once (remove { once: true } if you want to enable switching)
+    }, { once: true }); // Only allow once
 
   } catch (e) {
     poseLoaded = false;
@@ -532,8 +479,7 @@ window.addEventListener('DOMContentLoaded', () => {
     jtError("pose", "Pose initialization error", e);
   }
 });
-
-//===================================
+    //===================================
 // PART 8: CALIBRATION SYSTEM (WITH HOMOGRAPHY)
 //===================================
 function setupWorldCalibration() {
@@ -552,21 +498,6 @@ function setupWorldCalibration() {
 //===================================
 // PART 9: JUMP DETECTION LOGIC (3D)
 //===================================
-function getLowestBodyWorldLandmark(worldLandmarks) {
-  // Look for the lowest "z" in world coordinates (z is up in MediaPipe world)
-  let minY = Infinity, best = null;
-  for (let idx of [27, 28, 25, 26, 23, 24]) {
-    const lm = worldLandmarks[idx];
-    if (lm && typeof lm.visibility === "undefined" || (lm.visibility > 0.5)) {
-      if (lm.y < minY) { // Lower y is lower in world coordinates
-        minY = lm.y;
-        best = lm;
-      }
-    }
-  }
-  return best;
-}
-
 function computeAndSendJump3D(worldLandmarks) {
   const currentTime = performance.now();
   JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
