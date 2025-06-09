@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Optimized)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Auto Camera)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -384,14 +384,26 @@
       })();
     }
 
-    // --- Init ---
-    window.addEventListener('DOMContentLoaded', function() {
+    // --- Auto-start camera and pipeline on load ---
+    window.addEventListener('DOMContentLoaded', async function() {
       resizeCanvasToScreen();
       setupPose();
-      trampolineNotice.textContent = "Tap the camera icon to start the camera.";
+      trampolineNotice.textContent = "Loading camera...";
       trampolineNotice.style.color = "#ff0";
       hide(calibrateBtn); hide(restartDrawBtn);
       debugMode = debugModeCheckbox.checked;
+
+      try {
+        await startCamera();
+        drawLoop();
+        poseLoop();
+        trampolineNotice.textContent = "Camera started. Mark trampoline corners.";
+        trampolineNotice.style.color = "#0f0";
+        currentCalibrationPhase = 'mark_corners';
+      } catch (e) {
+        trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
+        trampolineNotice.style.color = "#f00";
+      }
     });
   </script>
 </body>
