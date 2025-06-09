@@ -471,10 +471,12 @@ function hasBothFeetMoving(worldLandmarks) {
 }
 
 //===================================
-// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION
+// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION (FIXED FOR CAMERA INIT)
 //===================================
 
 // --- MediaPipe Pose Setup for 3D Tracking ---
+// This version fixes camera init to only happen on user gesture (clicking the camera button)
+
 window.addEventListener('DOMContentLoaded', () => {
   try {
     if (typeof window.Pose !== "function") {
@@ -501,10 +503,28 @@ window.addEventListener('DOMContentLoaded', () => {
     });
     poseLoaded = true;
     loadSettingsFromStorage();
-    startCamera().then(() => {
-      drawLoop();
-      poseLoop();
-    }).catch(e => jtError("camera", "Camera failed to start", e));
+
+    // Prompt user to start camera
+    trampolineNotice.textContent = "Tap the camera icon to start the camera.";
+    trampolineNotice.style.color = "#ff0";
+
+    // Only start camera and pose after user gesture
+    switchCameraBtn.addEventListener('click', async () => {
+      trampolineNotice.textContent = "Starting camera...";
+      trampolineNotice.style.color = "#ff0";
+      try {
+        await startCamera();
+        drawLoop();
+        poseLoop();
+        trampolineNotice.textContent = "Camera started. Mark trampoline corners.";
+        trampolineNotice.style.color = "#0f0";
+      } catch (e) {
+        trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
+        trampolineNotice.style.color = "#f00";
+        jtError("camera", "Camera failed to start", e);
+      }
+    }, { once: true }); // Only allow once (remove { once: true } if you want to enable switching)
+
   } catch (e) {
     poseLoaded = false;
     trampolineNotice.textContent = "Failed to initialize pose detection. Ensure your browser supports MediaPipe.";
