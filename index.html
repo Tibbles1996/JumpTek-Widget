@@ -787,7 +787,7 @@ Time: ${flightTime.toFixed(3)}s`;
   }
 }
 //===================================
-// PART 10: EVENT HANDLERS AND INITIALIZATION (REVISED)
+// PART 10: EVENT HANDLERS AND INITIALIZATION (WITH SKELETON DRAW FIXES)
 //===================================
 
 // DOM event listeners
@@ -971,7 +971,26 @@ window.addEventListener('resize', () => {
   dirtyFrame = true;
 });
 
-// drawLoop: ensure camera is drawn on canvas every frame
+// --- FIX: DRAW SKELETON OVERLAY ON CANVAS --- //
+// Add this function just before drawLoop (or at the top of part 10)
+function drawPoseLandmarksAndSkeleton() {
+  if (!lastPoseResults || !lastPoseResults.poseLandmarks) return;
+  if (typeof window.drawConnectors === "function" && typeof window.POSE_CONNECTIONS !== "undefined") {
+    window.drawConnectors(
+      ctx,
+      lastPoseResults.poseLandmarks,
+      window.POSE_CONNECTIONS,
+      { color: "#00FF00", lineWidth: 4 }
+    );
+    window.drawLandmarks(
+      ctx,
+      lastPoseResults.poseLandmarks,
+      { color: "#FF0000", lineWidth: 2 }
+    );
+  }
+}
+
+// --- DRAW LOOP: CAMERA + SKELETON --- //
 function drawLoop() {
   // Draw the camera frame to the canvas
   if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
@@ -979,7 +998,10 @@ function drawLoop() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, drawX, drawY, drawW, drawH);
   }
-  // ...draw overlays, pose landmarks, trampoline guides, etc. here...
+  // Draw pose landmarks and skeleton overlay
+  drawPoseLandmarksAndSkeleton();
+
+  // ...draw overlays, trampoline guides, etc. here...
 
   requestAnimationFrame(drawLoop);
 }
