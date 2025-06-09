@@ -486,7 +486,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-    //===================================
+//===================================
 // PART 8: FULLY AUTOMATED BASELINE CALIBRATION SYSTEM (NO BUTTON NEEDED)
 //===================================
 
@@ -516,7 +516,11 @@ let baselineCalibrated = false;
 let baselineCalibrating = false;
 
 function automatedCalibrationCheck(worldLandmarks) {
-  if (baselineCalibrated || currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL) return;
+  // Only run in 'stand_still' phase, after trampoline corners are marked and homography is set
+  if (
+    baselineCalibrated ||
+    currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL
+  ) return;
 
   if (isUserStandingStill(worldLandmarks)) {
     // Start calibrating if not already
@@ -537,9 +541,8 @@ function automatedCalibrationCheck(worldLandmarks) {
       baselineZ = window._baselineYSamples.reduce((a, b) => a + b, 0) / window._baselineYSamples.length;
       currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
       baselineCalibrated = true;
-      trampolineNotice.textContent = "Calibration complete! Start jumping!";
+      trampolineNotice.textContent = "Calibration complete! Start jumping! Click 'Restart Draw' to recalibrate.";
       trampolineNotice.style.color = "#0f0";
-      calibrateBtn.style.display = 'none';
       baselineCalibrating = false;
       updateCalibrationUI();
     }
@@ -554,28 +557,30 @@ function automatedCalibrationCheck(worldLandmarks) {
   }
 }
 
-// Replace calibrateBtn click handler with a no-op/hide
-calibrateBtn.style.display = 'none'; // Hide the button entirely
-
-// Modify pose.onResults to include auto-calibration step:
-pose.onResults(results => {
+// Modify pose.onResults to include auto-calibration step (patch this into pose setup section!)
+function onPoseResultsWithAutoCalibration(results) {
   try {
     lastPoseResults = results;
     if (results && results.poseWorldLandmarks) {
-      // --- Automated calibration step ---
+      // Only run auto-calibration if in the right phase
       automatedCalibrationCheck(results.poseWorldLandmarks);
       computeAndSendJump3D(results.poseWorldLandmarks);
     }
   } catch (e) {
     jtError("pose.onResults", "Unhandled error in pose result callback", e);
   }
-});
+}
+
+// Patch (in your pose setup section) like:
+// pose.onResults(onPoseResultsWithAutoCalibration);
 
 // Update UI logic for calibration phases
 function updateCalibrationUI() {
   if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
     calibrateBtn.style.display = 'none';
     restartDrawBtn.style.display = 'none';
+    trampolineNotice.textContent = "Tap the four corners of the trampoline in order (1-4).";
+    trampolineNotice.style.color = "#ff0";
   } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
     calibrateBtn.style.display = 'none';
     restartDrawBtn.style.display = '';
