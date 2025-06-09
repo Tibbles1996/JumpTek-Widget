@@ -786,10 +786,13 @@ Time: ${flightTime.toFixed(3)}s`;
       break;
   }
 }
-    //===================================
-// PART 10: EVENT HANDLERS AND INITIALIZATION
 //===================================
+// PART 10: EVENT HANDLERS AND INITIALIZATION (REVISED)
+//===================================
+
 // DOM event listeners
+
+// Handle canvas clicks for calibration/corner selection
 canvas.addEventListener('click', function(e) {
   try {
     if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
@@ -823,6 +826,8 @@ canvas.addEventListener('click', function(e) {
     jtError("calibration", "Unhandled error in canvas click handler", e);
   }
 });
+
+// Restart calibration/corner selection
 restartDrawBtn.addEventListener('click', () => {
   trampolineCorners = [];
   trampolinePolygon = null;
@@ -833,13 +838,19 @@ restartDrawBtn.addEventListener('click', () => {
   window._JT_plane = null;
   updateCalibrationUI();
 });
+
+// Calibrate baseline
 calibrateBtn.addEventListener('click', runBaselineCalibration);
+
+// Debug mode toggle
 function applyDebugMode() {
   debugMode = debugModeCheckbox.checked;
   debugValuesDisplay.style.display = debugMode ? "block" : "none";
   rawHeightDebugDisplay.style.display = debugMode ? "block" : "none";
   frameRateDisplay.style.display = debugMode ? "block" : "none";
 }
+
+// Save/load settings
 function saveSettingsToStorage() {
   localStorage.setItem("jt_cameraDistance", cameraDistanceInput.value);
   localStorage.setItem("jt_cameraHeight", cameraHeightInput.value);
@@ -858,6 +869,8 @@ function loadSettingsFromStorage() {
   debugModeCheckbox.checked = localStorage.getItem("jt_debugMode") === "1";
   applyDebugMode();
 }
+
+// Settings popover handling
 settingsBtn.addEventListener('click', e => {
   settingsPopover.classList.add('open');
   settingsPopover.style.display = 'flex';
@@ -880,6 +893,8 @@ saveSettingsBtn.addEventListener('click', () => {
   settingsPopover.style.display = 'none';
   trampolineNotice.textContent = "Settings saved! If camera position changed, restart calibration.";
 });
+
+// Camera switch
 switchCameraBtn.addEventListener('click', async () => {
   useFrontCamera = !useFrontCamera;
   await startCamera();
@@ -898,6 +913,8 @@ switchCameraBtn.addEventListener('click', async () => {
   trampolineNotice.textContent = "Camera switched! Mark trampoline corners.";
   updateCalibrationUI();
 });
+
+// Zoom controls
 const resetCalibrationForZoom = () => {
   trampolineCorners = [];
   trampolinePolygon = null;
@@ -932,8 +949,12 @@ zoomOutBtn.addEventListener('click', async () => {
   await videoTrack.applyConstraints({ advanced: [{ zoom: newZoom }] });
   resetCalibrationForZoom();
 });
+
+// Ensure dirtyFrame on video play/seek
 video.addEventListener('play', () => { dirtyFrame = true; });
 video.addEventListener('seeked', () => { dirtyFrame = true; });
+
+// Periodic jump computation (from pose results)
 setInterval(() => {
   if (
     lastPoseResults &&
@@ -943,10 +964,27 @@ setInterval(() => {
     computeAndSendJump(lastPoseResults.poseLandmarks);
   }
 }, SAMPLING_INTERVAL);
+
+// Window resize: resize canvas and mark dirty for redraw
 window.addEventListener('resize', () => {
   resizeCanvasToScreen();
   dirtyFrame = true;
 });
+
+// drawLoop: ensure camera is drawn on canvas every frame
+function drawLoop() {
+  // Draw the camera frame to the canvas
+  if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+    const {drawX, drawY, drawW, drawH} = getVideoAspectFillDrawRect(video.videoWidth, video.videoHeight, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, drawX, drawY, drawW, drawH);
+  }
+  // ...draw overlays, pose landmarks, trampoline guides, etc. here...
+
+  requestAnimationFrame(drawLoop);
+}
+
+// Initialization: load pose, settings, camera, and start loops
 window.addEventListener('DOMContentLoaded', () => {
   try {
     if (typeof window.Pose !== "function") {
@@ -957,7 +995,7 @@ window.addEventListener('DOMContentLoaded', () => {
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
     });
     pose.setOptions({
-      modelComplexity: 0, // Use 1 for more stable tracking on strong devices, 0 for speed
+      modelComplexity: 0,
       smoothLandmarks: true,
       enableSegmentation: false,
       smoothSegmentation: false,
