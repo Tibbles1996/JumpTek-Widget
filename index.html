@@ -349,7 +349,7 @@ function drawLoop() {
   requestAnimationFrame(drawLoop);
 }
 
-// --- Jump detection ---
+// --- Jump detection (require both ankles off mat for jump) ---
 function computeAndSendJump3D(worldLandmarks) {
   const currentTime = performance.now();
   let JUMP_THRESHOLD = safeParseFloat(jumpThresholdInput.value, 0.03);
@@ -358,18 +358,25 @@ function computeAndSendJump3D(worldLandmarks) {
     widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
     return;
   }
-  // Get ankle landmarks
+  // Use both ankles
   const leftAnkle = worldLandmarks[27];
-const rightAnkle = worldLandmarks[28];
-let ankles = [];
-if (leftAnkle && typeof leftAnkle.y === "number") ankles.push(leftAnkle.y);
-if (rightAnkle && typeof rightAnkle.y === "number") ankles.push(rightAnkle.y);
-if (ankles.length === 0) {
-  widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-  return;
-}
-const currentY = ankles.reduce((a,b)=>a+b,0) / ankles.length;
+  const rightAnkle = worldLandmarks[28];
+
+  // Only proceed if both ankles are detected
+  if (!leftAnkle || !rightAnkle || typeof leftAnkle.y !== "number" || typeof rightAnkle.y !== "number") {
+    widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+    return;
+  }
+
+  // Calculate jump height for each ankle
+  const leftHeight = baselineZ - leftAnkle.y;
+  const rightHeight = baselineZ - rightAnkle.y;
+  // Minimum height of both ankles above the mat
+  const minAnkleHeight = Math.min(leftHeight, rightHeight);
+
   let verticalVelocityRaw = 0;
+  // Average Y for velocity smoothing (optional)
+  const currentY = (leftAnkle.y + rightAnkle.y) / 2;
   if (lastZPosRaw !== null && lastTimeRaw !== null) {
     const deltaTime = (currentTime - lastTimeRaw) / 1000;
     if (deltaTime > 0) verticalVelocityRaw = (currentY - lastZPosRaw) / deltaTime;
@@ -384,10 +391,10 @@ const currentY = ankles.reduce((a,b)=>a+b,0) / ankles.length;
   verticalVelocitySmoothed = 0.3 * verticalVelocityRaw + 0.7 * verticalVelocitySmoothed;
   velocityHistory.push(verticalVelocitySmoothed);
   if (velocityHistory.length > 6) velocityHistory.shift();
-  const heightDifference = baselineZ - currentZSmoothed;
+
   switch(jumpState) {
     case 'on_ground':
-      if (heightDifference > JUMP_THRESHOLD && verticalVelocitySmoothed < -VELOCITY_THRESHOLD) {
+      if (minAnkleHeight > JUMP_THRESHOLD && verticalVelocitySmoothed < -VELOCITY_THRESHOLD) {
         jumpState = 'ascending';
         jumpStartTime = currentTime;
         highestPointZ = currentZSmoothed;
@@ -399,16 +406,16 @@ const currentY = ankles.reduce((a,b)=>a+b,0) / ankles.length;
     case 'ascending':
       if (currentZSmoothed < highestPointZ) { highestPointZ = currentZSmoothed; }
       if (verticalVelocitySmoothed > VELOCITY_THRESHOLD) { jumpState = 'descending'; }
-      widgetJumpHeightDisplay.textContent = `Jump: ${(heightDifference > JUMP_THRESHOLD ? heightDifference : 0).toFixed(2)} m`;
+      widgetJumpHeightDisplay.textContent = `Jump: ${(minAnkleHeight > JUMP_THRESHOLD ? minAnkleHeight : 0).toFixed(2)} m`;
       break;
     case 'descending':
-      if (heightDifference < JUMP_THRESHOLD/2) {
+      if (minAnkleHeight < JUMP_THRESHOLD/2) {
         jumpState = 'on_ground';
         jumpEndTime = currentTime;
         const jumpHeight = baselineZ - highestPointZ;
         widgetJumpHeightDisplay.textContent = `Jump: ${(jumpHeight > JUMP_THRESHOLD ? jumpHeight : 0).toFixed(2)} m`;
       } else {
-        widgetJumpHeightDisplay.textContent = `Jump: ${(heightDifference > JUMP_THRESHOLD ? heightDifference : 0).toFixed(2)} m`;
+        widgetJumpHeightDisplay.textContent = `Jump: ${(minAnkleHeight > JUMP_THRESHOLD ? minAnkleHeight : 0).toFixed(2)} m`;
       }
       break;
     default:
@@ -441,30 +448,30 @@ calibrateBtn.addEventListener('click', function() {
     baselineCalibrating = true;
     trampolineNotice.textContent = "Calibrating, please stand still...";
     let count = 0;
-  let calibrationInterval = setInterval(() => {
-  if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-    const leftAnkle = lastPoseResults.poseWorldLandmarks[27];
-    const rightAnkle = lastPoseResults.poseWorldLandmarks[28];
-    let ankles = [];
-    if (leftAnkle && typeof leftAnkle.y === "number") ankles.push(leftAnkle.y);
-    if (rightAnkle && typeof rightAnkle.y === "number") ankles.push(rightAnkle.y);
-    if (ankles.length > 0) calibrationSamples.push(...ankles);
-  }
-  count++;
-  if (count >= calibrationSampleCount) {
-    clearInterval(calibrationInterval);
-    if (calibrationSamples.length > 0) {
-      baselineZ = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
-      currentCalibrationPhase = 'complete';
-      trampolineNotice.textContent = "Calibration complete! Start jumping!";
-      hide(calibrateBtn);
-      show(restartDrawBtn);
-    } else {
-      trampolineNotice.textContent = "Calibration failed. Try again.";
-    }
-    baselineCalibrating = false;
-  }
-}, 30);  
+    let calibrationInterval = setInterval(() => {
+      if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+        const leftAnkle = lastPoseResults.poseWorldLandmarks[27];
+        const rightAnkle = lastPoseResults.poseWorldLandmarks[28];
+        let ankles = [];
+        if (leftAnkle && typeof leftAnkle.y === "number") ankles.push(leftAnkle.y);
+        if (rightAnkle && typeof rightAnkle.y === "number") ankles.push(rightAnkle.y);
+        if (ankles.length === 2) calibrationSamples.push((ankles[0] + ankles[1]) / 2);
+      }
+      count++;
+      if (count >= calibrationSampleCount) {
+        clearInterval(calibrationInterval);
+        if (calibrationSamples.length > 0) {
+          baselineZ = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
+          currentCalibrationPhase = 'complete';
+          trampolineNotice.textContent = "Calibration complete! Start jumping!";
+          hide(calibrateBtn);
+          show(restartDrawBtn);
+        } else {
+          trampolineNotice.textContent = "Calibration failed. Try again.";
+        }
+        baselineCalibrating = false;
+      }
+    }, 30);  
   }
 });
 restartDrawBtn.addEventListener('click', function() {
