@@ -441,27 +441,30 @@ calibrateBtn.addEventListener('click', function() {
     baselineCalibrating = true;
     trampolineNotice.textContent = "Calibrating, please stand still...";
     let count = 0;
-    let calibrationInterval = setInterval(() => {
-      if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-        const ankleIdx = (window.POSE_LANDMARKS && window.POSE_LANDMARKS.LEFT_ANKLE) || 27;
-        const lm = lastPoseResults.poseWorldLandmarks[ankleIdx];
-        if (lm && typeof lm.y === "number") calibrationSamples.push(lm.y);
-      }
-      count++;
-      if (count >= calibrationSampleCount) {
-        clearInterval(calibrationInterval);
-        if (calibrationSamples.length > 0) {
-          baselineZ = calibrationSamples.reduce((a,b) => a + b, 0) / calibrationSamples.length;
-          currentCalibrationPhase = 'complete';
-          trampolineNotice.textContent = "Calibration complete! Start jumping!";
-          hide(calibrateBtn);
-          show(restartDrawBtn);
-        } else {
-          trampolineNotice.textContent = "Calibration failed. Try again.";
-        }
-        baselineCalibrating = false;
-      }
-    }, 30);
+  let calibrationInterval = setInterval(() => {
+  if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+    const leftAnkle = lastPoseResults.poseWorldLandmarks[27];
+    const rightAnkle = lastPoseResults.poseWorldLandmarks[28];
+    let ankles = [];
+    if (leftAnkle && typeof leftAnkle.y === "number") ankles.push(leftAnkle.y);
+    if (rightAnkle && typeof rightAnkle.y === "number") ankles.push(rightAnkle.y);
+    if (ankles.length > 0) calibrationSamples.push(...ankles);
+  }
+  count++;
+  if (count >= calibrationSampleCount) {
+    clearInterval(calibrationInterval);
+    if (calibrationSamples.length > 0) {
+      baselineZ = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
+      currentCalibrationPhase = 'complete';
+      trampolineNotice.textContent = "Calibration complete! Start jumping!";
+      hide(calibrateBtn);
+      show(restartDrawBtn);
+    } else {
+      trampolineNotice.textContent = "Calibration failed. Try again.";
+    }
+    baselineCalibrating = false;
+  }
+}, 30);  
   }
 });
 restartDrawBtn.addEventListener('click', function() {
