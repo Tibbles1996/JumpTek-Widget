@@ -540,6 +540,7 @@ function updateCalibrationUI() {
 
 //===================================
 // PART 9: JUMP DETECTION LOGIC (3D) WITH sendJumpHeight() FOR HOST UI
+// SIGN FIXED FOR CORRECT JUMP HEIGHT
 //===================================
 
 // Sends jump height data to the host UI via CustomEvent and postMessage for maximum compatibility.
@@ -592,7 +593,10 @@ function computeAndSendJump3D(worldLandmarks) {
   verticalVelocitySmoothed = 0.3 * verticalVelocityRaw + 0.7 * verticalVelocitySmoothed;
   velocityHistory.push(verticalVelocitySmoothed);
   if (velocityHistory.length > 6) velocityHistory.shift();
-  const heightDifference = currentZSmoothed - baselineZ;
+
+  // SIGN FIX: Use baselineZ - currentZSmoothed so jump height is positive when jumping up
+  const heightDifference = baselineZ - currentZSmoothed;
+
   if (debugMode) {
     let debugInfo = `Height: ${heightDifference.toFixed(3)}m\n`;
     debugInfo += `Velocity: ${verticalVelocitySmoothed.toFixed(2)}m/s\n`;
@@ -600,9 +604,11 @@ function computeAndSendJump3D(worldLandmarks) {
     debugValuesDisplay.textContent = debugInfo;
     debugValuesDisplay.style.display = "block";
   }
+
   switch(jumpState) {
     case 'on_ground':
-      if (heightDifference > JUMP_THRESHOLD && verticalVelocitySmoothed > VELOCITY_THRESHOLD) {
+      // Velocity is negative when going up (Y decreasing), so check for negative velocity
+      if (heightDifference > JUMP_THRESHOLD && verticalVelocitySmoothed < -VELOCITY_THRESHOLD) {
         jumpState = 'ascending';
         jumpStartTime = currentTime;
         highestPointZ = currentZSmoothed;
@@ -614,10 +620,12 @@ function computeAndSendJump3D(worldLandmarks) {
       }
       break;
     case 'ascending':
-      if (currentZSmoothed > highestPointZ) {
+      // Track lowest (most negative) Y as highest point
+      if (currentZSmoothed < highestPointZ) {
         highestPointZ = currentZSmoothed;
       }
-      if (verticalVelocitySmoothed < -0.2) {
+      // Switch to descending if velocity becomes positive (moving down, Y increasing)
+      if (verticalVelocitySmoothed > 0.2) {
         jumpState = 'descending';
       }
       const currentHeight = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
@@ -628,14 +636,15 @@ function computeAndSendJump3D(worldLandmarks) {
       if (heightDifference < JUMP_THRESHOLD/2) {
         jumpState = 'on_ground';
         jumpEndTime = currentTime;
-        const jumpHeight = highestPointZ - baselineZ;
+        // SIGN FIX: Use baselineZ - highestPointZ for positive jump height
+        const jumpHeight = baselineZ - highestPointZ;
         const finalHeight = jumpHeight > JUMP_THRESHOLD ? jumpHeight : 0;
         widgetJumpHeightDisplay.textContent = `Jump: ${finalHeight.toFixed(2)} m`;
         sendJumpHeight(finalHeight, true, 'landed');
       } else {
-        const currentHeight = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
-        widgetJumpHeightDisplay.textContent = `Jump: ${currentHeight.toFixed(2)} m`;
-        sendJumpHeight(currentHeight, true, 'descending');
+        const currentHeightDesc = heightDifference > JUMP_THRESHOLD ? heightDifference : 0;
+        widgetJumpHeightDisplay.textContent = `Jump: ${currentHeightDesc.toFixed(2)} m`;
+        sendJumpHeight(currentHeightDesc, true, 'descending');
       }
       break;
   }
