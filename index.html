@@ -164,12 +164,15 @@ const jumpThresholdInput = document.getElementById('jumpThreshold');
 //===================================
 // PART 2: STATE VARIABLES
 //===================================
+
+// --- Core system state ---
 let poseLoaded = false, currentStream = null, useFrontCamera = false, videoTrack = null, zoomCapabilities = null;
 let lastPoseResults = null, animationFrameId = null, pose = null, poseLoopActive = false, dirtyFrame = true;
+
+// --- Calibration and geometry ---
 let trampolineCorners = [], trampolinePolygon = null, trampolineCenter = null, baselineZ = null, debugMode = false;
 const CALIBRATION_PHASE_MARK_CORNERS = 'mark_corners', CALIBRATION_PHASE_STAND_STILL = 'stand_still', CALIBRATION_PHASE_COMPLETE = 'complete';
 let currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
-// 3D calibration/homography
 let homography = null;
 let worldCorners = [
   [0, 0],
@@ -178,7 +181,8 @@ let worldCorners = [
   [0, TRAMPOLINE_HEIGHT_M]
 ];
 let camExtrinsics = {};
-// Jump detection state
+
+// --- Jump detection state (single declaration, used by detection logic) ---
 let jumpState = 'on_ground';
 let jumpStartTime = 0;
 let jumpEndTime = 0;
@@ -423,7 +427,7 @@ function hasBothFeetMoving(worldLandmarks) {
 }
 
 //===================================
-// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION (REVISED)
+// PART 7: 3D POSE TRACKING, WORLD LANDMARKS, HOMOGRAPHY-BASED CALIBRATION (REVISED & FIXED)
 //===================================
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -446,6 +450,10 @@ window.addEventListener('DOMContentLoaded', () => {
     pose.onResults(results => {
       try {
         lastPoseResults = results;
+        // --- FIX: Call jump detection on each result ---
+        if (results && results.poseWorldLandmarks) {
+          computeAndSendJump3D(results.poseWorldLandmarks);
+        }
       } catch (e) {
         jtError("pose.onResults", "Unhandled error in pose result callback", e);
       }
@@ -479,7 +487,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 //===================================
-// PART 8: CALIBRATION SYSTEM (WITH HOMOGRAPHY) (REVISED)
+// PART 8: CALIBRATION SYSTEM (WITH HOMOGRAPHY) (REVISED & FIXED)
 //===================================
 
 function arePointsDistinct(points) {
@@ -538,26 +546,48 @@ function updateCalibrationUI() {
   }
 }
 
+// --- Calibrate button handler (average baselineZ over several frames for stability) ---
+calibrateBtn.addEventListener('click', async function() {
+  if (!(lastPoseResults && lastPoseResults.poseWorldLandmarks)) {
+    trampolineNotice.textContent = "No pose detected. Stand fully on trampoline.";
+    trampolineNotice.style.color = "#f00";
+    return;
+  }
+  trampolineNotice.textContent = "Calibrating baseline... Stand still.";
+  trampolineNotice.style.color = "#0ff";
+  calibrateBtn.disabled = true;
+
+  // Collect 20 frames for baselineZ (about 0.6s at 30fps)
+  let zSamples = [];
+  for (let i = 0; i < 20; ++i) {
+    await new Promise(r => setTimeout(r, 30));
+    if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+      const ankles = getAnkles(lastPoseResults.poseWorldLandmarks);
+      let zSum = 0, count = 0;
+      if (ankles.leftAnkle) { zSum += ankles.leftAnkle.y; count++; }
+      if (ankles.rightAnkle) { zSum += ankles.rightAnkle.y; count++; }
+      if (count > 0) zSamples.push(zSum / count);
+    }
+  }
+  if (zSamples.length > 0) {
+    baselineZ = zSamples.reduce((a, b) => a + b, 0) / zSamples.length;
+    currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
+    trampolineNotice.textContent = "Calibration complete! Start jumping!";
+    trampolineNotice.style.color = "#0f0";
+    calibrateBtn.style.display = 'none';
+    calibrateBtn.disabled = false;
+    updateCalibrationUI();
+  } else {
+    trampolineNotice.textContent = "Unable to detect feet. Stand fully on trampoline.";
+    trampolineNotice.style.color = "#f00";
+    calibrateBtn.disabled = false;
+  }
+});
+
 //===================================
 // PART 9: ROBUST JUMP DETECTION LOGIC (3D) WITH sendJumpHeight() FOR HOST UI
 // Includes: sign fix, threshold checks, debug logging, safe initialization
 //===================================
-
-// ---- State/History Variables (ensure these exist globally, or add here if needed) ----
-let jumpState = 'on_ground';
-let lastZPosRaw = null;
-let lastTimeRaw = null;
-let currentZSmoothed = null;
-let zHistory = [];
-let verticalVelocitySmoothed = null;
-let velocityHistory = [];
-let highestPointZ = null;
-let jumpStartTime = null;
-let jumpEndTime = null;
-
-// ---- Thresholds ----
-const VELOCITY_THRESHOLD = 0.2; // meters/second, reasonable for trampoline jump
-// JUMP_THRESHOLD is set from input in the function
 
 // ---- Host UI Communication ----
 function sendJumpHeight(value, isActive, phase) {
@@ -585,11 +615,12 @@ function sendJumpHeight(value, isActive, phase) {
 function computeAndSendJump3D(worldLandmarks) {
   const currentTime = performance.now();
   // Robust parse and default for JUMP_THRESHOLD
-  let JUMP_THRESHOLD = 0.02;
+  let JUMP_THRESHOLD = 0.03; // Lowered for easier testing
   if (typeof jumpThresholdInput !== "undefined" && jumpThresholdInput && jumpThresholdInput.value) {
     const parsed = parseFloat(jumpThresholdInput.value);
     if (!isNaN(parsed)) JUMP_THRESHOLD = parsed;
   }
+  const VELOCITY_THRESHOLD = 0.2;
 
   // Check calibration and baseline
   if (typeof currentCalibrationPhase === "undefined" || currentCalibrationPhase !== CALIBRATION_PHASE_COMPLETE || baselineZ === null) {
