@@ -294,6 +294,14 @@ function drawLoop() {
   if (!canvas || !ctx || !video) return;
   if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // --- Draw the camera feed as the background ---
+    ctx.drawImage(
+      video,
+      0, 0, video.videoWidth, video.videoHeight,
+      0, 0, canvas.width, canvas.height
+    );
+
     // Draw trampoline corners and polygon
     if (trampolineCorners.length > 0) {
       ctx.strokeStyle = "#0ff";
@@ -306,6 +314,7 @@ function drawLoop() {
       ctx.closePath();
       ctx.stroke();
     }
+
     // Draw calibration polygon
     if (trampolinePolygon) {
       ctx.strokeStyle = "#0f0";
@@ -317,11 +326,13 @@ function drawLoop() {
       ctx.closePath();
       ctx.stroke();
     }
+
     // Draw pose skeleton
     if (lastPoseResults && lastPoseResults.poseLandmarks) {
       drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
       drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
     }
+
     // Debug overlays
     if (debugModeCheckbox.checked && lastPoseResults && lastPoseResults.poseWorldLandmarks) {
       ctx.save();
@@ -348,17 +359,16 @@ function computeAndSendJump3D(worldLandmarks) {
     return;
   }
   // Get ankle landmarks
-  let lowestLandmark = null;
-  ['LEFT_ANKLE', 'RIGHT_ANKLE'].forEach(key => {
-    const idx = (window.POSE_LANDMARKS && window.POSE_LANDMARKS[key]) || (key === 'LEFT_ANKLE' ? 27 : 28);
-    const lm = worldLandmarks[idx];
-    if (lm && (!lowestLandmark || lm.y < lowestLandmark.y)) lowestLandmark = lm;
-  });
-  if (!lowestLandmark) {
-    widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-    return;
-  }
-  const currentY = lowestLandmark.y;
+  const leftAnkle = worldLandmarks[27];
+const rightAnkle = worldLandmarks[28];
+let ankles = [];
+if (leftAnkle && typeof leftAnkle.y === "number") ankles.push(leftAnkle.y);
+if (rightAnkle && typeof rightAnkle.y === "number") ankles.push(rightAnkle.y);
+if (ankles.length === 0) {
+  widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+  return;
+}
+const currentY = ankles.reduce((a,b)=>a+b,0) / ankles.length;
   let verticalVelocityRaw = 0;
   if (lastZPosRaw !== null && lastTimeRaw !== null) {
     const deltaTime = (currentTime - lastTimeRaw) / 1000;
