@@ -94,9 +94,6 @@
   </div>
   <video id="video" autoplay playsinline style="display:none;"></video>
   <script type="module">
-    //=========================
-    // STATE, CONSTANTS, DOM
-    //=========================
     const GRAVITY = 9.81;
     let JUMP_THRESHOLD = 0.08;
     let useFrontCamera = false;
@@ -110,7 +107,6 @@
     let frameCount = 0;
     let lastFpsUpdateTime = 0;
 
-    // Calibration state
     let calibrationPhase = 'mark_corners';
     let trampolineClickPoints = [];
     let trampolineCornersWorld = [
@@ -120,18 +116,14 @@
       [0, 17 * 0.3048]
     ];
     let homography = null;
-    let trampolinePlane = null; // {a, b, c, d}
-    let trampoline3DPoints = []; // world coords of corners
+    let trampolinePlane = null;
+    let trampoline3DPoints = [];
 
-    // Jump detection state
     let jumpState = 'on_ground';
-    let jumpStartTime = 0;
-    let jumpEndTime = 0;
     let baselineDist = null;
     let highestDist = null;
     let lastReportedJumpHeight = 0;
 
-    // Debug/settings
     let debugMode = false;
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
@@ -159,9 +151,6 @@
     }
     window.addEventListener('resize', resizeCanvasToScreen);
 
-    //=========================
-    // HOMOGRAPHY
-    //=========================
     function computeHomography(src, dst) {
       const X = [], Y = [];
       for (let i = 0; i < 4; i++) {
@@ -173,7 +162,7 @@
       const Xt = numeric.transpose(X);
       const XtX = numeric.dot(Xt, X);
       const XtY = numeric.dot(Xt, Y);
-      const h = numeric.solve(XtX, XtY); // h has 8 elements, h9 = 1
+      const h = numeric.solve(XtX, XtY);
       return [
         [h[0], h[1], h[2]],
         [h[3], h[4], h[5]],
@@ -187,9 +176,6 @@
       return [u, v];
     }
 
-    //=========================
-    // 3D PLANE FITTING
-    //=========================
     function fitPlaneFromPoints(points) {
       const [p0, p1, p2] = points;
       const v1 = {x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z};
@@ -210,9 +196,6 @@
              Math.sqrt(plane.a * plane.a + plane.b * plane.b + plane.c * plane.c);
     }
 
-    //=========================
-    // CAMERA SETUP
-    //=========================
     async function startCamera() {
       loadingIndicator.style.display = 'block';
       if (currentStream) {
@@ -252,20 +235,17 @@
       );
       poseLandmarker = await window.PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-assets/pose_landmarker.task"
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-assets/pose_landmarker_lite.task"
         },
         runningMode: "VIDEO",
         numPoses: 1,
-        minPoseDetectionConfidence: 0.5,
-        minPosePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        minPoseDetectionConfidence: 0.15,
+        minPosePresenceConfidence: 0.10,
+        minTrackingConfidence: 0.10
       });
       loadingIndicator.style.display = 'none';
     }
 
-    //=========================
-    // DRAWING
-    //=========================
     function drawTrampolineArea(ctx, points, color = '#00f') {
       if (!Array.isArray(points) || points.length < 1) return;
       ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 3;
@@ -291,14 +271,12 @@
           0, 0, canvas.width, canvas.height
         );
       }
-      // Draw calibration corners
       if (trampolineClickPoints.length > 0) {
         drawTrampolineArea(ctx, trampolineClickPoints.map(([x, y]) => [
           x * (canvas.width / video.videoWidth),
           y * (canvas.height / video.videoHeight)
         ]), "#00f");
       }
-      // Draw pose landmarks and mapped ankles
       if (lastPoseResult && lastPoseResult.landmarks && lastPoseResult.landmarks.length > 0) {
         const lm = lastPoseResult.landmarks[0];
         ctx.save();
@@ -310,7 +288,6 @@
         }
         ctx.restore();
       }
-      // FPS
       frameCount++;
       const now = performance.now();
       if (!lastFpsUpdateTime || now - lastFpsUpdateTime >= 500) {
@@ -323,12 +300,9 @@
       requestAnimationFrame(drawLoop);
     }
 
-    //=========================
-    // POSE INFERENCE LOOP
-    //=========================
     async function poseLoop() {
       if (!poseLandmarker) return;
-      let poseInterval = 1000 / 30; // Optimize for speed
+      let poseInterval = 1000 / 30;
       let lastPoseRequestTime = 0;
       async function loop() {
         if (video.readyState === 4) {
@@ -343,9 +317,6 @@
       loop();
     }
 
-    //=========================
-    // CALIBRATION EVENTS (3D plane fit)
-    //=========================
     canvas.addEventListener('click', function (e) {
       try {
         if (calibrationPhase !== "mark_corners") return;
@@ -357,7 +328,6 @@
         const x = (e.clientX - rect.left) * (video.videoWidth / rect.width);
         const y = (e.clientY - rect.top) * (video.videoHeight / rect.height);
         trampolineClickPoints.push([x, y]);
-        // Find the nearest world landmark to the click in 2D image space
         const lm = lastPoseResult.landmarks[0];
         const worldLm = lastPoseResult.worldLandmarks[0];
         let minDist = Infinity, minIdx = -1;
@@ -387,6 +357,7 @@
         }
       } catch (e) { console.error("Calibration error", e); }
     });
+
     restartDrawBtn.addEventListener('click', function () {
       trampolineClickPoints = [];
       homography = null;
@@ -401,9 +372,6 @@
       lastReportedJumpHeight = 0;
     });
 
-    //=========================
-    // CAMERA/ZOOM CONTROLS
-    //=========================
     switchCameraBtn.addEventListener('click', async () => {
       useFrontCamera = !useFrontCamera;
       await startCamera();
@@ -451,9 +419,6 @@
       resetCalibrationForZoom();
     });
 
-    //=========================
-    // SETTINGS PANEL
-    //=========================
     settingsBtn.addEventListener('click', e => {
       settingsPopover.classList.add('open');
       settingsPopover.style.display = 'flex';
@@ -480,9 +445,6 @@
       trampolineNotice.textContent = "Settings saved!";
     });
 
-    //=========================
-    // JUMP HEIGHT LOGIC (3D)
-    //=========================
     function getLowestAnkleWorld(landmarksWorld, landmarks2D) {
       let best = null, bestIdx = null;
       for (const idx of [27, 28]) {
@@ -496,6 +458,7 @@
       }
       return best;
     }
+
     function computeAndSendJump3D(landmarks2D, landmarksWorld) {
       if (!trampolinePlane) {
         widgetJumpHeightDisplay.style.display = "none";
@@ -507,42 +470,52 @@
         return;
       }
       const dist = pointToPlaneDistance(trampolinePlane, ankleWorld);
-      if (baselineDist === null) {
-        baselineDist = dist;
-        highestDist = dist;
-        jumpState = 'on_ground';
+
+      if (jumpState === "on_ground") {
+        if (baselineDist === null) {
+          baselineDist = dist;
+          highestDist = dist;
+        }
+        if (Math.abs(dist - baselineDist) > JUMP_THRESHOLD) {
+          jumpState = "in_air";
+          highestDist = dist;
+        } else {
+          baselineDist = dist;
+          highestDist = dist;
+        }
+      } else if (jumpState === "in_air") {
+        if (dist > highestDist) highestDist = dist;
+        if (Math.abs(dist - baselineDist) < JUMP_THRESHOLD / 2) {
+          const jumpHeight = Math.max(0, highestDist - baselineDist);
+          widgetJumpHeightDisplay.style.display = "block";
+          widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m`;
+          jumpState = "on_ground";
+          baselineDist = dist;
+          highestDist = dist;
+          lastReportedJumpHeight = jumpHeight;
+          return;
+        }
+      }
+
+      if (jumpState === "in_air") {
+        widgetJumpHeightDisplay.style.display = "block";
+        widgetJumpHeightDisplay.textContent = `Jump: ${(highestDist - baselineDist).toFixed(2)} m`;
+      } else {
         widgetJumpHeightDisplay.style.display = "block";
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-        return;
       }
-      if (dist > highestDist) highestDist = dist;
-      const jumpHeight = Math.max(0, highestDist - baselineDist);
 
       if (debugMode) {
         rawHeightDebugDisplay.style.display = "block";
-        rawHeightDebugDisplay.textContent = `Raw Jump Height: ${jumpHeight.toFixed(3)}m`;
+        rawHeightDebugDisplay.textContent = `Raw Jump Height: ${(highestDist - baselineDist).toFixed(3)}m`;
         debugValuesDisplay.style.display = "block";
-        debugValuesDisplay.textContent = `Ankle baseline: ${baselineDist.toFixed(3)}\nHighest: ${highestDist.toFixed(3)}\nCurrent: ${dist.toFixed(3)}`;
+        debugValuesDisplay.textContent = `Ankle baseline: ${baselineDist && baselineDist.toFixed ? baselineDist.toFixed(3) : 'n/a'}\nHighest: ${highestDist && highestDist.toFixed ? highestDist.toFixed(3) : 'n/a'}\nCurrent: ${dist && dist.toFixed ? dist.toFixed(3) : 'n/a'}`;
+      } else {
+        rawHeightDebugDisplay.style.display = "none";
+        debugValuesDisplay.style.display = "none";
       }
-
-      if (jumpState === "on_ground" && jumpHeight > JUMP_THRESHOLD) {
-        jumpState = "ascending";
-        jumpStartTime = performance.now();
-      }
-      if (jumpState === "ascending" && jumpHeight < JUMP_THRESHOLD) {
-        jumpState = "on_ground";
-        baselineDist = dist;
-        highestDist = dist;
-        jumpEndTime = performance.now();
-        lastReportedJumpHeight = jumpHeight;
-      }
-      widgetJumpHeightDisplay.style.display = "block";
-      widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m`;
     }
 
-    //=========================
-    // MASTER LOOP
-    //=========================
     function masterLoop() {
       drawLoop();
       if (
@@ -556,9 +529,6 @@
       requestAnimationFrame(masterLoop);
     }
 
-    //=========================
-    // INIT
-    //=========================
     window.addEventListener('DOMContentLoaded', async () => {
       await startCamera();
       await setupPoseLandmarker();
