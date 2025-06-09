@@ -619,15 +619,105 @@ function computeAndSendJump3D(worldLandmarks) {
 }
 
 //===================================
-// PART 10: DRAW LOOP & EVENTS (REVISED)
+// PART 10: DRAW LOOP & EVENTS (FULLY FIXED & ROBUST)
 //===================================
 
-// Draw loop remains unchanged...
+// --- Robust Draw Loop ---
+function drawLoop() {
+  // Defensive: Only draw if video is ready and dimensions are set
+  if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+    // Fit video to canvas with aspect ratio
+    const {drawX, drawY, drawW, drawH} = getVideoAspectFillDrawRect(
+      video.videoWidth, video.videoHeight, canvas.width, canvas.height
+    );
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, drawX, drawY, drawW, drawH);
 
-// Calibration interaction: click 4 corners
+    // --- Draw Overlays: Trampoline Corners/Polygon ---
+    if (trampolinePolygon && trampolinePolygon.length === 4) {
+      ctx.save();
+      ctx.strokeStyle = "#00ffff";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      for (let i = 0; i < 4; ++i) {
+        const [x, y] = trampolinePolygon[i];
+        const [cx, cy] = getCanvasRelativeToVideo(x, y, video.videoWidth, video.videoHeight, canvas.width, canvas.height);
+        if (i === 0) ctx.moveTo(cx, cy);
+        else ctx.lineTo(cx, cy);
+        // Draw corner dots
+        ctx.beginPath();
+        ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = "#ffff00";
+        ctx.fill();
+        ctx.font = "bold 18px Arial";
+        ctx.fillStyle = "#000";
+        ctx.fillText(String(i + 1), cx - 5, cy + 6); // Number corners
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    } else if (trampolineCorners.length > 0) {
+      // Draw in-progress corners as they are marked
+      ctx.save();
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < trampolineCorners.length; ++i) {
+        const [x, y] = trampolineCorners[i];
+        const [cx, cy] = getCanvasRelativeToVideo(x, y, video.videoWidth, video.videoHeight, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.arc(cx, cy, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = "#ffff00";
+        ctx.fill();
+        ctx.font = "bold 18px Arial";
+        ctx.fillStyle = "#000";
+        ctx.fillText(String(i + 1), cx - 5, cy + 6);
+      }
+      ctx.restore();
+    }
+
+    // --- Draw Pose Landmarks (optional, if poseResults available) ---
+    if (lastPoseResults && lastPoseResults.poseLandmarks && typeof window.drawConnectors === "function" && window.POSE_CONNECTIONS) {
+      window.drawConnectors(
+        ctx,
+        lastPoseResults.poseLandmarks,
+        window.POSE_CONNECTIONS,
+        { color: "#00FF00", lineWidth: 4 }
+      );
+      // Draw 3D Z as color
+      for (let i = 0; i < lastPoseResults.poseLandmarks.length; ++i) {
+        const lm2d = lastPoseResults.poseLandmarks[i];
+        const lm3d = lastPoseResults.poseWorldLandmarks[i];
+        if (!lm2d || !lm3d) continue;
+        ctx.beginPath();
+        ctx.arc(lm2d.x * canvas.width, lm2d.y * canvas.height, 8, 0, 2 * Math.PI);
+        // Blue = closer to camera in Z (world meters), red = further
+        const zcol = Math.min(255, Math.max(0, Math.round(128 + 128 * lm3d.z)));
+        ctx.fillStyle = `rgb(${zcol},${255-zcol},255)`;
+        ctx.globalAlpha = 0.6;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+  requestAnimationFrame(drawLoop);
+}
+
+// --- Camera Initialization Guarding ---
+
+// Only allow canvas clicks for calibration if video is ready
+function isVideoReady() {
+  return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+}
+
+// Calibration interaction: click 4 corners in correct phase and only if video is ready
 canvas.addEventListener('click', function(e) {
   try {
     if (currentCalibrationPhase !== CALIBRATION_PHASE_MARK_CORNERS) return;
+    if (!isVideoReady()) {
+      trampolineNotice.textContent = "Camera not ready. Wait for video to appear before marking corners.";
+      trampolineNotice.style.color = "#f00";
+      return;
+    }
     if (trampolineCorners.length >= 4) return;
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -639,6 +729,7 @@ canvas.addEventListener('click', function(e) {
       setupWorldCalibration();
       // Only advance phase if homography succeeded
       if (homography) {
+        trampolinePolygon = trampolineCorners.slice();
         trampolineCorners = [];
         currentCalibrationPhase = CALIBRATION_PHASE_STAND_STILL;
         updateCalibrationUI();
@@ -655,29 +746,117 @@ canvas.addEventListener('click', function(e) {
   }
 });
 
-// Calibrate button handler
-calibrateBtn.addEventListener('click', function() {
-  // Now that user is standing still, set baselineZ and advance phase
-  if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-    const ankles = getAnkles(lastPoseResults.poseWorldLandmarks);
-    let zSum = 0, count = 0;
-    if (ankles.leftAnkle) { zSum += ankles.leftAnkle.y; count++; }
-    if (ankles.rightAnkle) { zSum += ankles.rightAnkle.y; count++; }
-    if (count > 0) {
-      baselineZ = zSum / count;
-      currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-      trampolineNotice.textContent = "Calibration complete! Start jumping!";
-      trampolineNotice.style.color = "#0f0";
-      calibrateBtn.style.display = 'none';
-      updateCalibrationUI();
-    } else {
-      trampolineNotice.textContent = "Unable to detect feet. Stand fully on trampoline.";
-      trampolineNotice.style.color = "#f00";
-    }
-  } else {
+// --- Restart Draw button for recalibration ---
+restartDrawBtn.addEventListener('click', function() {
+  trampolineCorners = [];
+  trampolinePolygon = null;
+  homography = null;
+  currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
+  baselineZ = null;
+  trampolineNotice.textContent = "Tap the four corners of the trampoline in order (1-4).";
+  trampolineNotice.style.color = "#ff0";
+  calibrateBtn.style.display = 'none';
+  restartDrawBtn.style.display = 'none';
+  updateCalibrationUI();
+  dirtyFrame = true;
+});
+
+// Show Restart button after calibration is complete
+function updateCalibrationUI() {
+  // Example: update UI based on calibration phase
+  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
+    calibrateBtn.style.display = 'none';
+    restartDrawBtn.style.display = 'none';
+  } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
+    calibrateBtn.style.display = '';
+    restartDrawBtn.style.display = '';
+  } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
+    calibrateBtn.style.display = 'none';
+    restartDrawBtn.style.display = '';
+    trampolineNotice.textContent = "Calibration complete. Ready to jump! Click 'Restart Draw' to recalibrate.";
+    trampolineNotice.style.color = "#0f0";
+  }
+}
+
+// --- Calibrate button handler (average baselineZ over several frames for stability) ---
+calibrateBtn.addEventListener('click', async function() {
+  if (!(lastPoseResults && lastPoseResults.poseWorldLandmarks)) {
     trampolineNotice.textContent = "No pose detected. Stand fully on trampoline.";
     trampolineNotice.style.color = "#f00";
+    return;
   }
+  trampolineNotice.textContent = "Calibrating baseline... Stand still.";
+  trampolineNotice.style.color = "#0ff";
+  calibrateBtn.disabled = true;
+
+  // Collect 20 frames for baselineZ (about 0.6s at 30fps)
+  let zSamples = [];
+  for (let i = 0; i < 20; ++i) {
+    await new Promise(r => setTimeout(r, 30));
+    if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+      const ankles = getAnkles(lastPoseResults.poseWorldLandmarks);
+      let zSum = 0, count = 0;
+      if (ankles.leftAnkle) { zSum += ankles.leftAnkle.y; count++; }
+      if (ankles.rightAnkle) { zSum += ankles.rightAnkle.y; count++; }
+      if (count > 0) zSamples.push(zSum / count);
+    }
+  }
+  if (zSamples.length > 0) {
+    baselineZ = zSamples.reduce((a, b) => a + b, 0) / zSamples.length;
+    currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
+    trampolineNotice.textContent = "Calibration complete! Start jumping!";
+    trampolineNotice.style.color = "#0f0";
+    calibrateBtn.style.display = 'none';
+    calibrateBtn.disabled = false;
+    updateCalibrationUI();
+  } else {
+    trampolineNotice.textContent = "Unable to detect feet. Stand fully on trampoline.";
+    trampolineNotice.style.color = "#f00";
+    calibrateBtn.disabled = false;
+  }
+});
+
+// --- Start drawLoop only after camera/video is ready ---
+async function startCameraAndDraw() {
+  await startCamera();
+  // Only start drawLoop if not already running
+  if (!window._drawLoopRunning) {
+    window._drawLoopRunning = true;
+    drawLoop();
+  }
+  poseLoop();
+}
+
+// --- Camera button event: robust, disables until camera ready ---
+switchCameraBtn.addEventListener('click', async () => {
+  if (switchCameraBtn.disabled) return;
+  switchCameraBtn.disabled = true;
+  trampolineNotice.textContent = "Starting camera...";
+  trampolineNotice.style.color = "#ff0";
+  try {
+    await startCameraAndDraw();
+    trampolineNotice.textContent = "Camera started. Mark trampoline corners in order (1-4).";
+    trampolineNotice.style.color = "#0f0";
+    currentCalibrationPhase = CALIBRATION_PHASE_MARK_CORNERS;
+    updateCalibrationUI();
+    switchCameraBtn.disabled = true; // Only allow once, or adjust logic if you want multi-camera support
+  } catch (e) {
+    trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
+    trampolineNotice.style.color = "#f00";
+    jtError("camera", "Camera failed to start", e);
+    switchCameraBtn.disabled = false;
+  }
+}, { once: true });
+
+// --- Debug mode toggle ---
+debugModeCheckbox.addEventListener('change', () => {
+  debugMode = debugModeCheckbox.checked;
+});
+
+// --- Resize canvas on window resize ---
+window.addEventListener('resize', () => {
+  resizeCanvasToScreen();
+  dirtyFrame = true;
 });
 </script>
 </body>
