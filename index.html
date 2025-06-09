@@ -486,103 +486,108 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+    //===================================
+// PART 8: FULLY AUTOMATED BASELINE CALIBRATION SYSTEM (NO BUTTON NEEDED)
 //===================================
-// PART 8: CALIBRATION SYSTEM (WITH HOMOGRAPHY) (REVISED & FIXED)
-//===================================
 
-function arePointsDistinct(points) {
-  for (let i = 0; i < points.length; ++i) {
-    for (let j = i + 1; j < points.length; ++j) {
-      if (Math.abs(points[i][0] - points[j][0]) < 2 && Math.abs(points[i][1] - points[j][1]) < 2) {
-        return false;
-      }
+// Helper: Check if user is standing still (low velocity, both ankles detected)
+function isUserStandingStill(worldLandmarks, velocityThreshold = 0.015) {
+  const ankles = getAnkles(worldLandmarks);
+  if (!ankles.leftAnkle || !ankles.rightAnkle) return false;
+
+  // Use a short history to check for minimal movement
+  if (!window._ankleYHistory) window._ankleYHistory = [];
+  const currentAvgY = (ankles.leftAnkle.y + ankles.rightAnkle.y) / 2;
+  window._ankleYHistory.push(currentAvgY);
+  if (window._ankleYHistory.length > 15) window._ankleYHistory.shift();
+
+  if (window._ankleYHistory.length < 10) return false;
+
+  // Calculate velocity as max delta in history
+  const minY = Math.min(...window._ankleYHistory);
+  const maxY = Math.max(...window._ankleYHistory);
+  const deltaY = Math.abs(maxY - minY);
+
+  return deltaY < velocityThreshold;
+}
+
+// Automated baseline calibration logic
+let baselineCalibrated = false;
+let baselineCalibrating = false;
+
+function automatedCalibrationCheck(worldLandmarks) {
+  if (baselineCalibrated || currentCalibrationPhase !== CALIBRATION_PHASE_STAND_STILL) return;
+
+  if (isUserStandingStill(worldLandmarks)) {
+    // Start calibrating if not already
+    if (!baselineCalibrating) {
+      baselineCalibrating = true;
+      trampolineNotice.textContent = "Calibrating baseline... Stand still.";
+      trampolineNotice.style.color = "#0ff";
+      window._baselineYSamples = [];
     }
-  }
-  return true;
-}
-
-function setupWorldCalibration() {
-  // Only run after 4 corners are selected and validated
-  if (trampolineCorners.length !== 4) return;
-  if (!arePointsDistinct(trampolineCorners)) {
-    trampolineNotice.textContent = "Corners too close together. Please mark four distinct corners.";
-    trampolineNotice.style.color = "#f00";
-    trampolineCorners = [];
-    dirtyFrame = true;
-    updateCalibrationUI();
-    return;
-  }
-  try {
-    // Compute homography from user image points to known trampoline rectangle (meters)
-    homography = computeHomography(trampolineCorners, worldCorners);
-    trampolineNotice.textContent = "Corners set. Now stand still in the center and press Calibrate.";
-    trampolineNotice.style.color = "#0ff";
-    calibrateBtn.style.display = '';
-    trampolinePolygon = trampolineCorners.slice();
-    trampolineCenter = getQuadrilateralCenter(trampolinePolygon);
-    updateCalibrationUI();
-  } catch (err) {
-    trampolineNotice.textContent = "Error calculating trampoline calibration. Please try again.";
-    trampolineNotice.style.color = "#f00";
-    trampolineCorners = [];
-    trampolinePolygon = null;
-    dirtyFrame = true;
-    updateCalibrationUI();
-    jtError("calibration", "Error calculating trampoline calibration", err);
-  }
-}
-
-// Dummy for UI update (avoid ReferenceError)
-function updateCalibrationUI() {
-  // Example: update UI based on calibration phase
-  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
-    calibrateBtn.style.display = 'none';
-  } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
-    calibrateBtn.style.display = '';
-  } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
-    calibrateBtn.style.display = 'none';
-    trampolineNotice.textContent = "Calibration complete. Ready to jump!";
-    trampolineNotice.style.color = "#0f0";
-  }
-}
-
-// --- Calibrate button handler (average baselineZ over several frames for stability) ---
-calibrateBtn.addEventListener('click', async function() {
-  if (!(lastPoseResults && lastPoseResults.poseWorldLandmarks)) {
-    trampolineNotice.textContent = "No pose detected. Stand fully on trampoline.";
-    trampolineNotice.style.color = "#f00";
-    return;
-  }
-  trampolineNotice.textContent = "Calibrating baseline... Stand still.";
-  trampolineNotice.style.color = "#0ff";
-  calibrateBtn.disabled = true;
-
-  // Collect 20 frames for baselineZ (about 0.6s at 30fps)
-  let zSamples = [];
-  for (let i = 0; i < 20; ++i) {
-    await new Promise(r => setTimeout(r, 30));
-    if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-      const ankles = getAnkles(lastPoseResults.poseWorldLandmarks);
-      let zSum = 0, count = 0;
-      if (ankles.leftAnkle) { zSum += ankles.leftAnkle.y; count++; }
-      if (ankles.rightAnkle) { zSum += ankles.rightAnkle.y; count++; }
-      if (count > 0) zSamples.push(zSum / count);
+    // Collect samples
+    const ankles = getAnkles(worldLandmarks);
+    if (ankles.leftAnkle && ankles.rightAnkle) {
+      const avgY = (ankles.leftAnkle.y + ankles.rightAnkle.y) / 2;
+      window._baselineYSamples.push(avgY);
     }
-  }
-  if (zSamples.length > 0) {
-    baselineZ = zSamples.reduce((a, b) => a + b, 0) / zSamples.length;
-    currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
-    trampolineNotice.textContent = "Calibration complete! Start jumping!";
-    trampolineNotice.style.color = "#0f0";
-    calibrateBtn.style.display = 'none';
-    calibrateBtn.disabled = false;
-    updateCalibrationUI();
+    // After enough samples, set baselineZ
+    if (window._baselineYSamples.length >= 20) {
+      baselineZ = window._baselineYSamples.reduce((a, b) => a + b, 0) / window._baselineYSamples.length;
+      currentCalibrationPhase = CALIBRATION_PHASE_COMPLETE;
+      baselineCalibrated = true;
+      trampolineNotice.textContent = "Calibration complete! Start jumping!";
+      trampolineNotice.style.color = "#0f0";
+      calibrateBtn.style.display = 'none';
+      baselineCalibrating = false;
+      updateCalibrationUI();
+    }
   } else {
-    trampolineNotice.textContent = "Unable to detect feet. Stand fully on trampoline.";
-    trampolineNotice.style.color = "#f00";
-    calibrateBtn.disabled = false;
+    // User isn't standing still
+    if (baselineCalibrating) {
+      baselineCalibrating = false;
+      window._baselineYSamples = [];
+      trampolineNotice.textContent = "Stand still in the trampoline center for baseline calibration.";
+      trampolineNotice.style.color = "#ff0";
+    }
+  }
+}
+
+// Replace calibrateBtn click handler with a no-op/hide
+calibrateBtn.style.display = 'none'; // Hide the button entirely
+
+// Modify pose.onResults to include auto-calibration step:
+pose.onResults(results => {
+  try {
+    lastPoseResults = results;
+    if (results && results.poseWorldLandmarks) {
+      // --- Automated calibration step ---
+      automatedCalibrationCheck(results.poseWorldLandmarks);
+      computeAndSendJump3D(results.poseWorldLandmarks);
+    }
+  } catch (e) {
+    jtError("pose.onResults", "Unhandled error in pose result callback", e);
   }
 });
+
+// Update UI logic for calibration phases
+function updateCalibrationUI() {
+  if (currentCalibrationPhase === CALIBRATION_PHASE_MARK_CORNERS) {
+    calibrateBtn.style.display = 'none';
+    restartDrawBtn.style.display = 'none';
+  } else if (currentCalibrationPhase === CALIBRATION_PHASE_STAND_STILL) {
+    calibrateBtn.style.display = 'none';
+    restartDrawBtn.style.display = '';
+    trampolineNotice.textContent = "Stand still in the trampoline center for baseline calibration.";
+    trampolineNotice.style.color = "#ff0";
+  } else if (currentCalibrationPhase === CALIBRATION_PHASE_COMPLETE) {
+    calibrateBtn.style.display = 'none';
+    restartDrawBtn.style.display = '';
+    trampolineNotice.textContent = "Calibration complete! Start jumping! Click 'Restart Draw' to recalibrate.";
+    trampolineNotice.style.color = "#0f0";
+  }
+}
 
 //===================================
 // PART 9: ROBUST JUMP DETECTION LOGIC (3D) WITH sendJumpHeight() FOR HOST UI
