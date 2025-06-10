@@ -309,7 +309,7 @@
       const leftDist = distanceToPlane(plane3D, leftAnkle);
       const rightDist = distanceToPlane(plane3D, rightAnkle);
       const currentHeight = (leftDist + rightDist) / 2;
-      const jumpHeight = currentHeight - baselineHeight; // Positive = above trampoline
+      const jumpHeight = baselineheight - currentheight; // Positive = above trampoline
 
       // Jump state machine (min jump height required)
       let JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
