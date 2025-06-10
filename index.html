@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Y Axis Fix)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Y Axis Only)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -98,27 +98,18 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
     // --- State ---
-    const TRAMPOLINE_WIDTH_M = 3.048, TRAMPOLINE_HEIGHT_M = 5.1816;
-    const worldCorners = [
-      [0, 0],
-      [TRAMPOLINE_WIDTH_M, 0],
-      [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M],
-      [0, TRAMPOLINE_HEIGHT_M]
-    ];
-    let trampolineCorners = [], homography = null, baselineY = null, baselineCalibrating = false;
+    let baselineY = null, calibrationSamples = [], calibrationSampleCount = 45;
     let currentCalibrationPhase = 'mark_corners';
     let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
     let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointY = null;
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
-    let calibrationSamples = [], calibrationSampleCount = 45;
 
     // --- DOM ---
     function getEl(id) { return document.getElementById(id); }
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
     const video = getEl('video');
     const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
-    const switchCameraBtn = getEl('switchCameraBtn');
     const calibrateBtn = getEl('calibrateBtn');
     const settingsBtn = getEl('settingsBtn');
     const loadingIndicator = getEl('loadingIndicator');
@@ -136,37 +127,6 @@
 
     function show(el) { if (el) el.style.display = ""; }
     function hide(el) { if (el) el.style.display = "none"; }
-
-    // --- Homography ---
-    function computeHomography(src, dst) {
-      const X = [], Y = [];
-      for (let i = 0; i < 4; i++) {
-        X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0]*src[i][0], -dst[i][0]*src[i][1]]);
-        X.push([0,0,0,src[i][0],src[i][1],1,-dst[i][1]*src[i][0],-dst[i][1]*src[i][1]]);
-        Y.push(dst[i][0]); Y.push(dst[i][1]);
-      }
-      const Xt = numeric.transpose(X), XtX = numeric.dot(Xt,X), XtY = numeric.dot(Xt,Y);
-      const h = numeric.solve(XtX, XtY);
-      return [
-        [h[0], h[1], h[2]],
-        [h[3], h[4], h[5]],
-        [h[6], h[7], 1]
-      ];
-    }
-    function applyHomography(H, x, y) {
-      const d = H[2][0]*x+H[2][1]*y+H[2][2];
-      const u = (H[0][0]*x+H[0][1]*y+H[0][2])/d;
-      const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
-      return [u, v];
-    }
-    // This returns Y in METERS as mapped to trampoline plane
-    function getAnkleRealWorldY(landmark) {
-      if (!landmark || typeof landmark.x !== 'number' || typeof landmark.y !== 'number' || !homography) return null;
-      const px = landmark.x * canvas.width;
-      const py = landmark.y * canvas.height;
-      const [mx, my] = applyHomography(homography, px, py);
-      return my;
-    }
 
     // --- Resize ---
     function resizeCanvasToScreen() {
@@ -205,8 +165,8 @@
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 0,             // Fastest
-        smoothLandmarks: false,         // No smoothing for fastest response
+        modelComplexity: 0,
+        smoothLandmarks: false,
         enableSegmentation: false,
         smoothSegmentation: false,
         minDetectionConfidence: 0.5,
@@ -214,8 +174,8 @@
       });
       pose.onResults(results => {
         lastPoseResults = results;
-        if (results && results.poseLandmarks) {
-          computeAndSendJump3D(results.poseLandmarks);
+        if (results && results.poseWorldLandmarks) {
+          computeAndSendJumpY(results.poseWorldLandmarks);
         }
       });
       poseLoaded = true;
@@ -227,17 +187,7 @@
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
-        // Draw trampoline corners
-        if (trampolineCorners.length > 0) {
-          ctx.strokeStyle = "#0ff"; ctx.lineWidth = 2;
-          ctx.beginPath();
-          trampolineCorners.forEach(([x, y], idx) => {
-            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            ctx.arc(x, y, 7, 0, Math.PI*2);
-          });
-          ctx.closePath(); ctx.stroke();
-        }
-        // Draw pose
+        // Draw pose (optional: only if you want to see joints)
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
           drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
@@ -246,15 +196,16 @@
       requestAnimationFrame(drawLoop);
     }
 
-    // --- Jump Detection (Y axis only, in meters) ---
-    function computeAndSendJump3D(poseLandmarks) {
-      if (!homography || !baselineY || currentCalibrationPhase !== "complete") {
+    // --- Jump Detection (Y axis only, in meters, from poseWorldLandmarks) ---
+    function computeAndSendJumpY(poseWorldLandmarks) {
+      if (!baselineY || currentCalibrationPhase !== "complete") {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
-      // Use real-world Y (not Z!) for jump calculation
-      const leftY = getAnkleRealWorldY(poseLandmarks[27]);
-      const rightY = getAnkleRealWorldY(poseLandmarks[28]);
+
+      // Use world Y for jump calculation!
+      const leftY = poseWorldLandmarks[27].y;
+      const rightY = poseWorldLandmarks[28].y;
 
       if (!isFinite(leftY) || !isFinite(rightY)) {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
@@ -293,29 +244,15 @@
     }
 
     // --- Calibration ---
-    canvas.addEventListener('click', function(e) {
-      if (currentCalibrationPhase === 'mark_corners') {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        trampolineCorners.push([x, y]);
-        if (trampolineCorners.length === 4) {
-          homography = computeHomography(trampolineCorners, worldCorners);
-          currentCalibrationPhase = 'stand_still';
-          trampolineNotice.textContent = "Stand still in the center of the trampoline, then press Calibrate.";
-          show(calibrateBtn); show(restartDrawBtn);
-        }
-      }
-    });
     calibrateBtn.addEventListener('click', function() {
-      if (currentCalibrationPhase === 'stand_still' && lastPoseResults && lastPoseResults.poseLandmarks) {
+      if (currentCalibrationPhase === 'stand_still' && lastPoseResults && lastPoseResults.poseWorldLandmarks) {
         calibrationSamples = [];
-        baselineCalibrating = true;
         trampolineNotice.textContent = "Calibrating, please stand still...";
         let count = 0;
         let calibrationInterval = setInterval(() => {
-          if (lastPoseResults && lastPoseResults.poseLandmarks) {
-            const leftY = getAnkleRealWorldY(lastPoseResults.poseLandmarks[27]);
-            const rightY = getAnkleRealWorldY(lastPoseResults.poseLandmarks[28]);
+          if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
+            const leftY = lastPoseResults.poseWorldLandmarks[27].y;
+            const rightY = lastPoseResults.poseWorldLandmarks[28].y;
             if (isFinite(leftY) && isFinite(rightY)) calibrationSamples.push((leftY + rightY) / 2);
           }
           count++;
@@ -329,15 +266,15 @@
             } else {
               trampolineNotice.textContent = "Calibration failed. Try again.";
             }
-            baselineCalibrating = false;
           }
         }, 30);
       }
     });
+
     restartDrawBtn.addEventListener('click', function() {
-      trampolineCorners = []; homography = null; baselineY = null;
+      baselineY = null;
       currentCalibrationPhase = 'mark_corners';
-      trampolineNotice.textContent = "Tap the four corners of the trampoline in order (1-4).";
+      trampolineNotice.textContent = "Stand in the center and calibrate again.";
       hide(calibrateBtn); hide(restartDrawBtn);
     });
 
@@ -400,9 +337,10 @@
         await startCamera();
         drawLoop();
         poseLoop();
-        trampolineNotice.textContent = "Camera started. Mark trampoline corners.";
+        trampolineNotice.textContent = "Stand in the center of the trampoline, then press Calibrate.";
         trampolineNotice.style.color = "#0f0";
-        currentCalibrationPhase = 'mark_corners';
+        currentCalibrationPhase = 'stand_still';
+        show(calibrateBtn);
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
