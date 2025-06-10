@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Auto Camera, Throttled)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Y Axis Fix)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -159,6 +159,7 @@
       const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
       return [u, v];
     }
+    // This returns Y in METERS as mapped to trampoline plane
     function getAnkleRealWorldY(landmark) {
       if (!landmark || typeof landmark.x !== 'number' || typeof landmark.y !== 'number' || !homography) return null;
       const px = landmark.x * canvas.width;
@@ -245,23 +246,22 @@
       requestAnimationFrame(drawLoop);
     }
 
-    // --- Jump Detection (with homography, optimized) ---
+    // --- Jump Detection (Y axis only, in meters) ---
     function computeAndSendJump3D(poseLandmarks) {
       if (!homography || !baselineY || currentCalibrationPhase !== "complete") {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
-      const leftAnkle = poseLandmarks[27];
-      const rightAnkle = poseLandmarks[28];
-      const leftY = getAnkleRealWorldY(leftAnkle);
-      const rightY = getAnkleRealWorldY(rightAnkle);
+      // Use real-world Y (not Z!) for jump calculation
+      const leftY = getAnkleRealWorldY(poseLandmarks[27]);
+      const rightY = getAnkleRealWorldY(poseLandmarks[28]);
 
       if (!isFinite(leftY) || !isFinite(rightY)) {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
       const currentY = (leftY + rightY) / 2;
-      const jumpHeight = baselineY - currentY; // positive jump upwards
+      const jumpHeight = baselineY - currentY; // Positive value = upward jump in meters
 
       // Jump state machine (min jump height required)
       let JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
