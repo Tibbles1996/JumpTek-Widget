@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Accurate Plane-based Y Height, Fixed)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Lovable UI Integration)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -194,6 +194,20 @@
       return (plane.A * pt.x + plane.B * pt.y + plane.C * pt.z + plane.D) / Math.sqrt(plane.A*plane.A + plane.B*plane.B + plane.C*plane.C);
     }
 
+    // --- Lovable UI integration: send jump data ---
+    function sendJumpDataToLovableUI(jumpHeight, jumpTimestamp) {
+      // Example: send data to a UI handler, queue, or external collector
+      if (window.lovableUI && typeof window.lovableUI.collectJump === 'function') {
+        window.lovableUI.collectJump({
+          height: jumpHeight,
+          timestamp: jumpTimestamp
+        });
+      } else {
+        // Fallback: log to console
+        console.log("[Jump Data] Height:", jumpHeight, "Timestamp:", jumpTimestamp);
+      }
+    }
+
     // --- Resize ---
     function resizeCanvasToScreen() {
       canvas.width = window.innerWidth;
@@ -309,12 +323,11 @@
         return;
       }
 
-      // Calculate average current distance above trampoline plane (NOT difference between legs!)
       const leftDist = distanceToPlane(plane3D, leftAnkle);
       const rightDist = distanceToPlane(plane3D, rightAnkle);
       const currentHeight = (leftDist + rightDist) / 2;
 
-      // FIXED: jumpHeight = baselineHeight - currentHeight; (positive when jumping up)
+      // jumpHeight = baselineHeight - currentHeight; (positive when jumping up)
       let jumpHeight = baselineHeight - currentHeight;
 
       // Smoothing for stability
@@ -340,6 +353,8 @@
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
             widgetJumpHeightDisplay.textContent = `Jump: ${highestPointHeight.toFixed(2)} m`;
+            // --- Send jump data to lovable UI! ---
+            sendJumpDataToLovableUI(highestPointHeight, Date.now());
           } else {
             widgetJumpHeightDisplay.textContent = `Jump: ${smoothedJumpHeight.toFixed(2)} m`;
           }
@@ -359,7 +374,6 @@
         trampolineCorners.push([x, y]);
         if (trampolineCorners.length === 4) {
           // Map corners to world coordinates for homography
-          // Homography: image (x,y) -> real world (X,Y)
           homography = computeHomography(trampolineCorners, worldCorners.map(([X,Y]) => [X,Y]));
           // Generate 3D world points for plane fit: use (X,Y,0) real-world corners
           let planePoints = [];
@@ -395,9 +409,8 @@
           if (count >= calibrationSampleCount) {
             clearInterval(calibrationInterval);
             if (calibrationSamples.length > 0) {
-              // Save as baselineHeight (distance from ankles to trampoline plane when standing)
               baselineHeight = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
-              smoothedJumpHeight = 0; // reset smoothing on calibration
+              smoothedJumpHeight = 0;
               currentCalibrationPhase = 'complete';
               trampolineNotice.textContent = "Calibration complete! Start jumping!";
               hide(calibrateBtn);
@@ -415,7 +428,7 @@
       currentCalibrationPhase = 'mark_corners';
       trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
       show(canvas);
-      show(calibrateBtn); // for UI consistency
+      show(calibrateBtn);
     });
 
     // --- Settings UI ---
@@ -487,6 +500,17 @@
         trampolineNotice.style.color = "#f00";
       }
     });
+
+    // --- Example lovableUI handler for demo purposes ---
+    window.lovableUI = {
+      collectJump: function(data) {
+        // Here you could push to an array, send to server, or update a chart.
+        // For demo: show in console and alert
+        console.log("LovableUI received jump:", data);
+        // Uncomment the next line if you want a popup for every jump:
+        // alert("Jump: " + data.height.toFixed(2) + " m at " + new Date(data.timestamp).toLocaleTimeString());
+      }
+    };
   </script>
 </body>
 </html>
