@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Y Axis, Trampoline Plane, Restart, Clean UI)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Accurate Plane-based Y Height)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -92,15 +92,15 @@
     // --- Trampoline dimensions (meters) ---
     const TRAMPOLINE_WIDTH_M = 3.048, TRAMPOLINE_HEIGHT_M = 5.1816;
     const worldCorners = [
-      [0, 0],
-      [TRAMPOLINE_WIDTH_M, 0],
-      [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M],
-      [0, TRAMPOLINE_HEIGHT_M]
+      [0, 0, 0],
+      [TRAMPOLINE_WIDTH_M, 0, 0],
+      [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M, 0],
+      [0, TRAMPOLINE_HEIGHT_M, 0]
     ];
-    let trampolineCorners = [], homography = null, baselineY = null;
+    let trampolineCorners = [], homography = null, plane3D = null, baselineHeight = null;
     let currentCalibrationPhase = 'mark_corners';
     let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
-    let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointY = null;
+    let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointHeight = null;
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
     let calibrationSamples = [], calibrationSampleCount = 45;
@@ -147,6 +147,47 @@
       const u = (H[0][0]*x+H[0][1]*y+H[0][2])/d;
       const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
       return [u, v];
+    }
+
+    // --- 2D image to 3D trampoline plane mapping ---
+    function imageToTrampolinePlane(x, y) {
+      if (!homography) return null;
+      const [u, v] = applyHomography(homography, x, y);
+      // The trampoline plane in world coords is (u, v, 0)
+      return { x: u, y: v, z: 0 };
+    }
+
+    // --- Fit a 3D plane from 4 points (plane equation Ax+By+Cz+D=0) ---
+    function fitPlaneFromPoints(points) {
+      // Use the first 3 points for the plane
+      const [p1, p2, p3] = points;
+      const v1 = {
+        x: p2.x - p1.x,
+        y: p2.y - p1.y,
+        z: p2.z - p1.z
+      };
+      const v2 = {
+        x: p3.x - p1.x,
+        y: p3.y - p1.y,
+        z: p3.z - p1.z
+      };
+      // Cross product to get normal vector
+      const normal = {
+        x: v1.y * v2.z - v1.z * v2.y,
+        y: v1.z * v2.x - v1.x * v2.z,
+        z: v1.x * v2.y - v1.y * v2.x
+      };
+      const A = normal.x, B = normal.y, C = normal.z;
+      const D = -(A * p1.x + B * p1.y + C * p1.z);
+      // Normalize
+      const norm = Math.sqrt(A*A + B*B + C*C);
+      return {A: A/norm, B: B/norm, C: C/norm, D: D/norm};
+    }
+
+    // --- Distance from 3D point to a plane ---
+    function distanceToPlane(plane, pt) {
+      // Returns signed distance (above or below plane)
+      return (plane.A * pt.x + plane.B * pt.y + plane.C * pt.z + plane.D) / Math.sqrt(plane.A*plane.A + plane.B*plane.B + plane.C*plane.C);
     }
 
     // --- Resize ---
@@ -228,7 +269,7 @@
             ctx.strokeStyle = "#fff";
             ctx.lineWidth = 2;
             ctx.stroke();
-            // Optionally, draw number
+            // Draw number
             ctx.fillStyle = "#222";
             ctx.font = "bold 18px Arial";
             ctx.textAlign = "center";
@@ -248,22 +289,27 @@
       requestAnimationFrame(drawLoop);
     }
 
-    // --- Jump Detection (Y axis only, in meters, from poseWorldLandmarks) ---
+    // --- Jump Detection (distance above trampoline plane, in meters) ---
     function computeAndSendJumpY(poseWorldLandmarks) {
-      if (baselineY === null || currentCalibrationPhase !== "complete") {
+      if (!plane3D || baselineHeight === null || currentCalibrationPhase !== "complete") {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
 
-      // Use world Y for jump calculation!
-      const leftY = poseWorldLandmarks[27].y;
-      const rightY = poseWorldLandmarks[28].y;
-      if (!isFinite(leftY) || !isFinite(rightY)) {
+      // Get both ankles in 3D (MediaPipe world coordinates)
+      const leftAnkle = poseWorldLandmarks[27];
+      const rightAnkle = poseWorldLandmarks[28];
+
+      if (!leftAnkle || !rightAnkle) {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
-      const currentY = (leftY + rightY) / 2;
-      const jumpHeight = baselineY - currentY; // Positive value = upward jump in meters
+
+      // Calculate average current distance above trampoline plane (NOT difference between legs!)
+      const leftDist = distanceToPlane(plane3D, leftAnkle);
+      const rightDist = distanceToPlane(plane3D, rightAnkle);
+      const currentHeight = (leftDist + rightDist) / 2;
+      const jumpHeight = currentHeight - baselineHeight; // Positive = above trampoline
 
       // Jump state machine (min jump height required)
       let JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
@@ -272,16 +318,16 @@
           if (jumpHeight > JUMP_THRESHOLD) {
             jumpState = 'ascending';
             jumpStartTime = performance.now();
-            highestPointY = currentY;
+            highestPointHeight = currentHeight;
           }
           widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
           break;
         case 'ascending':
-          if (currentY < highestPointY) highestPointY = currentY;
+          if (currentHeight > highestPointHeight) highestPointHeight = currentHeight;
           if (jumpHeight < JUMP_THRESHOLD/2) { // landed
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
-            const maxJump = baselineY - highestPointY;
+            const maxJump = highestPointHeight - baselineHeight;
             widgetJumpHeightDisplay.textContent = `Jump: ${maxJump.toFixed(2)} m`;
           } else {
             widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m`;
@@ -302,7 +348,14 @@
         trampolineCorners.push([x, y]);
         if (trampolineCorners.length === 4) {
           // Map corners to world coordinates for homography
-          homography = computeHomography(trampolineCorners, worldCorners);
+          // Homography: image (x,y) -> real world (X,Y)
+          homography = computeHomography(trampolineCorners, worldCorners.map(([X,Y]) => [X,Y]));
+          // Generate 3D world points for plane fit: use (X,Y,0) real-world corners
+          let planePoints = [];
+          for (let i = 0; i < 4; ++i) {
+            planePoints.push({ x: worldCorners[i][0], y: worldCorners[i][1], z: 0 });
+          }
+          plane3D = fitPlaneFromPoints(planePoints);
           currentCalibrationPhase = 'stand_still';
           trampolineNotice.textContent = "Stand still in the center of the trampoline, then press Calibrate.";
           show(calibrateBtn);
@@ -319,15 +372,19 @@
         let count = 0;
         let calibrationInterval = setInterval(() => {
           if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-            const leftY = lastPoseResults.poseWorldLandmarks[27].y;
-            const rightY = lastPoseResults.poseWorldLandmarks[28].y;
-            if (isFinite(leftY) && isFinite(rightY)) calibrationSamples.push((leftY + rightY) / 2);
+            const leftAnkle = lastPoseResults.poseWorldLandmarks[27];
+            const rightAnkle = lastPoseResults.poseWorldLandmarks[28];
+            if (leftAnkle && rightAnkle) {
+              const leftDist = distanceToPlane(plane3D, leftAnkle);
+              const rightDist = distanceToPlane(plane3D, rightAnkle);
+              calibrationSamples.push((leftDist + rightDist) / 2);
+            }
           }
           count++;
           if (count >= calibrationSampleCount) {
             clearInterval(calibrationInterval);
             if (calibrationSamples.length > 0) {
-              baselineY = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
+              baselineHeight = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
               currentCalibrationPhase = 'complete';
               trampolineNotice.textContent = "Calibration complete! Start jumping!";
               hide(calibrateBtn);
@@ -341,7 +398,7 @@
 
     // --- Restart button functionality ---
     restartDrawBtn.addEventListener('click', function() {
-      trampolineCorners = []; homography = null; baselineY = null;
+      trampolineCorners = []; homography = null; plane3D = null; baselineHeight = null;
       currentCalibrationPhase = 'mark_corners';
       trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
       show(canvas);
