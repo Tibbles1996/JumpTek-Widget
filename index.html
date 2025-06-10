@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Y Axis Only)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Y Axis, Trampoline Plane, Restart, Clean UI)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -16,19 +16,19 @@
     #canvas { z-index: 2; pointer-events: auto; }
     #video { z-index: 1; opacity: 0; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
-    #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn {
+    #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn, #restartDrawBtn {
       padding: 10px 18px; color: #fff;
       border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
       display: flex; align-items: center; justify-content: center; font-weight: bold;
       background: #27ae60;
     }
+    #restartDrawBtn { background: #e74c3c; }
+    #restartDrawBtn:hover { background: #b53224; }
     #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
     #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
     #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
-    #restartDrawBtn { display: none; position: absolute; top: 20px; left: 20px; z-index: 21; padding: 10px 22px; border-radius: 14px; background: #e74c3c; color: #fff; border: none; font-size: 1.1rem;}
-    #restartDrawBtn:hover { background: #b53224; }
     #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem;}
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem;}
     #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.4); flex-direction: column; z-index: 40; padding: 24px 28px; }
@@ -45,16 +45,10 @@
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
     #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25;}
-    #rawHeightDebugDisplay, #debugValuesDisplay, #frameRateDisplay { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 15px; border-radius: 12px; font-size: 1rem; z-index: 30;}
-    #rawHeightDebugDisplay.positive { color: #0f0; }
-    #debugValuesDisplay { top: 120px; max-width: 300px; white-space: pre-line; }
-    #frameRateDisplay { top: 80px; }
-    #widgetJumpHeightDisplay, #debugValuesDisplay, #rawHeightDebugDisplay { visibility: visible !important; opacity: 1 !important; }
   </style>
 </head>
 <body>
   <div id="container">
-    <button id="restartDrawBtn" style="display:none;">Restart Draw</button>
     <canvas id="canvas"></canvas>
     <div id="buttonRow">
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
@@ -66,13 +60,14 @@
       <button class="settings-btn" id="settingsBtn" aria-label="Open settings" tabindex="0" role="button">
         <img src="https://creazilla-store.fra1.digitaloceanspaces.com/icons/3430447/ruler-icon-md.png" alt="Calibration Settings" />
       </button>
+      <button id="restartDrawBtn" aria-label="Restart" tabindex="0" role="button">Restart</button>
     </div>
     <div id="settingsPopover" aria-modal="true" role="dialog">
       <button class="close-btn" id="closeSettingsBtn" aria-label="Close settings">&times;</button>
       <div>
         <label for="jumpThreshold">Minimum Jump Threshold (meters):</label><br>
         <input type="number" step="0.01" min="0.01" max="0.5" value="0.08" id="jumpThreshold">
-        <div class="desc">Minimum height difference to be considered a jump (reduces false positives from minor movements).</div>
+        <div class="desc">Minimum height difference to be considered a jump.</div>
       </div>
       <div class="checkbox-container">
         <label for="debugMode">Enable Debug Mode (show raw data):</label>
@@ -83,9 +78,6 @@
     <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
     <div id="loadingIndicator">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
-    <div id="rawHeightDebugDisplay">Raw Delta: 0.000m</div>
-    <div id="debugValuesDisplay"></div>
-    <div id="frameRateDisplay">FPS: 0</div>
     <div id="zoomControls">
       <button id="zoomInBtn">+</button>
       <button id="zoomOutBtn">-</button>
@@ -97,13 +89,21 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
-    // --- State ---
-    let baselineY = null, calibrationSamples = [], calibrationSampleCount = 45;
+    // --- Trampoline dimensions (meters) ---
+    const TRAMPOLINE_WIDTH_M = 3.048, TRAMPOLINE_HEIGHT_M = 5.1816;
+    const worldCorners = [
+      [0, 0],
+      [TRAMPOLINE_WIDTH_M, 0],
+      [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M],
+      [0, TRAMPOLINE_HEIGHT_M]
+    ];
+    let trampolineCorners = [], homography = null, baselineY = null;
     let currentCalibrationPhase = 'mark_corners';
     let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
     let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointY = null;
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
+    let calibrationSamples = [], calibrationSampleCount = 45;
 
     // --- DOM ---
     function getEl(id) { return document.getElementById(id); }
@@ -114,8 +114,6 @@
     const settingsBtn = getEl('settingsBtn');
     const loadingIndicator = getEl('loadingIndicator');
     const trampolineNotice = getEl('trampolineNotice');
-    const debugValuesDisplay = getEl('debugValuesDisplay');
-    const frameRateDisplay = getEl('frameRateDisplay');
     const zoomInBtn = getEl('zoomInBtn');
     const zoomOutBtn = getEl('zoomOutBtn');
     const restartDrawBtn = getEl('restartDrawBtn');
@@ -127,6 +125,29 @@
 
     function show(el) { if (el) el.style.display = ""; }
     function hide(el) { if (el) el.style.display = "none"; }
+
+    // --- Homography ---
+    function computeHomography(src, dst) {
+      const X = [], Y = [];
+      for (let i = 0; i < 4; i++) {
+        X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0]*src[i][0], -dst[i][0]*src[i][1]]);
+        X.push([0,0,0,src[i][0],src[i][1],1,-dst[i][1]*src[i][0],-dst[i][1]*src[i][1]]);
+        Y.push(dst[i][0]); Y.push(dst[i][1]);
+      }
+      const Xt = numeric.transpose(X), XtX = numeric.dot(Xt,X), XtY = numeric.dot(Xt,Y);
+      const h = numeric.solve(XtX, XtY);
+      return [
+        [h[0], h[1], h[2]],
+        [h[3], h[4], h[5]],
+        [h[6], h[7], 1]
+      ];
+    }
+    function applyHomography(H, x, y) {
+      const d = H[2][0]*x+H[2][1]*y+H[2][2];
+      const u = (H[0][0]*x+H[0][1]*y+H[0][2])/d;
+      const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
+      return [u, v];
+    }
 
     // --- Resize ---
     function resizeCanvasToScreen() {
@@ -187,6 +208,37 @@
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
+
+        // Draw trampoline corners and lines
+        if (trampolineCorners.length > 0) {
+          ctx.save();
+          ctx.strokeStyle = "#0ff"; ctx.lineWidth = 3;
+          ctx.fillStyle = "#0ff";
+          ctx.beginPath();
+          trampolineCorners.forEach(([x, y], idx) => {
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          if (trampolineCorners.length === 4) ctx.closePath();
+          ctx.stroke();
+          // Draw corner dots
+          trampolineCorners.forEach(([x, y], idx) => {
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // Optionally, draw number
+            ctx.fillStyle = "#222";
+            ctx.font = "bold 18px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(String(idx + 1), x, y);
+            ctx.fillStyle = "#0ff";
+          });
+          ctx.restore();
+        }
+
         // Draw pose (optional: only if you want to see joints)
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
@@ -198,7 +250,7 @@
 
     // --- Jump Detection (Y axis only, in meters, from poseWorldLandmarks) ---
     function computeAndSendJumpY(poseWorldLandmarks) {
-      if (!baselineY || currentCalibrationPhase !== "complete") {
+      if (baselineY === null || currentCalibrationPhase !== "complete") {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
@@ -206,7 +258,6 @@
       // Use world Y for jump calculation!
       const leftY = poseWorldLandmarks[27].y;
       const rightY = poseWorldLandmarks[28].y;
-
       if (!isFinite(leftY) || !isFinite(rightY)) {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
@@ -227,7 +278,7 @@
           break;
         case 'ascending':
           if (currentY < highestPointY) highestPointY = currentY;
-          if (jumpHeight < JUMP_THRESHOLD/2) { // fallen back down
+          if (jumpHeight < JUMP_THRESHOLD/2) { // landed
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
             const maxJump = baselineY - highestPointY;
@@ -243,7 +294,24 @@
       }
     }
 
-    // --- Calibration ---
+    // --- Calibration: Mark corners and calibrate ---
+    canvas.addEventListener('click', function(e) {
+      if (currentCalibrationPhase === 'mark_corners') {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left, y = e.clientY - rect.top;
+        trampolineCorners.push([x, y]);
+        if (trampolineCorners.length === 4) {
+          // Map corners to world coordinates for homography
+          homography = computeHomography(trampolineCorners, worldCorners);
+          currentCalibrationPhase = 'stand_still';
+          trampolineNotice.textContent = "Stand still in the center of the trampoline, then press Calibrate.";
+          show(calibrateBtn);
+        } else {
+          trampolineNotice.textContent = `Corner ${trampolineCorners.length}/4 marked. Continue.`;
+        }
+      }
+    });
+
     calibrateBtn.addEventListener('click', function() {
       if (currentCalibrationPhase === 'stand_still' && lastPoseResults && lastPoseResults.poseWorldLandmarks) {
         calibrationSamples = [];
@@ -262,7 +330,7 @@
               baselineY = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
               currentCalibrationPhase = 'complete';
               trampolineNotice.textContent = "Calibration complete! Start jumping!";
-              hide(calibrateBtn); show(restartDrawBtn);
+              hide(calibrateBtn);
             } else {
               trampolineNotice.textContent = "Calibration failed. Try again.";
             }
@@ -271,11 +339,13 @@
       }
     });
 
+    // --- Restart button functionality ---
     restartDrawBtn.addEventListener('click', function() {
-      baselineY = null;
+      trampolineCorners = []; homography = null; baselineY = null;
       currentCalibrationPhase = 'mark_corners';
-      trampolineNotice.textContent = "Stand in the center and calibrate again.";
-      hide(calibrateBtn); hide(restartDrawBtn);
+      trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
+      show(canvas);
+      show(calibrateBtn); // for UI consistency
     });
 
     // --- Settings UI ---
@@ -330,17 +400,18 @@
       setupPose();
       trampolineNotice.textContent = "Loading camera...";
       trampolineNotice.style.color = "#ff0";
-      hide(calibrateBtn); hide(restartDrawBtn);
+      show(canvas);
+      show(restartDrawBtn);
+      hide(calibrateBtn);
       debugMode = debugModeCheckbox.checked;
 
       try {
         await startCamera();
         drawLoop();
         poseLoop();
-        trampolineNotice.textContent = "Stand in the center of the trampoline, then press Calibrate.";
+        trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
         trampolineNotice.style.color = "#0f0";
-        currentCalibrationPhase = 'stand_still';
-        show(calibrateBtn);
+        currentCalibrationPhase = 'mark_corners';
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
