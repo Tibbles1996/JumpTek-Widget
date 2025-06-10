@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Accurate Plane-based Y Height)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Accurate Plane-based Y Height, Fixed)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -104,6 +104,10 @@
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
     let calibrationSamples = [], calibrationSampleCount = 45;
+
+    // Smoothing for jump height
+    let smoothedJumpHeight = 0;
+    const SMOOTHING_ALPHA = 0.3; // 0 = very smooth, 1 = raw
 
     // --- DOM ---
     function getEl(id) { return document.getElementById(id); }
@@ -309,28 +313,35 @@
       const leftDist = distanceToPlane(plane3D, leftAnkle);
       const rightDist = distanceToPlane(plane3D, rightAnkle);
       const currentHeight = (leftDist + rightDist) / 2;
-      const jumpHeight = baselineheight - currentheight; // Positive = above trampoline
+
+      // FIXED: jumpHeight = baselineHeight - currentHeight; (positive when jumping up)
+      let jumpHeight = baselineHeight - currentHeight;
+
+      // Smoothing for stability
+      smoothedJumpHeight = SMOOTHING_ALPHA * jumpHeight + (1 - SMOOTHING_ALPHA) * smoothedJumpHeight;
+
+      // Clamp to zero if near zero (to hide micro-noise)
+      if (Math.abs(smoothedJumpHeight) < 0.01) smoothedJumpHeight = 0;
 
       // Jump state machine (min jump height required)
       let JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
       switch(jumpState) {
         case 'on_ground':
-          if (jumpHeight > JUMP_THRESHOLD) {
+          if (smoothedJumpHeight > JUMP_THRESHOLD) {
             jumpState = 'ascending';
             jumpStartTime = performance.now();
-            highestPointHeight = currentHeight;
+            highestPointHeight = smoothedJumpHeight;
           }
           widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
           break;
         case 'ascending':
-          if (currentHeight > highestPointHeight) highestPointHeight = currentHeight;
-          if (jumpHeight < JUMP_THRESHOLD/2) { // landed
+          if (smoothedJumpHeight > highestPointHeight) highestPointHeight = smoothedJumpHeight;
+          if (smoothedJumpHeight < JUMP_THRESHOLD/2) { // landed
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
-            const maxJump = highestPointHeight - baselineHeight;
-            widgetJumpHeightDisplay.textContent = `Jump: ${maxJump.toFixed(2)} m`;
+            widgetJumpHeightDisplay.textContent = `Jump: ${highestPointHeight.toFixed(2)} m`;
           } else {
-            widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m`;
+            widgetJumpHeightDisplay.textContent = `Jump: ${smoothedJumpHeight.toFixed(2)} m`;
           }
           break;
         default:
@@ -384,7 +395,9 @@
           if (count >= calibrationSampleCount) {
             clearInterval(calibrationInterval);
             if (calibrationSamples.length > 0) {
+              // Save as baselineHeight (distance from ankles to trampoline plane when standing)
               baselineHeight = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
+              smoothedJumpHeight = 0; // reset smoothing on calibration
               currentCalibrationPhase = 'complete';
               trampolineNotice.textContent = "Calibration complete! Start jumping!";
               hide(calibrateBtn);
