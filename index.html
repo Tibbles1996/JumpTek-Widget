@@ -204,7 +204,7 @@
         });
       }
       // Send via postMessage to external parent or listeners
-      window.postMessage({
+      window.parent.postMessage({
         type: 'jump',
         height: jumpHeight,
         timestamp: jumpTimestamp
