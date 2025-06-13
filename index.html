@@ -102,6 +102,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
+    // --- Utility Functions ---
+    function show(el) { if (el) el.style.display = ""; }
+    function hide(el) { if (el) el.style.display = "none"; }
+
     // --- DOM ---
     function getEl(id) { return document.getElementById(id); }
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
