@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Lovable UI Integration)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Lovable UI Integration, Trampoline/Custom Modes)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -35,7 +35,7 @@
     #settingsPopover.open { display: flex; animation: popIn 0.18s; }
     @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"] { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; background: #222; color: #fff; }
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; background: #222; color: #fff; }
     #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
     #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
     #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
@@ -44,7 +44,7 @@
     #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2);}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
-    #widgetJumpHeightDisplay { display: none; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25;}
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25;}
   </style>
 </head>
 <body>
@@ -64,6 +64,19 @@
     </div>
     <div id="settingsPopover" aria-modal="true" role="dialog">
       <button class="close-btn" id="closeSettingsBtn" aria-label="Close settings">&times;</button>
+      <div style="margin-bottom: 8px;">
+        <label for="jumpAreaMode">Jump Area Mode:</label><br>
+        <select id="jumpAreaMode">
+          <option value="trampoline">Full Trampoline</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div id="customDimensionsFields" style="display:none; margin-bottom:10px;">
+        <label for="customWidth">Width (meters):</label>
+        <input type="number" step="0.01" min="0.1" max="10" value="1.5" id="customWidth"><br>
+        <label for="customLength">Length (meters):</label>
+        <input type="number" step="0.01" min="0.1" max="10" value="2.5" id="customLength">
+      </div>
       <div>
         <label for="jumpThreshold">Minimum Jump Threshold (meters):</label><br>
         <input type="number" step="0.01" min="0.01" max="0.5" value="0.08" id="jumpThreshold">
@@ -89,26 +102,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
-    // --- Trampoline dimensions (meters) ---
-    const TRAMPOLINE_WIDTH_M = 3.048, TRAMPOLINE_HEIGHT_M = 5.1816;
-    const worldCorners = [
-      [0, 0, 0],
-      [TRAMPOLINE_WIDTH_M, 0, 0],
-      [TRAMPOLINE_WIDTH_M, TRAMPOLINE_HEIGHT_M, 0],
-      [0, TRAMPOLINE_HEIGHT_M, 0]
-    ];
-    let trampolineCorners = [], homography = null, plane3D = null, baselineHeight = null;
-    let currentCalibrationPhase = 'mark_corners';
-    let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
-    let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointHeight = null;
-    let currentStream = null, videoTrack = null, zoomCapabilities = null;
-    let debugMode = false;
-    let calibrationSamples = [], calibrationSampleCount = 45;
-
-    // Smoothing for jump height
-    let smoothedJumpHeight = 0;
-    const SMOOTHING_ALPHA = 0.3; // 0 = very smooth, 1 = raw
-
     // --- DOM ---
     function getEl(id) { return document.getElementById(id); }
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
@@ -126,11 +119,52 @@
     const saveSettingsBtn = getEl('saveSettingsBtn');
     const jumpThresholdInput = getEl('jumpThreshold');
     const debugModeCheckbox = getEl('debugMode');
+    // For custom mode
+    const jumpAreaModeSelect = getEl('jumpAreaMode');
+    const customDimensionsFields = getEl('customDimensionsFields');
+    const customWidthInput = getEl('customWidth');
+    const customLengthInput = getEl('customLength');
 
-    function show(el) { if (el) el.style.display = ""; }
-    function hide(el) { if (el) el.style.display = "none"; }
+    // --- Area dimensions ---
+    // 10ft x 17ft trampoline (in meters)
+    const TRAMPOLINE_WIDTH_M = 3.048;  // 10 feet
+    const TRAMPOLINE_LENGTH_M = 5.1816; // 17 feet
 
-    // --- Homography ---
+    // --- Homography/plane calibration state ---
+    let trampolineCorners = [], homography = null, plane3D = null, baselineHeight = null;
+    let currentCalibrationPhase = 'mark_corners';
+    let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
+    let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointHeight = null;
+    let currentStream = null, videoTrack = null, zoomCapabilities = null;
+    let debugMode = false;
+    let calibrationSamples = [], calibrationSampleCount = 45;
+
+    // Smoothing for jump height
+    let smoothedJumpHeight = 0;
+    const SMOOTHING_ALPHA = 0.3;
+
+    // --- Homography/plane helpers ---
+    function getWorldCorners() {
+      if (jumpAreaModeSelect && jumpAreaModeSelect.value === "custom") {
+        const width = parseFloat(customWidthInput.value) || 1.5;
+        const length = parseFloat(customLengthInput.value) || 2.5;
+        return [
+          [0, 0, 0],
+          [width, 0, 0],
+          [width, length, 0],
+          [0, length, 0]
+        ];
+      } else {
+        // Full trampoline mode (10ft x 17ft)
+        return [
+          [0, 0, 0],
+          [TRAMPOLINE_WIDTH_M, 0, 0],
+          [TRAMPOLINE_WIDTH_M, TRAMPOLINE_LENGTH_M, 0],
+          [0, TRAMPOLINE_LENGTH_M, 0]
+        ];
+      }
+    }
+
     function computeHomography(src, dst) {
       const X = [], Y = [];
       for (let i = 0; i < 4; i++) {
@@ -152,18 +186,12 @@
       const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
       return [u, v];
     }
-
-    // --- 2D image to 3D trampoline plane mapping ---
     function imageToTrampolinePlane(x, y) {
       if (!homography) return null;
       const [u, v] = applyHomography(homography, x, y);
-      // The trampoline plane in world coords is (u, v, 0)
       return { x: u, y: v, z: 0 };
     }
-
-    // --- Fit a 3D plane from 4 points (plane equation Ax+By+Cz+D=0) ---
     function fitPlaneFromPoints(points) {
-      // Use the first 3 points for the plane
       const [p1, p2, p3] = points;
       const v1 = {
         x: p2.x - p1.x,
@@ -175,7 +203,6 @@
         y: p3.y - p1.y,
         z: p3.z - p1.z
       };
-      // Cross product to get normal vector
       const normal = {
         x: v1.y * v2.z - v1.z * v2.y,
         y: v1.z * v2.x - v1.x * v2.z,
@@ -183,33 +210,26 @@
       };
       const A = normal.x, B = normal.y, C = normal.z;
       const D = -(A * p1.x + B * p1.y + C * p1.z);
-      // Normalize
       const norm = Math.sqrt(A*A + B*B + C*C);
       return {A: A/norm, B: B/norm, C: C/norm, D: D/norm};
     }
-
-    // --- Distance from 3D point to a plane ---
     function distanceToPlane(plane, pt) {
-      // Returns signed distance (above or below plane)
       return (plane.A * pt.x + plane.B * pt.y + plane.C * pt.z + plane.D) / Math.sqrt(plane.A*plane.A + plane.B*plane.B + plane.C*plane.C);
     }
 
     // --- Lovable UI integration: send jump data and postMessage ---
     function sendJumpDataToLovableUI(jumpHeight, jumpTimestamp) {
-      // Send to lovableUI handler if present
       if (window.lovableUI && typeof window.lovableUI.collectJump === 'function') {
         window.lovableUI.collectJump({
           height: jumpHeight,
           timestamp: jumpTimestamp
         });
       }
-      // Send via postMessage to external parent or listeners
       window.parent.postMessage({
         type: 'jump',
         height: jumpHeight,
         timestamp: jumpTimestamp
       }, '*');
-      // Fallback: log to console
       console.log("[Jump Data] Height:", jumpHeight, "Timestamp:", jumpTimestamp);
     }
 
@@ -292,7 +312,6 @@
             ctx.strokeStyle = "#fff";
             ctx.lineWidth = 2;
             ctx.stroke();
-            // Draw number
             ctx.fillStyle = "#222";
             ctx.font = "bold 18px Arial";
             ctx.textAlign = "center";
@@ -318,30 +337,19 @@
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
-
-      // Get both ankles in 3D (MediaPipe world coordinates)
       const leftAnkle = poseWorldLandmarks[27];
       const rightAnkle = poseWorldLandmarks[28];
-
       if (!leftAnkle || !rightAnkle) {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
       }
-
       const leftDist = distanceToPlane(plane3D, leftAnkle);
       const rightDist = distanceToPlane(plane3D, rightAnkle);
       const currentHeight = (leftDist + rightDist) / 2;
-
-      // jumpHeight = baselineHeight - currentHeight; (positive when jumping up)
       let jumpHeight = baselineHeight - currentHeight;
-
-      // Smoothing for stability
       smoothedJumpHeight = SMOOTHING_ALPHA * jumpHeight + (1 - SMOOTHING_ALPHA) * smoothedJumpHeight;
-
-      // Clamp to zero if near zero (to hide micro-noise)
       if (Math.abs(smoothedJumpHeight) < 0.01) smoothedJumpHeight = 0;
 
-      // Jump state machine (min jump height required)
       let JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
       switch(jumpState) {
         case 'on_ground':
@@ -358,7 +366,6 @@
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
             widgetJumpHeightDisplay.textContent = `Jump: ${highestPointHeight.toFixed(2)} m`;
-            // --- Send jump data to lovable UI! ---
             sendJumpDataToLovableUI(highestPointHeight, Date.now());
           } else {
             widgetJumpHeightDisplay.textContent = `Jump: ${smoothedJumpHeight.toFixed(2)} m`;
@@ -378,12 +385,11 @@
         const x = e.clientX - rect.left, y = e.clientY - rect.top;
         trampolineCorners.push([x, y]);
         if (trampolineCorners.length === 4) {
-          // Map corners to world coordinates for homography
-          homography = computeHomography(trampolineCorners, worldCorners.map(([X,Y]) => [X,Y]));
-          // Generate 3D world points for plane fit: use (X,Y,0) real-world corners
+          // Use correct world corners for selected mode
+          homography = computeHomography(trampolineCorners, getWorldCorners().map(([X,Y]) => [X,Y]));
           let planePoints = [];
           for (let i = 0; i < 4; ++i) {
-            planePoints.push({ x: worldCorners[i][0], y: worldCorners[i][1], z: 0 });
+            planePoints.push({ x: getWorldCorners()[i][0], y: getWorldCorners()[i][1], z: 0 });
           }
           plane3D = fitPlaneFromPoints(planePoints);
           currentCalibrationPhase = 'stand_still';
@@ -437,6 +443,13 @@
     });
 
     // --- Settings UI ---
+    jumpAreaModeSelect.addEventListener('change', function() {
+      if (jumpAreaModeSelect.value === 'custom') {
+        customDimensionsFields.style.display = "";
+      } else {
+        customDimensionsFields.style.display = "none";
+      }
+    });
     settingsBtn.addEventListener('click', function() {
       settingsPopover.classList.add('open');
     });
@@ -509,11 +522,7 @@
     // --- Example lovableUI handler for demo purposes ---
     window.lovableUI = {
       collectJump: function(data) {
-        // Here you could push to an array, send to server, or update a chart.
-        // For demo: show in console and alert
         console.log("LovableUI received jump:", data);
-        // Uncomment the next line if you want a popup for every jump:
-        // alert("Jump: " + data.height.toFixed(2) + " m at " + new Date(data.timestamp).toLocaleTimeString());
       }
     };
   </script>
