@@ -194,18 +194,23 @@
       return (plane.A * pt.x + plane.B * pt.y + plane.C * pt.z + plane.D) / Math.sqrt(plane.A*plane.A + plane.B*plane.B + plane.C*plane.C);
     }
 
-    // --- Lovable UI integration: send jump data ---
+    // --- Lovable UI integration: send jump data and postMessage ---
     function sendJumpDataToLovableUI(jumpHeight, jumpTimestamp) {
-      // Example: send data to a UI handler, queue, or external collector
+      // Send to lovableUI handler if present
       if (window.lovableUI && typeof window.lovableUI.collectJump === 'function') {
         window.lovableUI.collectJump({
           height: jumpHeight,
           timestamp: jumpTimestamp
         });
-      } else {
-        // Fallback: log to console
-        console.log("[Jump Data] Height:", jumpHeight, "Timestamp:", jumpTimestamp);
       }
+      // Send via postMessage to external parent or listeners
+      window.postMessage({
+        type: 'jump',
+        height: jumpHeight,
+        timestamp: jumpTimestamp
+      }, '*');
+      // Fallback: log to console
+      console.log("[Jump Data] Height:", jumpHeight, "Timestamp:", jumpTimestamp);
     }
 
     // --- Resize ---
