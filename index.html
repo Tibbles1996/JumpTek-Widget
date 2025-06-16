@@ -29,13 +29,13 @@
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
     #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
     #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem;}
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.15rem;}
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem;}
-    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.4); flex-direction: column; z-index: 40; padding: 24px 28px; }
+    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.7); padding: 30px 36px 20px 24px; flex-direction: column; z-index: 99; }
     #settingsPopover.open { display: flex; animation: popIn 0.18s; }
     @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; background: #222; color: #fff; }
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 7px;}
     #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
     #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
     #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
@@ -44,7 +44,7 @@
     #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2);}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25;}
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 50;}
   </style>
 </head>
 <body>
@@ -123,6 +123,7 @@
     const saveSettingsBtn = getEl('saveSettingsBtn');
     const jumpThresholdInput = getEl('jumpThreshold');
     const debugModeCheckbox = getEl('debugMode');
+    const switchCameraBtn = getEl('switchCameraBtn'); // Added DOM ref
     // For custom mode
     const jumpAreaModeSelect = getEl('jumpAreaMode');
     const customDimensionsFields = getEl('customDimensionsFields');
@@ -130,7 +131,6 @@
     const customLengthInput = getEl('customLength');
 
     // --- Area dimensions ---
-    // 10ft x 17ft trampoline (in meters)
     const TRAMPOLINE_WIDTH_M = 3.048;  // 10 feet
     const TRAMPOLINE_LENGTH_M = 5.1816; // 17 feet
 
@@ -142,6 +142,10 @@
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
     let calibrationSamples = [], calibrationSampleCount = 45;
+
+    // Camera switching state
+    let videoDevices = [];
+    let currentDeviceIndex = 0;
 
     // Smoothing for jump height
     let smoothedJumpHeight = 0;
@@ -245,20 +249,36 @@
     window.addEventListener('resize', resizeCanvasToScreen);
 
     // --- Camera/Video logic ---
-    async function startCamera() {
+    async function enumerateVideoDevices() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      videoDevices = devices.filter(device => device.kind === 'videoinput');
+      if (videoDevices.length > 1) {
+        show(switchCameraBtn);
+      } else {
+        hide(switchCameraBtn);
+      }
+    }
+
+    async function startCamera(deviceId) {
       show(loadingIndicator);
       if (currentStream) {
         try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
         videoTrack = null; zoomCapabilities = null;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
+      let constraints = {
         audio: false,
         video: {
-          facingMode: "environment",
           width: { ideal: 640 }, height: { ideal: 480 },
           frameRate: { ideal: 90, max: 120 }
         }
-      });
+      };
+      if (deviceId) {
+        constraints.video.deviceId = { exact: deviceId };
+      } else {
+        constraints.video.facingMode = "environment";
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       currentStream = stream;
       video.srcObject = stream;
       await video.play();
@@ -269,6 +289,17 @@
       zoomOutBtn.disabled = !zoomCapabilities;
       resizeCanvasToScreen();
     }
+
+    switchCameraBtn.addEventListener('click', async function() {
+      if (videoDevices.length <= 1) return;
+      currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
+      try {
+        await startCamera(videoDevices[currentDeviceIndex].deviceId);
+      } catch (e) {
+        trampolineNotice.textContent = 'Unable to switch camera: ' + e;
+        trampolineNotice.style.color = "#f00";
+      }
+    });
 
     // --- Pose setup (optimized) ---
     function setupPose() {
@@ -511,7 +542,25 @@
       debugMode = debugModeCheckbox.checked;
 
       try {
+        // First start: try with environment or default
         await startCamera();
+        await enumerateVideoDevices();
+        // Try to use rear camera if available and not default
+        if (videoDevices.length > 1) {
+          // Try to find a rear camera in the labels (for mobile)
+          let found = false;
+          for (let i = 0; i < videoDevices.length; ++i) {
+            if (/back|rear|environment/i.test(videoDevices[i].label)) {
+              currentDeviceIndex = i;
+              await startCamera(videoDevices[i].deviceId);
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            currentDeviceIndex = 0;
+          }
+        }
         drawLoop();
         poseLoop();
         trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
