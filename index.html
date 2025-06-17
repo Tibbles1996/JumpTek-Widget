@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Optimized Tracking)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Persistent Tracking)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -154,7 +154,6 @@
     let airTimeForLastJump = 0, airTimeHeightForLastJump = 0;
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
-    let calibrationSamples = [], calibrationSampleCount = 45;
 
     // Camera switching state
     let videoDevices = [];
@@ -166,12 +165,13 @@
 
     // --- Athlete tracking state ---
     let autoBaselineActive = false;
-    let autoBaselineSamples = {};
-    let athleteTrackId = null;
-    let athleteBaseline = null;
+    let autoBaselineSamples = [];
     const AUTO_BASELINE_DURATION = 2500; // ms
     let autoBaselineStart = 0;
-    let jumpersInTrampoline = {};
+    let athleteLastCenter = null;
+    let framesSinceSeen = 0;
+    const LOST_TRACKING_THRESHOLD = 15; // ~0.6s at 25 FPS
+    let lastValidLandmarks = null;
 
     // --- Homography/plane helpers ---
     function getWorldCorners() {
@@ -185,7 +185,6 @@
           [0, length, 0]
         ];
       } else {
-        // Full trampoline mode (10ft x 17ft)
         return [
           [0, 0, 0],
           [TRAMPOLINE_WIDTH_M, 0, 0],
@@ -320,6 +319,24 @@
       }
     });
 
+    // Persistent athlete tracking logic
+    function getCenter(poseLandmarks) {
+      const lHip = poseLandmarks[23], rHip = poseLandmarks[24];
+      if (lHip && rHip) {
+        return { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
+      }
+      // fallback: use nose if hips are missing
+      const nose = poseLandmarks[0]; 
+      return nose ? { x: nose.x, y: nose.y } : null;
+    }
+
+    function isFeetInTrampoline(poseLandmarks) {
+      if (!poseLandmarks || trampolineCorners.length !== 4) return false;
+      const la = [poseLandmarks[27].x * canvas.width, poseLandmarks[27].y * canvas.height];
+      const ra = [poseLandmarks[28].x * canvas.width, poseLandmarks[28].y * canvas.height];
+      return pointInPolygon(la[0], la[1], trampolineCorners) && pointInPolygon(ra[0], ra[1], trampolineCorners);
+    }
+
     // --- Pose setup (optimized, single-person) ---
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
@@ -337,99 +354,70 @@
           processAutoBaseline(results.poseWorldLandmarks);
         }
         if (!autoBaselineActive && results && results.poseWorldLandmarks) {
-          // Robust filtering: only track if ankles are in trampoline
-          if (athleteTrackId === null) return;
-          // For single-person pose, just check if feet are in trampoline
-          if (!isFeetInTrampoline(results.poseLandmarks)) return;
-          computeAndSendJumpY(results.poseWorldLandmarks);
+          processPersistentTracking(results.poseWorldLandmarks, results.poseLandmarks);
         }
       });
       poseLoaded = true;
     }
 
-    // --- Draw Loop ---
-    function drawLoop() {
-      if (!canvas || !ctx || !video) return;
-      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
-        // Draw trampoline corners and lines
-        if (trampolineCorners.length > 0) {
-          ctx.save();
-          ctx.strokeStyle = "#0ff"; ctx.lineWidth = 3;
-          ctx.fillStyle = "#0ff";
-          ctx.beginPath();
-          trampolineCorners.forEach(([x, y], idx) => {
-            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-          });
-          if (trampolineCorners.length === 4) ctx.closePath();
-          ctx.stroke();
-          trampolineCorners.forEach(([x, y], idx) => {
-            ctx.beginPath();
-            ctx.arc(x, y, 10, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = "#fff";
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.fillStyle = "#222";
-            ctx.font = "bold 18px Arial";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(String(idx + 1), x, y);
-            ctx.fillStyle = "#0ff";
-          });
-          ctx.restore();
+    function processPersistentTracking(poseWorldLandmarks, poseLandmarks) {
+      const center = getCenter(poseLandmarks);
+      if (!center) return;
+
+      if (athleteLastCenter) {
+        const dx = center.x - athleteLastCenter.x;
+        const dy = center.y - athleteLastCenter.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        // If detected pose is far from last known, ignore (likely not athlete)
+        if (dist > 0.18) {
+          framesSinceSeen++;
+          if (framesSinceSeen < LOST_TRACKING_THRESHOLD && lastValidLandmarks) {
+            // Use last known valid landmarks for jump logic
+            computeAndSendJumpY(lastValidLandmarks);
+            trampolineNotice.textContent = "Tracking athlete... (reacquiring)";
+          } else {
+            trampolineNotice.textContent = "Tracking lost! Please recalibrate or ensure the athlete is visible.";
+            return;
+          }
+        } else {
+          framesSinceSeen = 0;
+          athleteLastCenter = center;
+          lastValidLandmarks = poseWorldLandmarks;
+          computeAndSendJumpY(poseWorldLandmarks);
+          trampolineNotice.textContent = "";
         }
-        // Draw pose
-        if (lastPoseResults && lastPoseResults.poseLandmarks) {
-          drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
-          drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
-        }
+      } else {
+        // First assignment
+        athleteLastCenter = center;
+        framesSinceSeen = 0;
+        lastValidLandmarks = poseWorldLandmarks;
+        computeAndSendJumpY(poseWorldLandmarks);
       }
-      requestAnimationFrame(drawLoop);
     }
 
-    // --- Robust feet-in-trampoline check ---
-    function isFeetInTrampoline(poseLandmarks) {
-      if (!poseLandmarks || trampolineCorners.length !== 4) return false;
-      const la = [poseLandmarks[27].x * canvas.width, poseLandmarks[27].y * canvas.height];
-      const ra = [poseLandmarks[28].x * canvas.width, poseLandmarks[28].y * canvas.height];
-      return pointInPolygon(la[0], la[1], trampolineCorners) && pointInPolygon(ra[0], ra[1], trampolineCorners);
-    }
-
-    // --- Athlete auto-baseline calibration, persistent selection, and filtering ---
     function processAutoBaseline(poseWorldLandmarks) {
-      if (!autoBaselineActive) return;
-      if (!isFeetInTrampoline(lastPoseResults.poseLandmarks)) return;
       // Only process if both feet are in trampoline
+      if (!isFeetInTrampoline(lastPoseResults.poseLandmarks)) return;
       const leftAnkle = poseWorldLandmarks[27], rightAnkle = poseWorldLandmarks[28];
       if (!leftAnkle || !rightAnkle) return;
       const leftDist = distanceToPlane(plane3D, leftAnkle);
       const rightDist = distanceToPlane(plane3D, rightAnkle);
       const mean = (leftDist + rightDist) / 2;
-      const frameTime = performance.now();
+      autoBaselineSamples.push(mean);
 
-      // Track by time and jump height in trampoline
-      if (!autoBaselineSamples['athlete']) autoBaselineSamples['athlete'] = [];
-      autoBaselineSamples['athlete'].push({ time: frameTime, height: mean });
-
-      // Track if this person "jumps" (feet above baseline by 20+ cm)
-      if (!jumpersInTrampoline['athlete']) jumpersInTrampoline['athlete'] = { maxJump: 0, touches: 0 };
-      const jumpDelta = Math.abs(mean - (athleteBaseline !== null ? athleteBaseline : mean));
-      if (jumpDelta > 0.2) jumpersInTrampoline['athlete'].maxJump = Math.max(jumpersInTrampoline['athlete'].maxJump, jumpDelta);
-      jumpersInTrampoline['athlete'].touches++;
-
-      // End auto-baseline after period
-      if (frameTime - autoBaselineStart > AUTO_BASELINE_DURATION) {
-        // Find the lowest ankle height (baseline)
-        const heights = autoBaselineSamples['athlete'].map(s => s.height);
-        athleteBaseline = Math.max(...heights);
-        baselineHeight = athleteBaseline;
-        // Lock tracking to this athlete
-        athleteTrackId = 'athlete';
-        autoBaselineActive = false;
-        currentCalibrationPhase = 'complete';
-        trampolineNotice.textContent = "Calibration complete! Start jumping!";
+      if (performance.now() - autoBaselineStart > AUTO_BASELINE_DURATION) {
+        if (autoBaselineSamples.length > 0) {
+          baselineHeight = Math.max(...autoBaselineSamples);
+          autoBaselineActive = false;
+          currentCalibrationPhase = 'complete';
+          trampolineNotice.textContent = "Calibration complete! Start jumping!";
+        } else {
+          trampolineNotice.textContent = "Calibration failed, please retry.";
+          show(calibrateBtn); // Keep calibrate visible on failure
+          autoBaselineActive = false;
+          currentCalibrationPhase = 'auto_baseline';
+          return;
+        }
       }
     }
 
@@ -465,13 +453,11 @@
           if (smoothedJumpHeight < JUMP_THRESHOLD/2) { // landed
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
-            // --- Air time-based jump height calculation ---
             const airTimeSeconds = (jumpEndTime - jumpStartTime) / 1000;
             const gravity = 9.81;
             const jumpHeightByAirTime = (gravity * airTimeSeconds * airTimeSeconds) / 8;
             airTimeForLastJump = airTimeSeconds;
             airTimeHeightForLastJump = jumpHeightByAirTime;
-            // Display both heights for testing
             widgetJumpHeightDisplay.textContent =
               `Jump (ankle): ${highestPointHeight.toFixed(2)} m\nJump (air): ${jumpHeightByAirTime.toFixed(2)} m`;
             sendJumpDataToLovableUI(jumpHeightByAirTime, Date.now());
@@ -484,6 +470,45 @@
           widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
           break;
       }
+    }
+
+    function drawLoop() {
+      if (!canvas || !ctx || !video) return;
+      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
+        if (trampolineCorners.length > 0) {
+          ctx.save();
+          ctx.strokeStyle = "#0ff"; ctx.lineWidth = 3;
+          ctx.fillStyle = "#0ff";
+          ctx.beginPath();
+          trampolineCorners.forEach(([x, y], idx) => {
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          if (trampolineCorners.length === 4) ctx.closePath();
+          ctx.stroke();
+          trampolineCorners.forEach(([x, y], idx) => {
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = "#222";
+            ctx.font = "bold 18px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(String(idx + 1), x, y);
+            ctx.fillStyle = "#0ff";
+          });
+          ctx.restore();
+        }
+        if (lastPoseResults && lastPoseResults.poseLandmarks) {
+          drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
+          drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
+        }
+      }
+      requestAnimationFrame(drawLoop);
     }
 
     canvas.addEventListener('click', function(e) {
@@ -500,7 +525,7 @@
           plane3D = fitPlaneFromPoints(planePoints);
           currentCalibrationPhase = 'auto_baseline';
           trampolineNotice.textContent = "Calibration: Move/jump as normal for 2.5s...";
-          show(calibrateBtn);
+          show(calibrateBtn); // Always show calibrate for manual retry
           startAutoBaseline();
         } else {
           trampolineNotice.textContent = `Corner ${trampolineCorners.length}/4 marked. Continue.`;
@@ -510,17 +535,21 @@
 
     function startAutoBaseline() {
       autoBaselineActive = true;
-      autoBaselineSamples = {};
-      athleteTrackId = null;
-      athleteBaseline = null;
-      jumpersInTrampoline = {};
+      autoBaselineSamples = [];
       autoBaselineStart = performance.now();
       trampolineNotice.textContent = "Calibrating... Move or jump as normal!";
-      hide(calibrateBtn);
+      show(calibrateBtn); // Always keep calibrate visible for retry
     }
 
     calibrateBtn.addEventListener('click', function() {
-      if (currentCalibrationPhase === 'auto_baseline') startAutoBaseline();
+      if (trampolineCorners.length === 4 && plane3D) {
+        autoBaselineActive = true;
+        autoBaselineSamples = [];
+        autoBaselineStart = performance.now();
+        trampolineNotice.textContent = "Manual calibration: Move or jump as normal!";
+        currentCalibrationPhase = 'auto_baseline';
+        show(calibrateBtn);
+      }
     });
 
     restartDrawBtn.addEventListener('click', function() {
@@ -530,10 +559,10 @@
       show(canvas);
       show(calibrateBtn);
       autoBaselineActive = false;
-      autoBaselineSamples = {};
-      athleteTrackId = null;
-      athleteBaseline = null;
-      jumpersInTrampoline = {};
+      autoBaselineSamples = [];
+      athleteLastCenter = null;
+      framesSinceSeen = 0;
+      lastValidLandmarks = null;
     });
 
     jumpAreaModeSelect.addEventListener('change', function() {
@@ -619,10 +648,10 @@
         trampolineNotice.style.color = "#0f0";
         currentCalibrationPhase = 'mark_corners';
         autoBaselineActive = false;
-        autoBaselineSamples = {};
-        athleteTrackId = null;
-        athleteBaseline = null;
-        jumpersInTrampoline = {};
+        autoBaselineSamples = [];
+        athleteLastCenter = null;
+        framesSinceSeen = 0;
+        lastValidLandmarks = null;
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
