@@ -29,19 +29,19 @@
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
     #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
     #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem;}
-    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem;}
-    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 20px #000a; padding: 20px 30px 24px 30px; z-index: 40; flex-direction: column; }
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; }
+    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; z-index: 20;}
+    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); padding: 26px 32px 18px 24px; z-index:40; flex-direction: column;}
     #settingsPopover.open { display: flex; animation: popIn 0.18s; }
     @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; }
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; }
     #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
     #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
     #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
     #settingsPopover .close-btn { position: absolute; top: 10px; right: 16px; background: none; border: none; color: #aaa; font-size: 1.35rem; cursor: pointer; padding: 0; line-height: 1;}
     #settingsPopover .close-btn:hover { color: #fff; }
-    #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2);}
+    #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.15);}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
     #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 30; white-space: pre-line;}
@@ -151,6 +151,10 @@
     // Smoothing for jump height
     let smoothedJumpHeight = 0;
     const SMOOTHING_ALPHA = 0.3;
+
+    // --- Athlete selection state (NEW) ---
+    let selectionMode = false;
+    let athleteSelected = false;
 
     // --- Homography/plane helpers ---
     function getWorldCorners() {
@@ -362,6 +366,24 @@
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
           drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
+
+          // --- Minimal Manual Selection Logic (NEW) ---
+          if (selectionMode && !athleteSelected) {
+            // Draw a yellow circle at the nose (landmark 0)
+            const nose = lastPoseResults.poseLandmarks[0];
+            if (nose) {
+              const nx = nose.x * canvas.width;
+              const ny = nose.y * canvas.height;
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(nx, ny, 38, 0, 2 * Math.PI);
+              ctx.lineWidth = 6;
+              ctx.strokeStyle = "#ffd600";
+              ctx.globalAlpha = 0.9;
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
         }
       }
       requestAnimationFrame(drawLoop);
@@ -369,6 +391,12 @@
 
     // --- Jump Detection (distance above trampoline plane, in meters) ---
     function computeAndSendJumpY(poseWorldLandmarks) {
+      // --- Minimal Selection Guard (NEW) ---
+      if (selectionMode && !athleteSelected) {
+        widgetJumpHeightDisplay.textContent = `Waiting for athlete selection...`;
+        return;
+      }
+
       if (!plane3D || baselineHeight === null || currentCalibrationPhase !== "complete") {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
@@ -428,6 +456,24 @@
 
     // --- Calibration: Mark corners and calibrate ---
     canvas.addEventListener('click', function(e) {
+      // --- Athlete Selection (NEW) ---
+      if (selectionMode && !athleteSelected && lastPoseResults && lastPoseResults.poseLandmarks) {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left, y = e.clientY - rect.top;
+        const nose = lastPoseResults.poseLandmarks[0];
+        if (nose) {
+          const nx = nose.x * canvas.width;
+          const ny = nose.y * canvas.height;
+          const dist = Math.sqrt((x - nx) ** 2 + (y - ny) ** 2);
+          if (dist < 45) { // generous selection radius
+            athleteSelected = true;
+            selectionMode = false;
+            trampolineNotice.textContent = "Athlete selected. Start jumping!";
+            return;
+          }
+        }
+      }
+      // --- Usual calibration corner marking ---
       if (currentCalibrationPhase === 'mark_corners') {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -471,7 +517,10 @@
               baselineHeight = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
               smoothedJumpHeight = 0;
               currentCalibrationPhase = 'complete';
-              trampolineNotice.textContent = "Calibration complete! Start jumping!";
+              // --- Athlete selection step ---
+              selectionMode = true;
+              athleteSelected = false;
+              trampolineNotice.textContent = "Tap the athlete's nose to select for tracking.";
               hide(calibrateBtn);
             } else {
               trampolineNotice.textContent = "Calibration failed. Try again.";
@@ -488,6 +537,9 @@
       trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
       show(canvas);
       show(calibrateBtn);
+      // --- Reset selection state ---
+      selectionMode = false;
+      athleteSelected = false;
     });
 
     // --- Settings UI ---
@@ -579,6 +631,9 @@
         trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
         trampolineNotice.style.color = "#0f0";
         currentCalibrationPhase = 'mark_corners';
+        // --- Reset selection state (NEW) ---
+        selectionMode = false;
+        athleteSelected = false;
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
