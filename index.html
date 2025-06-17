@@ -29,13 +29,13 @@
     #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
     #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
     #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.15rem;}
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem;}
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem;}
-    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.7); padding: 30px 36px 20px 24px; flex-direction: column; z-index: 99; }
+    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 20px #000a; padding: 20px 30px 24px 30px; z-index: 40; flex-direction: column; }
     #settingsPopover.open { display: flex; animation: popIn 0.18s; }
     @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
     #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 7px;}
+    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; margin-bottom: 8px; }
     #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
     #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
     #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
@@ -44,7 +44,7 @@
     #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.2);}
     #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
     #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 50;}
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 30; white-space: pre-line;}
   </style>
 </head>
 <body>
@@ -123,7 +123,7 @@
     const saveSettingsBtn = getEl('saveSettingsBtn');
     const jumpThresholdInput = getEl('jumpThreshold');
     const debugModeCheckbox = getEl('debugMode');
-    const switchCameraBtn = getEl('switchCameraBtn'); // Added DOM ref
+    const switchCameraBtn = getEl('switchCameraBtn');
     // For custom mode
     const jumpAreaModeSelect = getEl('jumpAreaMode');
     const customDimensionsFields = getEl('customDimensionsFields');
@@ -139,6 +139,7 @@
     let currentCalibrationPhase = 'mark_corners';
     let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
     let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointHeight = null;
+    let airTimeForLastJump = 0, airTimeHeightForLastJump = 0;
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
     let debugMode = false;
     let calibrationSamples = [], calibrationSampleCount = 45;
@@ -400,8 +401,20 @@
           if (smoothedJumpHeight < JUMP_THRESHOLD/2) { // landed
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
-            widgetJumpHeightDisplay.textContent = `Jump: ${highestPointHeight.toFixed(2)} m`;
-            sendJumpDataToLovableUI(highestPointHeight, Date.now());
+
+            // --- Air time-based jump height calculation ---
+            const airTimeSeconds = (jumpEndTime - jumpStartTime) / 1000;
+            const gravity = 9.81;
+            const jumpHeightByAirTime = (gravity * airTimeSeconds * airTimeSeconds) / 8;
+
+            airTimeForLastJump = airTimeSeconds;
+            airTimeHeightForLastJump = jumpHeightByAirTime;
+
+            // Display both heights for testing
+            widgetJumpHeightDisplay.textContent =
+              `Jump (ankle): ${highestPointHeight.toFixed(2)} m\nJump (air): ${jumpHeightByAirTime.toFixed(2)} m`;
+
+            sendJumpDataToLovableUI(jumpHeightByAirTime, Date.now());
           } else {
             widgetJumpHeightDisplay.textContent = `Jump: ${smoothedJumpHeight.toFixed(2)} m`;
           }
