@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Persistent Tracking)</title>
+  <title>JumpTek Homography-Calibrated Jump Tracker (Persistent + Dead Reckoning)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -168,10 +168,15 @@
     let autoBaselineSamples = [];
     const AUTO_BASELINE_DURATION = 2500; // ms
     let autoBaselineStart = 0;
-    let athleteLastCenter = null;
+
+    // Persistent tracking state
+    let lastSmoothedLandmarks = null;
+    let lastVelocity = null;
+    let lastCenter = null;
+    let lastHeight = null;
     let framesSinceSeen = 0;
-    const LOST_TRACKING_THRESHOLD = 48; // ~0.8s at 60 FPS
-    let lastValidLandmarks = null;
+    const LOST_TRACKING_THRESHOLD = 36; // ~0.6s at 60 FPS
+    const DEAD_RECKON_FRAMES = 6; // Predict up to 0.1s at 60 FPS
 
     // --- Homography/plane helpers ---
     function getWorldCorners() {
@@ -288,7 +293,7 @@
         audio: false,
         video: {
           width: { ideal: 640 }, height: { ideal: 480 },
-          frameRate: { ideal: 25, max: 30 }
+          frameRate: { ideal: 60, max: 60 }
         }
       };
       if (deviceId) {
@@ -319,22 +324,110 @@
       }
     });
 
-    // Persistent athlete tracking logic
-    function getCenter(poseLandmarks) {
-      const lHip = poseLandmarks[23], rHip = poseLandmarks[24];
+    // --- Persistent Athlete Tracking Logic ---
+    function getCenter(landmarks) {
+      const lHip = landmarks[23], rHip = landmarks[24];
       if (lHip && rHip) {
         return { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
       }
-      // fallback: use nose if hips are missing
-      const nose = poseLandmarks[0]; 
+      const nose = landmarks[0];
       return nose ? { x: nose.x, y: nose.y } : null;
     }
 
-    function isFeetInTrampoline(poseLandmarks) {
-      if (!poseLandmarks || trampolineCorners.length !== 4) return false;
-      const la = [poseLandmarks[27].x * canvas.width, poseLandmarks[27].y * canvas.height];
-      const ra = [poseLandmarks[28].x * canvas.width, poseLandmarks[28].y * canvas.height];
-      return pointInPolygon(la[0], la[1], trampolineCorners) && pointInPolygon(ra[0], ra[1], trampolineCorners);
+    // Only track when both ankles are inside or just below trampoline polygon (10% margin)
+    function isAthleteOnOrAboveTrampoline(landmarks) {
+      if (!landmarks || trampolineCorners.length !== 4) return false;
+      let margin = 0.1 * canvas.height;
+      let anklePts = [landmarks[27], landmarks[28]];
+      for (let pt of anklePts) {
+        let x = pt.x * canvas.width, y = pt.y * canvas.height;
+        if (pointInPolygon(x, y, trampolineCorners)) continue;
+        // Allow a little margin below trampoline for landings
+        let below = Math.max(...trampolineCorners.map(c => c[1]));
+        if (y > below + margin) return false;
+      }
+      return true;
+    }
+
+    function smoothLandmarks(current, previous, alpha=0.6) {
+      if (!previous) return current;
+      return current.map((pt, i) => ({
+        x: pt.x * alpha + previous[i].x * (1 - alpha),
+        y: pt.y * alpha + previous[i].y * (1 - alpha),
+        z: pt.z * alpha + previous[i].z * (1 - alpha),
+        visibility: pt.visibility
+      }));
+    }
+
+    // Main tracking handler
+    function persistentTrackingHandler(poseWorldLandmarks, poseLandmarks) {
+      const center = getCenter(poseLandmarks);
+      const height = poseLandmarks[27].y; // use left ankle y as a simple metric
+
+      // 1. Filter: Only track if on/above trampoline polygon (with margin)
+      if (!isAthleteOnOrAboveTrampoline(poseLandmarks)) {
+        framesSinceSeen++;
+        // Dead reckoning: Predict for a few frames
+        if (framesSinceSeen <= DEAD_RECKON_FRAMES && lastSmoothedLandmarks && lastVelocity) {
+          let predicted = lastSmoothedLandmarks.map((pt, i) => ({
+            x: pt.x + lastVelocity[i].x,
+            y: pt.y + lastVelocity[i].y,
+            z: pt.z + lastVelocity[i].z,
+            visibility: pt.visibility
+          }));
+          computeAndSendJumpY(predicted);
+          return;
+        } else if (framesSinceSeen > LOST_TRACKING_THRESHOLD) {
+          trampolineNotice.textContent = "Tracking lost! Please recalibrate or ensure the athlete is visible.";
+          return;
+        }
+        // Use last pose if within grace period
+        if (lastSmoothedLandmarks) computeAndSendJumpY(lastSmoothedLandmarks);
+        return;
+      }
+
+      // 2. Identity persistence: Only switch if close in position and height
+      if (lastCenter) {
+        let dx = center.x - lastCenter.x;
+        let dy = center.y - lastCenter.y;
+        let dh = Math.abs(height - lastHeight);
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 0.18 || dh > 0.12) { // Too far, likely a different person
+          framesSinceSeen++;
+          if (framesSinceSeen <= DEAD_RECKON_FRAMES && lastSmoothedLandmarks && lastVelocity) {
+            let predicted = lastSmoothedLandmarks.map((pt, i) => ({
+              x: pt.x + lastVelocity[i].x,
+              y: pt.y + lastVelocity[i].y,
+              z: pt.z + lastVelocity[i].z,
+              visibility: pt.visibility
+            }));
+            computeAndSendJumpY(predicted);
+            return;
+          } else if (framesSinceSeen > LOST_TRACKING_THRESHOLD) {
+            trampolineNotice.textContent = "Tracking lost! Please recalibrate or ensure the athlete is visible.";
+            return;
+          }
+          if (lastSmoothedLandmarks) computeAndSendJumpY(lastSmoothedLandmarks);
+          return;
+        }
+      }
+
+      // 3. If here, this is our athlete: update state and process normally
+      framesSinceSeen = 0;
+      lastCenter = center;
+      lastHeight = height;
+      // Smoothing
+      let smoothed = smoothLandmarks(poseWorldLandmarks, lastSmoothedLandmarks, 0.6);
+      // Velocity for dead reckoning
+      lastVelocity = lastSmoothedLandmarks ?
+        smoothed.map((pt, i) => ({
+          x: pt.x - lastSmoothedLandmarks[i].x,
+          y: pt.y - lastSmoothedLandmarks[i].y,
+          z: pt.z - lastSmoothedLandmarks[i].z,
+        }))
+        : null;
+      lastSmoothedLandmarks = smoothed;
+      computeAndSendJumpY(smoothed);
     }
 
     // --- Pose setup (optimized, single-person) ---
@@ -350,54 +443,19 @@
       });
       pose.onResults(results => {
         lastPoseResults = results;
+        if (!autoBaselineActive && results && results.poseWorldLandmarks && results.poseLandmarks) {
+          persistentTrackingHandler(results.poseWorldLandmarks, results.poseLandmarks);
+        }
         if (autoBaselineActive && results && results.poseWorldLandmarks) {
           processAutoBaseline(results.poseWorldLandmarks);
-        }
-        if (!autoBaselineActive && results && results.poseWorldLandmarks) {
-          processPersistentTracking(results.poseWorldLandmarks, results.poseLandmarks);
         }
       });
       poseLoaded = true;
     }
 
-    function processPersistentTracking(poseWorldLandmarks, poseLandmarks) {
-      const center = getCenter(poseLandmarks);
-      if (!center) return;
-
-      if (athleteLastCenter) {
-        const dx = center.x - athleteLastCenter.x;
-        const dy = center.y - athleteLastCenter.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        // If detected pose is far from last known, ignore (likely not athlete)
-        if (dist > 0.18) {
-          framesSinceSeen++;
-          if (framesSinceSeen < LOST_TRACKING_THRESHOLD && lastValidLandmarks) {
-            // Use last known valid landmarks for jump logic
-            computeAndSendJumpY(lastValidLandmarks);
-            trampolineNotice.textContent = "Tracking athlete... (reacquiring)";
-          } else {
-            trampolineNotice.textContent = "Tracking lost! Please recalibrate or ensure the athlete is visible.";
-            return;
-          }
-        } else {
-          framesSinceSeen = 0;
-          athleteLastCenter = center;
-          lastValidLandmarks = poseWorldLandmarks;
-          computeAndSendJumpY(poseWorldLandmarks);
-          trampolineNotice.textContent = "";
-        }
-      } else {
-        // First assignment
-        athleteLastCenter = center;
-        framesSinceSeen = 0;
-        lastValidLandmarks = poseWorldLandmarks;
-        computeAndSendJumpY(poseWorldLandmarks);
-      }
-    }
-
     function processAutoBaseline(poseWorldLandmarks) {
       // Only process if both feet are in trampoline
-      if (!isFeetInTrampoline(lastPoseResults.poseLandmarks)) return;
+      if (!isAthleteOnOrAboveTrampoline(lastPoseResults.poseLandmarks)) return;
       const leftAnkle = poseWorldLandmarks[27], rightAnkle = poseWorldLandmarks[28];
       if (!leftAnkle || !rightAnkle) return;
       const leftDist = distanceToPlane(plane3D, leftAnkle);
@@ -560,9 +618,11 @@
       show(calibrateBtn);
       autoBaselineActive = false;
       autoBaselineSamples = [];
-      athleteLastCenter = null;
+      lastSmoothedLandmarks = null;
+      lastVelocity = null;
+      lastCenter = null;
+      lastHeight = null;
       framesSinceSeen = 0;
-      lastValidLandmarks = null;
     });
 
     jumpAreaModeSelect.addEventListener('change', function() {
@@ -609,7 +669,7 @@
             }
           } catch (e) {}
           const elapsed = performance.now() - start;
-          const wait = Math.max(0, 16 - elapsed); // 60 FPS
+          const wait = Math.max(0, 16 - elapsed); // 16ms for 60 FPS
           await new Promise(res => setTimeout(res, wait));
         }
         poseLoopActive = false;
@@ -649,9 +709,11 @@
         currentCalibrationPhase = 'mark_corners';
         autoBaselineActive = false;
         autoBaselineSamples = [];
-        athleteLastCenter = null;
+        lastSmoothedLandmarks = null;
+        lastVelocity = null;
+        lastCenter = null;
+        lastHeight = null;
         framesSinceSeen = 0;
-        lastValidLandmarks = null;
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
