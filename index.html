@@ -105,9 +105,22 @@
     // --- Utility Functions ---
     function show(el) { if (el) el.style.display = ""; }
     function hide(el) { if (el) el.style.display = "none"; }
+    function getEl(id) { return document.getElementById(id); }
+
+    // --- Point in Polygon (for trampoline) ---
+    function pointInPolygon(x, y, corners) {
+      let inside = false;
+      for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+        const xi = corners[i][0], yi = corners[i][1];
+        const xj = corners[j][0], yj = corners[j][1];
+        const intersect = ((yi > y) !== (yj > y))
+          && (x < (xj - xi) * (y - yi) / (yj - yi + 0.00001) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
 
     // --- DOM ---
-    function getEl(id) { return document.getElementById(id); }
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
     const video = getEl('video');
     const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
@@ -124,7 +137,6 @@
     const jumpThresholdInput = getEl('jumpThreshold');
     const debugModeCheckbox = getEl('debugMode');
     const switchCameraBtn = getEl('switchCameraBtn');
-    // For custom mode
     const jumpAreaModeSelect = getEl('jumpAreaMode');
     const customDimensionsFields = getEl('customDimensionsFields');
     const customWidthInput = getEl('customWidth');
@@ -152,9 +164,11 @@
     let smoothedJumpHeight = 0;
     const SMOOTHING_ALPHA = 0.3;
 
-    // --- Athlete selection state (NEW) ---
-    let selectionMode = false;
-    let athleteSelected = false;
+    // --- AUTO-BASELINE calibration (NEW) ---
+    let autoBaselineActive = false;
+    let autoBaselineSamples = [];
+    const AUTO_BASELINE_DURATION = 2500; // ms
+    let autoBaselineStart = 0;
 
     // --- Homography/plane helpers ---
     function getWorldCorners() {
@@ -275,7 +289,7 @@
         audio: false,
         video: {
           width: { ideal: 640 }, height: { ideal: 480 },
-          frameRate: { ideal: 90, max: 120 }
+          frameRate: { ideal: 25, max: 30 } // OPTIMIZED FPS
         }
       };
       if (deviceId) {
@@ -319,7 +333,10 @@
       });
       pose.onResults(results => {
         lastPoseResults = results;
-        if (results && results.poseWorldLandmarks) {
+        if (autoBaselineActive && results && results.poseWorldLandmarks) {
+          processAutoBaseline(results.poseWorldLandmarks);
+        }
+        if (!autoBaselineActive && results && results.poseWorldLandmarks) {
           computeAndSendJumpY(results.poseWorldLandmarks);
         }
       });
@@ -366,37 +383,46 @@
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
           drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
-
-          // --- Minimal Manual Selection Logic (NEW) ---
-          if (selectionMode && !athleteSelected) {
-            // Draw a yellow circle at the nose (landmark 0)
-            const nose = lastPoseResults.poseLandmarks[0];
-            if (nose) {
-              const nx = nose.x * canvas.width;
-              const ny = nose.y * canvas.height;
-              ctx.save();
-              ctx.beginPath();
-              ctx.arc(nx, ny, 38, 0, 2 * Math.PI);
-              ctx.lineWidth = 6;
-              ctx.strokeStyle = "#ffd600";
-              ctx.globalAlpha = 0.9;
-              ctx.stroke();
-              ctx.restore();
-            }
-          }
         }
       }
       requestAnimationFrame(drawLoop);
     }
 
+    // --- AUTO-BASELINE: process frames for calibration (NEW) ---
+    function processAutoBaseline(poseWorldLandmarks) {
+      if (!autoBaselineActive) return;
+      const leftAnkle = poseWorldLandmarks[27], rightAnkle = poseWorldLandmarks[28];
+      if (!leftAnkle || !rightAnkle) return;
+      // Project ankle (x, y) to image/canvas space
+      const la = [leftAnkle.x * canvas.width, leftAnkle.y * canvas.height];
+      const ra = [rightAnkle.x * canvas.width, rightAnkle.y * canvas.height];
+      // Only use if both feet are inside trampoline
+      if (
+        pointInPolygon(la[0], la[1], trampolineCorners) &&
+        pointInPolygon(ra[0], ra[1], trampolineCorners)
+      ) {
+        // Use 3D distance to trampoline plane
+        const leftDist = distanceToPlane(plane3D, leftAnkle);
+        const rightDist = distanceToPlane(plane3D, rightAnkle);
+        const mean = (leftDist + rightDist) / 2;
+        autoBaselineSamples.push(mean);
+      }
+      // Stop after set duration
+      if (performance.now() - autoBaselineStart > AUTO_BASELINE_DURATION) {
+        if (autoBaselineSamples.length > 0) {
+          // Use the MAX value as the baseline (lowest the athlete got)
+          baselineHeight = Math.max(...autoBaselineSamples);
+          trampolineNotice.textContent = "Calibration complete! Start jumping!";
+        } else {
+          trampolineNotice.textContent = "Calibration failed, please retry.";
+        }
+        autoBaselineActive = false;
+        currentCalibrationPhase = 'complete';
+      }
+    }
+
     // --- Jump Detection (distance above trampoline plane, in meters) ---
     function computeAndSendJumpY(poseWorldLandmarks) {
-      // --- Minimal Selection Guard (NEW) ---
-      if (selectionMode && !athleteSelected) {
-        widgetJumpHeightDisplay.textContent = `Waiting for athlete selection...`;
-        return;
-      }
-
       if (!plane3D || baselineHeight === null || currentCalibrationPhase !== "complete") {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
         return;
@@ -429,19 +455,15 @@
           if (smoothedJumpHeight < JUMP_THRESHOLD/2) { // landed
             jumpState = 'on_ground';
             jumpEndTime = performance.now();
-
             // --- Air time-based jump height calculation ---
             const airTimeSeconds = (jumpEndTime - jumpStartTime) / 1000;
             const gravity = 9.81;
             const jumpHeightByAirTime = (gravity * airTimeSeconds * airTimeSeconds) / 8;
-
             airTimeForLastJump = airTimeSeconds;
             airTimeHeightForLastJump = jumpHeightByAirTime;
-
             // Display both heights for testing
             widgetJumpHeightDisplay.textContent =
               `Jump (ankle): ${highestPointHeight.toFixed(2)} m\nJump (air): ${jumpHeightByAirTime.toFixed(2)} m`;
-
             sendJumpDataToLovableUI(jumpHeightByAirTime, Date.now());
           } else {
             widgetJumpHeightDisplay.textContent = `Jump: ${smoothedJumpHeight.toFixed(2)} m`;
@@ -456,24 +478,6 @@
 
     // --- Calibration: Mark corners and calibrate ---
     canvas.addEventListener('click', function(e) {
-      // --- Athlete Selection (NEW) ---
-      if (selectionMode && !athleteSelected && lastPoseResults && lastPoseResults.poseLandmarks) {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        const nose = lastPoseResults.poseLandmarks[0];
-        if (nose) {
-          const nx = nose.x * canvas.width;
-          const ny = nose.y * canvas.height;
-          const dist = Math.sqrt((x - nx) ** 2 + (y - ny) ** 2);
-          if (dist < 45) { // generous selection radius
-            athleteSelected = true;
-            selectionMode = false;
-            trampolineNotice.textContent = "Athlete selected. Start jumping!";
-            return;
-          }
-        }
-      }
-      // --- Usual calibration corner marking ---
       if (currentCalibrationPhase === 'mark_corners') {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -486,47 +490,29 @@
             planePoints.push({ x: getWorldCorners()[i][0], y: getWorldCorners()[i][1], z: 0 });
           }
           plane3D = fitPlaneFromPoints(planePoints);
-          currentCalibrationPhase = 'stand_still';
-          trampolineNotice.textContent = "Stand still in the center of the trampoline, then press Calibrate.";
-          show(calibrateBtn);
+          currentCalibrationPhase = 'auto_baseline'; // AUTO-BASELINE
+          trampolineNotice.textContent = "Calibration: Move/jump as normal for 2.5s...";
+          show(calibrateBtn); // Optional: can remove if you want no manual step
+          // --- Start auto-baseline immediately ---
+          startAutoBaseline();
         } else {
           trampolineNotice.textContent = `Corner ${trampolineCorners.length}/4 marked. Continue.`;
         }
       }
     });
 
+    // --- AUTO-BASELINE: Start calibration (NEW) ---
+    function startAutoBaseline() {
+      autoBaselineActive = true;
+      autoBaselineSamples = [];
+      autoBaselineStart = performance.now();
+      trampolineNotice.textContent = "Calibrating... Move or jump as normal!";
+      hide(calibrateBtn);
+    }
+
     calibrateBtn.addEventListener('click', function() {
-      if (currentCalibrationPhase === 'stand_still' && lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-        calibrationSamples = [];
-        trampolineNotice.textContent = "Calibrating, please stand still...";
-        let count = 0;
-        let calibrationInterval = setInterval(() => {
-          if (lastPoseResults && lastPoseResults.poseWorldLandmarks) {
-            const leftAnkle = lastPoseResults.poseWorldLandmarks[27];
-            const rightAnkle = lastPoseResults.poseWorldLandmarks[28];
-            if (leftAnkle && rightAnkle) {
-              const leftDist = distanceToPlane(plane3D, leftAnkle);
-              const rightDist = distanceToPlane(plane3D, rightAnkle);
-              calibrationSamples.push((leftDist + rightDist) / 2);
-            }
-          }
-          count++;
-          if (count >= calibrationSampleCount) {
-            clearInterval(calibrationInterval);
-            if (calibrationSamples.length > 0) {
-              baselineHeight = calibrationSamples.reduce((a, b) => a + b, 0) / calibrationSamples.length;
-              smoothedJumpHeight = 0;
-              currentCalibrationPhase = 'complete';
-              // --- Athlete selection step ---
-              selectionMode = true;
-              athleteSelected = false;
-              trampolineNotice.textContent = "Tap the athlete's nose to select for tracking.";
-              hide(calibrateBtn);
-            } else {
-              trampolineNotice.textContent = "Calibration failed. Try again.";
-            }
-          }
-        }, 30);
+      if (currentCalibrationPhase === 'auto_baseline') {
+        startAutoBaseline(); // Allow manual trigger or just skip this button
       }
     });
 
@@ -537,9 +523,8 @@
       trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
       show(canvas);
       show(calibrateBtn);
-      // --- Reset selection state ---
-      selectionMode = false;
-      athleteSelected = false;
+      autoBaselineActive = false;
+      autoBaselineSamples = [];
     });
 
     // --- Settings UI ---
@@ -575,7 +560,7 @@
       videoTrack.applyConstraints({ advanced: [{ zoom: next }] });
     });
 
-    // --- Pose Loop (THROTTLED to 30 FPS) ---
+    // --- Pose Loop (THROTTLED to 25 FPS) ---
     function poseLoop() {
       if (poseLoopActive) return;
       poseLoopActive = true;
@@ -588,7 +573,7 @@
             }
           } catch (e) {}
           const elapsed = performance.now() - start;
-          const wait = Math.max(0, 33 - elapsed); // 33ms/frame ~30 FPS
+          const wait = Math.max(0, 40 - elapsed); // 40ms/frame ~25 FPS
           await new Promise(res => setTimeout(res, wait));
         }
         poseLoopActive = false;
@@ -607,12 +592,9 @@
       debugMode = debugModeCheckbox.checked;
 
       try {
-        // First start: try with environment or default
         await startCamera();
         await enumerateVideoDevices();
-        // Try to use rear camera if available and not default
         if (videoDevices.length > 1) {
-          // Try to find a rear camera in the labels (for mobile)
           let found = false;
           for (let i = 0; i < videoDevices.length; ++i) {
             if (/back|rear|environment/i.test(videoDevices[i].label)) {
@@ -631,9 +613,8 @@
         trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
         trampolineNotice.style.color = "#0f0";
         currentCalibrationPhase = 'mark_corners';
-        // --- Reset selection state (NEW) ---
-        selectionMode = false;
-        athleteSelected = false;
+        autoBaselineActive = false;
+        autoBaselineSamples = [];
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
