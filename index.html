@@ -82,10 +82,8 @@
     const zoomInBtn = getEl('zoomInBtn');
     const zoomOutBtn = getEl('zoomOutBtn');
 
-    // ===== Zoom State =====
-    let zoom = 1;
-    const minZoom = 0.5, maxZoom = 3, zoomStep = 0.1;
-    let zoomCenter = {x: 0.5, y: 0.5}; // center of canvas (relative, 0..1)
+    // ===== Native Camera Zoom State =====
+    let maxNativeZoom = 1, minNativeZoom = 1, currentNativeZoom = 1, zoomStep = 0.1;
 
     // ===== State =====
     let trampolineCorners = [];
@@ -130,6 +128,23 @@
       hide(loadingIndicator);
       videoTrack = stream.getVideoTracks()[0];
       resizeCanvasToScreen();
+
+      // Native camera zoom support
+      if (videoTrack && typeof videoTrack.getCapabilities === "function") {
+        const caps = videoTrack.getCapabilities();
+        if (caps.zoom) {
+          minNativeZoom = caps.zoom.min;
+          maxNativeZoom = caps.zoom.max;
+          currentNativeZoom = videoTrack.getSettings().zoom || minNativeZoom;
+          show(zoomInBtn);
+          show(zoomOutBtn);
+          console.log("Native camera zoom supported:", minNativeZoom, maxNativeZoom);
+        } else {
+          hide(zoomInBtn);
+          hide(zoomOutBtn);
+          console.log("Native camera zoom NOT supported on this device.");
+        }
+      }
     }
 
     switchCameraBtn.addEventListener('click', async function() {
@@ -302,14 +317,7 @@
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Zoom transform
-        ctx.save();
-        // Calculate center point for zoom
-        const cx = canvas.width * zoomCenter.x;
-        const cy = canvas.height * zoomCenter.y;
-        ctx.translate(cx, cy);
-        ctx.scale(zoom, zoom);
-        ctx.translate(-cx, -cy);
+        // No canvas zoom! Native camera zoom is used.
 
         // Draw video frame
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
@@ -348,7 +356,6 @@
             drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
           }
         }
-        ctx.restore();
       }
       requestAnimationFrame(drawLoop);
     }
@@ -358,12 +365,8 @@
       // Mark trampoline corners (in order)
       if (trampolineCorners.length < 4) {
         const rect = canvas.getBoundingClientRect();
-        // Take zoom/pan into account
-        const cx = canvas.width * zoomCenter.x;
-        const cy = canvas.height * zoomCenter.y;
-        const zx = (e.clientX - rect.left - cx) / zoom + cx;
-        const zy = (e.clientY - rect.top  - cy) / zoom + cy;
-        trampolineCorners.push([zx, zy]);
+        const x = e.clientX - rect.left, y = e.clientY - rect.top;
+        trampolineCorners.push([x, y]);
         if (trampolineCorners.length === 4) {
           trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
         } else {
@@ -381,23 +384,32 @@
       jumpState = 'on_ground';
     });
 
-    // Zoom button handlers
-    function setZoom(newZoom) {
-      zoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+    // Native zoom button handlers
+    async function setNativeZoom(zoomValue) {
+      if (videoTrack && typeof videoTrack.getCapabilities === "function") {
+        zoomValue = Math.max(minNativeZoom, Math.min(maxNativeZoom, zoomValue));
+        try {
+          await videoTrack.applyConstraints({advanced: [{zoom: zoomValue}]});
+          currentNativeZoom = zoomValue;
+          console.log("Set native camera zoom to", zoomValue);
+        } catch (e) {
+          console.warn("Unable to set native zoom:", e);
+        }
+      }
     }
     zoomInBtn.addEventListener('click', function() {
-      setZoom(zoom + zoomStep);
+      setNativeZoom(currentNativeZoom + zoomStep);
     });
     zoomOutBtn.addEventListener('click', function() {
-      setZoom(zoom - zoomStep);
+      setNativeZoom(currentNativeZoom - zoomStep);
     });
 
     // Mouse wheel zoom (with Ctrl key)
     canvas.addEventListener('wheel', function(e) {
-      if (e.ctrlKey) {
+      if (e.ctrlKey && videoTrack && typeof videoTrack.getCapabilities === "function") {
         e.preventDefault();
-        if (e.deltaY < 0) setZoom(zoom + zoomStep);
-        else setZoom(zoom - zoomStep);
+        if (e.deltaY < 0) setNativeZoom(currentNativeZoom + zoomStep);
+        else setNativeZoom(currentNativeZoom - zoomStep);
       }
     }, {passive: false});
 
@@ -412,13 +424,13 @@
       }
     });
     canvas.addEventListener('touchmove', function(e) {
-      if (e.touches.length === 2 && lastDist !== null) {
+      if (e.touches.length === 2 && lastDist !== null && videoTrack && typeof videoTrack.getCapabilities === "function") {
         const newDist = Math.hypot(
           e.touches[0].clientX - e.touches[1].clientX,
           e.touches[0].clientY - e.touches[1].clientY
         );
         const delta = (newDist - lastDist) / 200; // scale sensitivity
-        setZoom(zoom + delta);
+        setNativeZoom(currentNativeZoom + delta);
         lastDist = newDist;
         e.preventDefault();
       }
