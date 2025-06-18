@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek Homography-Calibrated Jump Tracker (Persistent + Dead Reckoning)</title>
+  <title>JumpTek: Trampoline Jump Tracker (Airtime Only)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -16,7 +16,7 @@
     #canvas { z-index: 2; pointer-events: auto; }
     #video { z-index: 1; opacity: 0; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
-    #switchCameraBtn, #calibrateBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn, #restartDrawBtn {
+    #switchCameraBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn, #restartDrawBtn {
       padding: 10px 18px; color: #fff;
       border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
@@ -25,25 +25,12 @@
     }
     #restartDrawBtn { background: #e74c3c; }
     #restartDrawBtn:hover { background: #b53224; }
-    #switchCameraBtn:hover, #settingsBtn:hover, #calibrateBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
-    #switchCameraBtn img, #settingsBtn img, #calibrateBtn img { width: 28px; height: 28px; display: block; }
+    #switchCameraBtn:hover, #settingsBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
+    #switchCameraBtn img, #settingsBtn img { width: 28px; height: 28px; display: block; }
     #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
     #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
     #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; }
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; z-index: 20;}
-    #settingsPopover { display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 320px; background: rgba(34,34,34,0.98); border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); padding: 26px 32px 18px 24px; z-index:40; flex-direction: column;}
-    #settingsPopover.open { display: flex; animation: popIn 0.18s; }
-    @keyframes popIn { from { opacity: 0; transform: translateX(-50%) scale(0.97); } to   { opacity: 1; transform: translateX(-50%) scale(1); } }
-    #settingsPopover label { font-size: 1rem; margin-bottom: 2px; }
-    #settingsPopover input[type="number"], #settingsPopover input[type="checkbox"], #settingsPopover select { padding: 6px; font-size: 1rem; border-radius: 6px; border: 1px solid #888; width: 110px; }
-    #settingsPopover input[type="checkbox"] { width: auto; margin-left: 10px; vertical-align: middle; }
-    #settingsPopover .checkbox-container { display: flex; align-items: center; margin-top: 5px; }
-    #settingsPopover .desc { color: #aaa; font-size: 0.92rem; margin-bottom: 7px; margin-top: -4px; }
-    #settingsPopover .close-btn { position: absolute; top: 10px; right: 16px; background: none; border: none; color: #aaa; font-size: 1.35rem; cursor: pointer; padding: 0; line-height: 1;}
-    #settingsPopover .close-btn:hover { color: #fff; }
-    #saveSettingsBtn { margin-top: 12px; padding: 10px 18px; border-radius: 12px; background: #27ae60; color: #fff; font-size: 1rem; border: none; cursor: pointer; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.15);}
-    #saveSettingsBtn:active, #saveSettingsBtn:focus { background: #219150; }
-    #calibrateBtn:disabled { background: #888 !important; cursor: not-allowed; }
     #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 30; white-space: pre-line;}
   </style>
 </head>
@@ -54,42 +41,13 @@
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
         <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
       </button>
-      <button id="calibrateBtn" aria-label="Calibrate baseline" tabindex="0" role="button" style="display:none;">
-        <img src="https://icon-library.com/images/wrench-icon-png/wrench-icon-png-11.jpg" alt="Calibrate" style="width:28px;height:28px;" />
-      </button>
       <button class="settings-btn" id="settingsBtn" aria-label="Open settings" tabindex="0" role="button">
         <img src="https://creazilla-store.fra1.digitaloceanspaces.com/icons/3430447/ruler-icon-md.png" alt="Calibration Settings" />
       </button>
       <button id="restartDrawBtn" aria-label="Restart" tabindex="0" role="button">Restart</button>
     </div>
-    <div id="settingsPopover" aria-modal="true" role="dialog">
-      <button class="close-btn" id="closeSettingsBtn" aria-label="Close settings">&times;</button>
-      <div style="margin-bottom: 8px;">
-        <label for="jumpAreaMode">Jump Area Mode:</label><br>
-        <select id="jumpAreaMode">
-          <option value="trampoline">Full Trampoline</option>
-          <option value="custom">Custom</option>
-        </select>
-      </div>
-      <div id="customDimensionsFields" style="display:none; margin-bottom:10px;">
-        <label for="customWidth">Width (meters):</label>
-        <input type="number" step="0.01" min="0.1" max="10" value="1.5" id="customWidth"><br>
-        <label for="customLength">Length (meters):</label>
-        <input type="number" step="0.01" min="0.1" max="10" value="2.5" id="customLength">
-      </div>
-      <div>
-        <label for="jumpThreshold">Minimum Jump Threshold (meters):</label><br>
-        <input type="number" step="0.01" min="0.01" max="0.5" value="0.08" id="jumpThreshold">
-        <div class="desc">Minimum height difference to be considered a jump.</div>
-      </div>
-      <div class="checkbox-container">
-        <label for="debugMode">Enable Debug Mode (show raw data):</label>
-        <input type="checkbox" id="debugMode">
-      </div>
-      <button id="saveSettingsBtn">Save</button>
-    </div>
-    <div id="trampolineNotice">Tap the four corners of the trampoline, then press Calibrate</div>
-    <div id="loadingIndicator">Loading...</div>
+    <div id="trampolineNotice">Tap the four corners of the trampoline</div>
+    <div id="loadingIndicator" style="display:none;">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
     <div id="zoomControls">
       <button id="zoomInBtn">+</button>
@@ -102,7 +60,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
-    // --- Utility Functions ---
+    // ===== Utility Functions =====
     function show(el) { if (el) el.style.display = ""; }
     function hide(el) { if (el) el.style.display = "none"; }
     function getEl(id) { return document.getElementById(id); }
@@ -120,85 +78,75 @@
       return inside;
     }
 
-    // --- DOM ---
+    // ===== DOM Elements =====
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
     const video = getEl('video');
     const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
-    const calibrateBtn = getEl('calibrateBtn');
     const settingsBtn = getEl('settingsBtn');
     const loadingIndicator = getEl('loadingIndicator');
     const trampolineNotice = getEl('trampolineNotice');
     const zoomInBtn = getEl('zoomInBtn');
     const zoomOutBtn = getEl('zoomOutBtn');
     const restartDrawBtn = getEl('restartDrawBtn');
-    const settingsPopover = getEl('settingsPopover');
-    const closeSettingsBtn = getEl('closeSettingsBtn');
-    const saveSettingsBtn = getEl('saveSettingsBtn');
-    const jumpThresholdInput = getEl('jumpThreshold');
-    const debugModeCheckbox = getEl('debugMode');
     const switchCameraBtn = getEl('switchCameraBtn');
-    const jumpAreaModeSelect = getEl('jumpAreaMode');
-    const customDimensionsFields = getEl('customDimensionsFields');
-    const customWidthInput = getEl('customWidth');
-    const customLengthInput = getEl('customLength');
 
-    // --- Area dimensions ---
-    const TRAMPOLINE_WIDTH_M = 3.048;  // 10 feet
-    const TRAMPOLINE_LENGTH_M = 5.1816; // 17 feet
-
-    // --- Homography/plane calibration state ---
-    let trampolineCorners = [], homography = null, plane3D = null, baselineHeight = null;
-    let currentCalibrationPhase = 'mark_corners';
-    let pose = null, poseLoaded = false, poseLoopActive = false, lastPoseResults = null;
-    let jumpState = 'on_ground', jumpStartTime = 0, jumpEndTime = 0, highestPointHeight = null;
-    let airTimeForLastJump = 0, airTimeHeightForLastJump = 0;
+    // ===== State =====
+    let trampolineCorners = [];
+    let homography = null;
+    let lastPoseResults = null;
+    let inAir = false, takeoffTime = 0;
+    let videoDevices = [], currentDeviceIndex = 0;
     let currentStream = null, videoTrack = null, zoomCapabilities = null;
-    let debugMode = false;
+    let pose = null, poseLoaded = false, poseLoopActive = false;
 
-    // Camera switching state
-    let videoDevices = [];
-    let currentDeviceIndex = 0;
+    function resizeCanvasToScreen() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvasToScreen);
 
-    // Smoothing for jump height
-    let smoothedJumpHeight = 0;
-    const SMOOTHING_ALPHA = 0.3;
-
-    // --- Athlete tracking state ---
-    let autoBaselineActive = false;
-    let autoBaselineSamples = [];
-    const AUTO_BASELINE_DURATION = 2500; // ms
-    let autoBaselineStart = 0;
-
-    // Persistent tracking state
-    let lastSmoothedLandmarks = null;
-    let lastVelocity = null;
-    let lastCenter = null;
-    let lastHeight = null;
-    let framesSinceSeen = 0;
-    const LOST_TRACKING_THRESHOLD = 36; // ~0.6s at 60 FPS
-    const DEAD_RECKON_FRAMES = 6; // Predict up to 0.1s at 60 FPS
-
-    // --- Homography/plane helpers ---
-    function getWorldCorners() {
-      if (jumpAreaModeSelect && jumpAreaModeSelect.value === "custom") {
-        const width = parseFloat(customWidthInput.value) || 1.5;
-        const length = parseFloat(customLengthInput.value) || 2.5;
-        return [
-          [0, 0, 0],
-          [width, 0, 0],
-          [width, length, 0],
-          [0, length, 0]
-        ];
-      } else {
-        return [
-          [0, 0, 0],
-          [TRAMPOLINE_WIDTH_M, 0, 0],
-          [TRAMPOLINE_WIDTH_M, TRAMPOLINE_LENGTH_M, 0],
-          [0, TRAMPOLINE_LENGTH_M, 0]
-        ];
-      }
+    async function enumerateVideoDevices() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      videoDevices = devices.filter(device => device.kind === 'videoinput');
+      if (videoDevices.length > 1) show(switchCameraBtn); else hide(switchCameraBtn);
     }
 
+    async function startCamera(deviceId) {
+      show(loadingIndicator);
+      if (currentStream) {
+        try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+        videoTrack = null; zoomCapabilities = null;
+      }
+      let constraints = {
+        audio: false,
+        video: {
+          width: { ideal: 640 }, height: { ideal: 480 },
+          frameRate: { ideal: 60, max: 60 }
+        }
+      };
+      if (deviceId) constraints.video.deviceId = { exact: deviceId };
+      else constraints.video.facingMode = "environment";
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentStream = stream;
+      video.srcObject = stream;
+      await video.play();
+      hide(loadingIndicator);
+      videoTrack = stream.getVideoTracks()[0];
+      zoomCapabilities = (videoTrack && videoTrack.getCapabilities && videoTrack.getCapabilities().zoom) ? videoTrack.getCapabilities().zoom : null;
+      zoomInBtn.disabled = !zoomCapabilities;
+      zoomOutBtn.disabled = !zoomCapabilities;
+      resizeCanvasToScreen();
+    }
+
+    switchCameraBtn.addEventListener('click', async function() {
+      if (videoDevices.length <= 1) return;
+      currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
+      try { await startCamera(videoDevices[currentDeviceIndex].deviceId); }
+      catch (e) { trampolineNotice.textContent = 'Unable to switch camera: ' + e; trampolineNotice.style.color = "#f00"; }
+    });
+
+    // ===== Homography helpers =====
     function computeHomography(src, dst) {
       const X = [], Y = [];
       for (let i = 0; i < 4; i++) {
@@ -220,222 +168,80 @@
       const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
       return [u, v];
     }
-    function imageToTrampolinePlane(x, y) {
+
+    // 2D polygon in meters (trampoline base, for filtering in world space)
+    const TRAMPOLINE_WIDTH_M = 3.048;  // 10ft
+    const TRAMPOLINE_LENGTH_M = 5.1816; // 17ft
+    function getTrampolineWorldCorners() {
+      return [
+        [0, 0],
+        [TRAMPOLINE_WIDTH_M, 0],
+        [TRAMPOLINE_WIDTH_M, TRAMPOLINE_LENGTH_M],
+        [0, TRAMPOLINE_LENGTH_M]
+      ];
+    }
+
+    // Convert screen (image) x,y to trampoline meters (x,y)
+    function screenToTrampolineMeters(x, y) {
       if (!homography) return null;
-      const [u, v] = applyHomography(homography, x, y);
-      return { x: u, y: v, z: 0 };
-    }
-    function fitPlaneFromPoints(points) {
-      const [p1, p2, p3] = points;
-      const v1 = {
-        x: p2.x - p1.x,
-        y: p2.y - p1.y,
-        z: p2.z - p1.z
-      };
-      const v2 = {
-        x: p3.x - p1.x,
-        y: p3.y - p1.y,
-        z: p3.z - p1.z
-      };
-      const normal = {
-        x: v1.y * v2.z - v1.z * v2.y,
-        y: v1.z * v2.x - v1.x * v2.z,
-        z: v1.x * v2.y - v1.y * v2.x
-      };
-      const A = normal.x, B = normal.y, C = normal.z;
-      const D = -(A * p1.x + B * p1.y + C * p1.z);
-      const norm = Math.sqrt(A*A + B*B + C*C);
-      return {A: A/norm, B: B/norm, C: C/norm, D: D/norm};
-    }
-    function distanceToPlane(plane, pt) {
-      return (plane.A * pt.x + plane.B * pt.y + plane.C * pt.z + plane.D) / Math.sqrt(plane.A*plane.A + plane.B*plane.B + plane.C*plane.C);
+      return applyHomography(homography, x, y);
     }
 
-    function sendJumpDataToLovableUI(jumpHeight, jumpTimestamp) {
-      if (window.lovableUI && typeof window.lovableUI.collectJump === 'function') {
-        window.lovableUI.collectJump({
-          height: jumpHeight,
-          timestamp: jumpTimestamp
-        });
-      }
-      window.parent.postMessage({
-        type: 'jump',
-        height: jumpHeight,
-        timestamp: jumpTimestamp
-      }, '*');
-      console.log("[Jump Data] Height:", jumpHeight, "Timestamp:", jumpTimestamp);
+    // ===== Jump Logic =====
+    let jumpState = 'on_ground';
+    let jumpStartTime = 0;
+    let lastInTrampoline = false;
+
+    function isAthleteInTrampoline(landmarks) {
+      if (trampolineCorners.length !== 4 || !homography || !landmarks) return false;
+      // Use the midpoint between both ankles as the "body location"
+      const lAnkle = landmarks[27], rAnkle = landmarks[28];
+      if (!lAnkle || !rAnkle) return false;
+      const x = (lAnkle.x + rAnkle.x) / 2 * canvas.width;
+      const y = (lAnkle.y + rAnkle.y) / 2 * canvas.height;
+      return pointInPolygon(x, y, trampolineCorners);
     }
 
-    function resizeCanvasToScreen() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    }
-    window.addEventListener('resize', resizeCanvasToScreen);
+    function processPose(results) {
+      if (!results || !results.poseLandmarks) return;
 
-    async function enumerateVideoDevices() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      videoDevices = devices.filter(device => device.kind === 'videoinput');
-      if (videoDevices.length > 1) {
-        show(switchCameraBtn);
-      } else {
-        hide(switchCameraBtn);
-      }
-    }
+      // Only process athlete if in trampoline
+      const inTrampoline = isAthleteInTrampoline(results.poseLandmarks);
 
-    async function startCamera(deviceId) {
-      show(loadingIndicator);
-      if (currentStream) {
-        try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
-        videoTrack = null; zoomCapabilities = null;
-      }
-      let constraints = {
-        audio: false,
-        video: {
-          width: { ideal: 640 }, height: { ideal: 480 },
-          frameRate: { ideal: 60, max: 60 }
-        }
-      };
-      if (deviceId) {
-        constraints.video.deviceId = { exact: deviceId };
-      } else {
-        constraints.video.facingMode = "environment";
-      }
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      currentStream = stream;
-      video.srcObject = stream;
-      await video.play();
-      hide(loadingIndicator);
-      videoTrack = stream.getVideoTracks()[0];
-      zoomCapabilities = (videoTrack && videoTrack.getCapabilities && videoTrack.getCapabilities().zoom) ? videoTrack.getCapabilities().zoom : null;
-      zoomInBtn.disabled = !zoomCapabilities;
-      zoomOutBtn.disabled = !zoomCapabilities;
-      resizeCanvasToScreen();
-    }
+      // Use ankles to determine airborne status
+      const lAnkle = results.poseLandmarks[27], rAnkle = results.poseLandmarks[28];
+      const minY = Math.min(lAnkle.y, rAnkle.y);
 
-    switchCameraBtn.addEventListener('click', async function() {
-      if (videoDevices.length <= 1) return;
-      currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
-      try {
-        await startCamera(videoDevices[currentDeviceIndex].deviceId);
-      } catch (e) {
-        trampolineNotice.textContent = 'Unable to switch camera: ' + e;
-        trampolineNotice.style.color = "#f00";
-      }
-    });
+      const airborneThreshold = 0.86; // tweak for your camera angle, closer to 1 is closer to bottom
+      const isAirborne = minY < airborneThreshold && inTrampoline;
 
-    // --- Persistent Athlete Tracking Logic ---
-    function getCenter(landmarks) {
-      const lHip = landmarks[23], rHip = landmarks[24];
-      if (lHip && rHip) {
-        return { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
-      }
-      const nose = landmarks[0];
-      return nose ? { x: nose.x, y: nose.y } : null;
-    }
-
-    // Only track when both ankles are inside or just below trampoline polygon (10% margin)
-    function isAthleteOnOrAboveTrampoline(landmarks) {
-      if (!landmarks || trampolineCorners.length !== 4) return false;
-      let margin = 0.1 * canvas.height;
-      let anklePts = [landmarks[27], landmarks[28]];
-      for (let pt of anklePts) {
-        let x = pt.x * canvas.width, y = pt.y * canvas.height;
-        if (pointInPolygon(x, y, trampolineCorners)) continue;
-        // Allow a little margin below trampoline for landings
-        let below = Math.max(...trampolineCorners.map(c => c[1]));
-        if (y > below + margin) return false;
-      }
-      return true;
-    }
-
-    function smoothLandmarks(current, previous, alpha=0.6) {
-      if (!previous) return current;
-      return current.map((pt, i) => ({
-        x: pt.x * alpha + previous[i].x * (1 - alpha),
-        y: pt.y * alpha + previous[i].y * (1 - alpha),
-        z: pt.z * alpha + previous[i].z * (1 - alpha),
-        visibility: pt.visibility
-      }));
-    }
-
-    // Main tracking handler
-    function persistentTrackingHandler(poseWorldLandmarks, poseLandmarks) {
-      const center = getCenter(poseLandmarks);
-      const height = poseLandmarks[27].y; // use left ankle y as a simple metric
-
-      // 1. Filter: Only track if on/above trampoline polygon (with margin)
-      if (!isAthleteOnOrAboveTrampoline(poseLandmarks)) {
-        framesSinceSeen++;
-        // Dead reckoning: Predict for a few frames
-        if (framesSinceSeen <= DEAD_RECKON_FRAMES && lastSmoothedLandmarks && lastVelocity) {
-          let predicted = lastSmoothedLandmarks.map((pt, i) => ({
-            x: pt.x + lastVelocity[i].x,
-            y: pt.y + lastVelocity[i].y,
-            z: pt.z + lastVelocity[i].z,
-            visibility: pt.visibility
-          }));
-          computeAndSendJumpY(predicted);
-          return;
-        } else if (framesSinceSeen > LOST_TRACKING_THRESHOLD) {
-          trampolineNotice.textContent = "Tracking lost! Please recalibrate or ensure the athlete is visible.";
-          return;
-        }
-        // Use last pose if within grace period
-        if (lastSmoothedLandmarks) computeAndSendJumpY(lastSmoothedLandmarks);
-        return;
+      if (jumpState === 'on_ground' && isAirborne) {
+        jumpState = 'in_air';
+        jumpStartTime = performance.now();
       }
 
-      // 2. Identity persistence: Only switch if close in position and height
-      if (lastCenter) {
-        let dx = center.x - lastCenter.x;
-        let dy = center.y - lastCenter.y;
-        let dh = Math.abs(height - lastHeight);
-        let dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist > 0.18 || dh > 0.12) { // Too far, likely a different person
-          framesSinceSeen++;
-          if (framesSinceSeen <= DEAD_RECKON_FRAMES && lastSmoothedLandmarks && lastVelocity) {
-            let predicted = lastSmoothedLandmarks.map((pt, i) => ({
-              x: pt.x + lastVelocity[i].x,
-              y: pt.y + lastVelocity[i].y,
-              z: pt.z + lastVelocity[i].z,
-              visibility: pt.visibility
-            }));
-            computeAndSendJumpY(predicted);
-            return;
-          } else if (framesSinceSeen > LOST_TRACKING_THRESHOLD) {
-            trampolineNotice.textContent = "Tracking lost! Please recalibrate or ensure the athlete is visible.";
-            return;
-          }
-          if (lastSmoothedLandmarks) computeAndSendJumpY(lastSmoothedLandmarks);
-          return;
-        }
+      if (jumpState === 'in_air' && !isAirborne && inTrampoline) {
+        jumpState = 'on_ground';
+        const jumpEndTime = performance.now();
+        const airtime = (jumpEndTime - jumpStartTime) / 1000;
+        const gravity = 9.81;
+        const jumpHeight = (gravity * airtime * airtime) / 8;
+        widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(airtime: ${airtime.toFixed(2)}s)`;
       }
 
-      // 3. If here, this is our athlete: update state and process normally
-      framesSinceSeen = 0;
-      lastCenter = center;
-      lastHeight = height;
-      // Smoothing
-      let smoothed = smoothLandmarks(poseWorldLandmarks, lastSmoothedLandmarks, 0.6);
-      // Velocity for dead reckoning
-      lastVelocity = lastSmoothedLandmarks ?
-        smoothed.map((pt, i) => ({
-          x: pt.x - lastSmoothedLandmarks[i].x,
-          y: pt.y - lastSmoothedLandmarks[i].y,
-          z: pt.z - lastSmoothedLandmarks[i].z,
-        }))
-        : null;
-      lastSmoothedLandmarks = smoothed;
-      computeAndSendJumpY(smoothed);
+      // Display "Ready" message if standing in trampoline
+      if (jumpState === 'on_ground' && inTrampoline) {
+        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+      }
+      lastInTrampoline = inTrampoline;
     }
 
-    // --- Pose setup (optimized, single-person) ---
+    // ===== Pose Setup =====
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 0,
-        smoothLandmarks: false,
+        modelComplexity: 1, // or 2 for higher accuracy if performance allows
+        smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
         minDetectionConfidence: 0.5,
@@ -443,98 +249,18 @@
       });
       pose.onResults(results => {
         lastPoseResults = results;
-        if (!autoBaselineActive && results && results.poseWorldLandmarks && results.poseLandmarks) {
-          persistentTrackingHandler(results.poseWorldLandmarks, results.poseLandmarks);
-        }
-        if (autoBaselineActive && results && results.poseWorldLandmarks) {
-          processAutoBaseline(results.poseWorldLandmarks);
-        }
+        processPose(results);
       });
       poseLoaded = true;
     }
 
-    function processAutoBaseline(poseWorldLandmarks) {
-      // Only process if both feet are in trampoline
-      if (!isAthleteOnOrAboveTrampoline(lastPoseResults.poseLandmarks)) return;
-      const leftAnkle = poseWorldLandmarks[27], rightAnkle = poseWorldLandmarks[28];
-      if (!leftAnkle || !rightAnkle) return;
-      const leftDist = distanceToPlane(plane3D, leftAnkle);
-      const rightDist = distanceToPlane(plane3D, rightAnkle);
-      const mean = (leftDist + rightDist) / 2;
-      autoBaselineSamples.push(mean);
-
-      if (performance.now() - autoBaselineStart > AUTO_BASELINE_DURATION) {
-        if (autoBaselineSamples.length > 0) {
-          baselineHeight = Math.max(...autoBaselineSamples);
-          autoBaselineActive = false;
-          currentCalibrationPhase = 'complete';
-          trampolineNotice.textContent = "Calibration complete! Start jumping!";
-        } else {
-          trampolineNotice.textContent = "Calibration failed, please retry.";
-          show(calibrateBtn); // Keep calibrate visible on failure
-          autoBaselineActive = false;
-          currentCalibrationPhase = 'auto_baseline';
-          return;
-        }
-      }
-    }
-
-    function computeAndSendJumpY(poseWorldLandmarks) {
-      if (!plane3D || baselineHeight === null || currentCalibrationPhase !== "complete") {
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-        return;
-      }
-      const leftAnkle = poseWorldLandmarks[27], rightAnkle = poseWorldLandmarks[28];
-      if (!leftAnkle || !rightAnkle) {
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-        return;
-      }
-      const leftDist = distanceToPlane(plane3D, leftAnkle);
-      const rightDist = distanceToPlane(plane3D, rightAnkle);
-      const currentHeight = (leftDist + rightDist) / 2;
-      let jumpHeight = baselineHeight - currentHeight;
-      smoothedJumpHeight = SMOOTHING_ALPHA * jumpHeight + (1 - SMOOTHING_ALPHA) * smoothedJumpHeight;
-      if (Math.abs(smoothedJumpHeight) < 0.01) smoothedJumpHeight = 0;
-
-      let JUMP_THRESHOLD = parseFloat(jumpThresholdInput.value) || 0.08;
-      switch(jumpState) {
-        case 'on_ground':
-          if (smoothedJumpHeight > JUMP_THRESHOLD) {
-            jumpState = 'ascending';
-            jumpStartTime = performance.now();
-            highestPointHeight = smoothedJumpHeight;
-          }
-          widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-          break;
-        case 'ascending':
-          if (smoothedJumpHeight > highestPointHeight) highestPointHeight = smoothedJumpHeight;
-          if (smoothedJumpHeight < JUMP_THRESHOLD/2) { // landed
-            jumpState = 'on_ground';
-            jumpEndTime = performance.now();
-            const airTimeSeconds = (jumpEndTime - jumpStartTime) / 1000;
-            const gravity = 9.81;
-            const jumpHeightByAirTime = (gravity * airTimeSeconds * airTimeSeconds) / 8;
-            airTimeForLastJump = airTimeSeconds;
-            airTimeHeightForLastJump = jumpHeightByAirTime;
-            widgetJumpHeightDisplay.textContent =
-              `Jump (ankle): ${highestPointHeight.toFixed(2)} m\nJump (air): ${jumpHeightByAirTime.toFixed(2)} m`;
-            sendJumpDataToLovableUI(jumpHeightByAirTime, Date.now());
-          } else {
-            widgetJumpHeightDisplay.textContent = `Jump: ${smoothedJumpHeight.toFixed(2)} m`;
-          }
-          break;
-        default:
-          jumpState = 'on_ground';
-          widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
-          break;
-      }
-    }
-
+    // ===== Drawing Loop =====
     function drawLoop() {
       if (!canvas || !ctx || !video) return;
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
+        // Draw trampoline corners/polygon
         if (trampolineCorners.length > 0) {
           ctx.save();
           ctx.strokeStyle = "#0ff"; ctx.lineWidth = 3;
@@ -561,6 +287,7 @@
           });
           ctx.restore();
         }
+        // Draw pose
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
           drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
@@ -569,80 +296,32 @@
       requestAnimationFrame(drawLoop);
     }
 
+    // ===== User Interaction =====
     canvas.addEventListener('click', function(e) {
-      if (currentCalibrationPhase === 'mark_corners') {
+      // Mark trampoline corners (in order)
+      if (trampolineCorners.length < 4) {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left, y = e.clientY - rect.top;
         trampolineCorners.push([x, y]);
         if (trampolineCorners.length === 4) {
-          homography = computeHomography(trampolineCorners, getWorldCorners().map(([X,Y]) => [X,Y]));
-          let planePoints = [];
-          for (let i = 0; i < 4; ++i) {
-            planePoints.push({ x: getWorldCorners()[i][0], y: getWorldCorners()[i][1], z: 0 });
-          }
-          plane3D = fitPlaneFromPoints(planePoints);
-          currentCalibrationPhase = 'auto_baseline';
-          trampolineNotice.textContent = "Calibration: Move/jump as normal for 2.5s...";
-          show(calibrateBtn); // Always show calibrate for manual retry
-          startAutoBaseline();
+          // Compute homography for mapping screen to trampoline meters
+          homography = computeHomography(trampolineCorners, getTrampolineWorldCorners());
+          trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
         } else {
           trampolineNotice.textContent = `Corner ${trampolineCorners.length}/4 marked. Continue.`;
         }
       }
     });
 
-    function startAutoBaseline() {
-      autoBaselineActive = true;
-      autoBaselineSamples = [];
-      autoBaselineStart = performance.now();
-      trampolineNotice.textContent = "Calibrating... Move or jump as normal!";
-      show(calibrateBtn); // Always keep calibrate visible for retry
-    }
-
-    calibrateBtn.addEventListener('click', function() {
-      if (trampolineCorners.length === 4 && plane3D) {
-        autoBaselineActive = true;
-        autoBaselineSamples = [];
-        autoBaselineStart = performance.now();
-        trampolineNotice.textContent = "Manual calibration: Move or jump as normal!";
-        currentCalibrationPhase = 'auto_baseline';
-        show(calibrateBtn);
-      }
-    });
-
     restartDrawBtn.addEventListener('click', function() {
-      trampolineCorners = []; homography = null; plane3D = null; baselineHeight = null;
-      currentCalibrationPhase = 'mark_corners';
-      trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
-      show(canvas);
-      show(calibrateBtn);
-      autoBaselineActive = false;
-      autoBaselineSamples = [];
-      lastSmoothedLandmarks = null;
-      lastVelocity = null;
-      lastCenter = null;
-      lastHeight = null;
-      framesSinceSeen = 0;
+      trampolineCorners = [];
+      homography = null;
+      trampolineNotice.textContent = "Tap the four corners of the trampoline";
     });
 
-    jumpAreaModeSelect.addEventListener('change', function() {
-      if (jumpAreaModeSelect.value === 'custom') {
-        customDimensionsFields.style.display = "";
-      } else {
-        customDimensionsFields.style.display = "none";
-      }
-    });
     settingsBtn.addEventListener('click', function() {
-      settingsPopover.classList.add('open');
+      alert("Settings coming soon!");
     });
-    closeSettingsBtn.addEventListener('click', function() {
-      settingsPopover.classList.remove('open');
-    });
-    saveSettingsBtn.addEventListener('click', function() {
-      settingsPopover.classList.remove('open');
-      debugMode = debugModeCheckbox.checked;
-    });
-    debugModeCheckbox.addEventListener('change', function() { debugMode = debugModeCheckbox.checked; });
 
     zoomInBtn.addEventListener('click', function() {
       if (!zoomCapabilities || !videoTrack) return;
@@ -669,7 +348,7 @@
             }
           } catch (e) {}
           const elapsed = performance.now() - start;
-          const wait = Math.max(0, 16 - elapsed); // 16ms for 60 FPS
+          const wait = Math.max(0, 16 - elapsed);
           await new Promise(res => setTimeout(res, wait));
         }
         poseLoopActive = false;
@@ -683,8 +362,6 @@
       trampolineNotice.style.color = "#ff0";
       show(canvas);
       show(restartDrawBtn);
-      hide(calibrateBtn);
-      debugMode = debugModeCheckbox.checked;
       try {
         await startCamera();
         await enumerateVideoDevices();
@@ -704,27 +381,13 @@
         }
         drawLoop();
         poseLoop();
-        trampolineNotice.textContent = "Tap the four corners of the trampoline, then press Calibrate";
+        trampolineNotice.textContent = "Tap the four corners of the trampoline";
         trampolineNotice.style.color = "#0f0";
-        currentCalibrationPhase = 'mark_corners';
-        autoBaselineActive = false;
-        autoBaselineSamples = [];
-        lastSmoothedLandmarks = null;
-        lastVelocity = null;
-        lastCenter = null;
-        lastHeight = null;
-        framesSinceSeen = 0;
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
       }
     });
-
-    window.lovableUI = {
-      collectJump: function(data) {
-        console.log("LovableUI received jump:", data);
-      }
-    };
   </script>
 </body>
 </html>
