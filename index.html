@@ -27,9 +27,9 @@
     #restartDrawBtn:hover { background: #b53224; }
     #switchCameraBtn:hover { background: #219150; }
     #switchCameraBtn img { width: 28px; height: 28px; display: block; }
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; }
-    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; z-index: 20;}
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 30; white-space: pre-line;}
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; font-family: monospace;}
+    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; }
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 10;}
   </style>
 </head>
 <body>
@@ -167,23 +167,47 @@
       return count;
     }
 
+    // ===== Athlete Tracking State =====
+    let trackedAthleteIndex = null;  // Index of the currently tracked athlete
+    let lastTrackedLandmarks = null; // Landmarks of the athlete we are tracking
+
     function selectMainAthlete(results, polygon) {
-      // Multi-pose support (future-proofing): poseLandmarks can be array of arrays
       let candidates = [];
-      if (Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0])) {
+      let multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
+      if (multiPose) {
         for (let i = 0; i < results.poseLandmarks.length; i++) {
           const landmarks = results.poseLandmarks[i];
           const score = countKeypointsInPolygon(landmarks, polygon);
-          candidates.push({ landmarks, score });
+          candidates.push({ index: i, landmarks, score });
         }
       } else if (results.poseLandmarks) {
-        // Single-pose
         const landmarks = results.poseLandmarks;
         const score = countKeypointsInPolygon(landmarks, polygon);
-        candidates.push({ landmarks, score });
+        candidates.push({ index: 0, landmarks, score });
       }
+
+      // Sort by highest score (most keypoints in polygon)
       candidates.sort((a, b) => b.score - a.score);
-      return candidates.length > 0 && candidates[0].score > 0 ? candidates[0].landmarks : null;
+
+      // If someone is currently in contact (score > 0), start/continue tracking them
+      if (candidates.length > 0 && candidates[0].score > 0) {
+        trackedAthleteIndex = candidates[0].index;
+        lastTrackedLandmarks = candidates[0].landmarks;
+        return lastTrackedLandmarks;
+      }
+
+      // If nobody is in contact, but we were tracking someone previously, try to keep tracking them
+      if (trackedAthleteIndex !== null && multiPose && results.poseLandmarks[trackedAthleteIndex]) {
+        lastTrackedLandmarks = results.poseLandmarks[trackedAthleteIndex];
+        return lastTrackedLandmarks;
+      }
+      if (trackedAthleteIndex !== null && !multiPose && results.poseLandmarks) {
+        lastTrackedLandmarks = results.poseLandmarks;
+        return lastTrackedLandmarks;
+      }
+
+      // If all else fails, don't display
+      return null;
     }
 
     function processPose(results) {
@@ -191,6 +215,7 @@
       const mainLandmarks = selectMainAthlete(results, trampolineCorners);
       if (!mainLandmarks) {
         widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
+        jumpState = 'on_ground'; // Reset jump state if no athlete
         return;
       }
 
@@ -303,6 +328,9 @@
       trampolineCorners = [];
       homography = null;
       trampolineNotice.textContent = "Tap the four corners of the trampoline";
+      trackedAthleteIndex = null;
+      lastTrackedLandmarks = null;
+      jumpState = 'on_ground';
     });
 
     function poseLoop() {
