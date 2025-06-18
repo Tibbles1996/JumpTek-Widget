@@ -225,12 +225,12 @@
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 1, // Default (do NOT increase for this request)
+        modelComplexity: 0, // Default (do NOT increase for this request)
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        minDetectionConfidence: 0.3,
+        minTrackingConfidence: 0.3
       });
       pose.onResults(results => {
         lastPoseResults = results;
