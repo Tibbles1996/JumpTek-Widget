@@ -171,11 +171,10 @@
       ];
     }
 
-    // ===== Jump Logic =====
+    // ===== Jump Logic and rest unchanged =====
     let jumpState = 'on_ground';
     let jumpStartTime = 0;
 
-    // --- Helper: count keypoints in trampoline polygon ---
     function countKeypointsInPolygon(landmarks, polygon) {
       let count = 0;
       for (let i = 0; i < landmarks.length; i++) {
@@ -191,9 +190,8 @@
       return count;
     }
 
-    // ===== Athlete Tracking State =====
-    let trackedAthleteIndex = null;  // Index of the currently tracked athlete
-    let lastTrackedLandmarks = null; // Landmarks of the athlete we are tracking
+    let trackedAthleteIndex = null;
+    let lastTrackedLandmarks = null;
 
     function selectMainAthlete(results, polygon) {
       let candidates = [];
@@ -209,18 +207,12 @@
         const score = countKeypointsInPolygon(landmarks, polygon);
         candidates.push({ index: 0, landmarks, score });
       }
-
-      // Sort by highest score (most keypoints in polygon)
       candidates.sort((a, b) => b.score - a.score);
-
-      // If someone is currently in contact (score > 0), start/continue tracking them
       if (candidates.length > 0 && candidates[0].score > 0) {
         trackedAthleteIndex = candidates[0].index;
         lastTrackedLandmarks = candidates[0].landmarks;
         return lastTrackedLandmarks;
       }
-
-      // If nobody is in contact, but we were tracking someone previously, try to keep tracking them
       if (trackedAthleteIndex !== null && multiPose && results.poseLandmarks[trackedAthleteIndex]) {
         lastTrackedLandmarks = results.poseLandmarks[trackedAthleteIndex];
         return lastTrackedLandmarks;
@@ -229,45 +221,25 @@
         lastTrackedLandmarks = results.poseLandmarks;
         return lastTrackedLandmarks;
       }
-
-      // If all else fails, don't display
       return null;
     }
 
     function processPose(results) {
-      if (!results || !results.poseLandmarks) {
-        console.log("No pose landmarks detected.");
-        return;
-      }
+      if (!results || !results.poseLandmarks) return;
       const mainLandmarks = selectMainAthlete(results, trampolineCorners);
       if (!mainLandmarks || !mainLandmarks[27] || !mainLandmarks[28]) {
-        console.log("Main athlete not found or ankle landmarks missing.");
         widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
-        jumpState = 'on_ground'; // Reset jump state if no athlete
+        jumpState = 'on_ground';
         return;
       }
-
       const lAnkle = mainLandmarks[27], rAnkle = mainLandmarks[28];
       const minY = Math.min(lAnkle.y, rAnkle.y);
-      const airborneThreshold = 0.86; // tweak for your camera angle
+      const airborneThreshold = 0.86;
       const isAirborne = minY < airborneThreshold;
-
-      // Debug logs
-      console.log({
-        lAnkle: lAnkle,
-        rAnkle: rAnkle,
-        minY: minY,
-        airborneThreshold: airborneThreshold,
-        isAirborne: isAirborne,
-        jumpState: jumpState
-      });
-
       if (jumpState === 'on_ground' && isAirborne) {
         jumpState = 'in_air';
         jumpStartTime = performance.now();
-        console.log("Jump started (takeoff detected). Time:", jumpStartTime);
       }
-
       if (jumpState === 'in_air' && !isAirborne) {
         jumpState = 'on_ground';
         const jumpEndTime = performance.now();
@@ -275,7 +247,6 @@
         const gravity = 9.81;
         const jumpHeight = (gravity * airtime * airtime) / 8;
         widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(airtime: ${airtime.toFixed(2)}s)`;
-        // Send jump data to parent via postMessage
         window.parent.postMessage(
           {
             type: "jumptek_jump",
@@ -284,20 +255,16 @@
           },
           "*"
         );
-        console.log("Jump landed. Airtime:", airtime, "Jump Height:", jumpHeight);
       }
-
-      // Display "Ready" message if standing in trampoline
       if (jumpState === 'on_ground') {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
       }
     }
 
-    // ===== Pose Setup =====
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 0, // Default (do NOT increase for this request)
+        modelComplexity: 0,
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
@@ -311,17 +278,11 @@
       poseLoaded = true;
     }
 
-    // ===== Drawing Loop =====
     function drawLoop() {
       if (!canvas || !ctx || !video) return;
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // No canvas zoom! Native camera zoom is used.
-
-        // Draw video frame
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
-        // Draw trampoline corners/polygon
         if (trampolineCorners.length > 0) {
           ctx.save();
           ctx.strokeStyle = "#0ff"; ctx.lineWidth = 3;
@@ -348,7 +309,6 @@
           });
           ctx.restore();
         }
-        // Draw main pose if present
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           const mainLandmarks = selectMainAthlete(lastPoseResults, trampolineCorners);
           if (mainLandmarks) {
@@ -360,9 +320,7 @@
       requestAnimationFrame(drawLoop);
     }
 
-    // ===== User Interaction =====
     canvas.addEventListener('click', function(e) {
-      // Mark trampoline corners (in order)
       if (trampolineCorners.length < 4) {
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -429,7 +387,7 @@
           e.touches[0].clientX - e.touches[1].clientX,
           e.touches[0].clientY - e.touches[1].clientY
         );
-        const delta = (newDist - lastDist) / 200; // scale sensitivity
+        const delta = (newDist - lastDist) / 200;
         setNativeZoom(currentNativeZoom + delta);
         lastDist = newDist;
         e.preventDefault();
