@@ -16,7 +16,7 @@
     #canvas { z-index: 2; pointer-events: auto; }
     #video { z-index: 1; opacity: 0; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
-    #switchCameraBtn, #restartDrawBtn {
+    #switchCameraBtn, #restartDrawBtn, #zoomInBtn, #zoomOutBtn {
       padding: 10px 18px; color: #fff;
       border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
@@ -25,7 +25,7 @@
     }
     #restartDrawBtn { background: #e74c3c; }
     #restartDrawBtn:hover { background: #b53224; }
-    #switchCameraBtn:hover { background: #219150; }
+    #switchCameraBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
     #switchCameraBtn img { width: 28px; height: 28px; display: block; }
     #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; font-family: monospace;}
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; }
@@ -39,6 +39,8 @@
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
         <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
       </button>
+      <button id="zoomInBtn" aria-label="Zoom In" tabindex="0" role="button">+</button>
+      <button id="zoomOutBtn" aria-label="Zoom Out" tabindex="0" role="button">−</button>
       <button id="restartDrawBtn" aria-label="Restart" tabindex="0" role="button">Restart</button>
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline</div>
@@ -77,6 +79,13 @@
     const trampolineNotice = getEl('trampolineNotice');
     const restartDrawBtn = getEl('restartDrawBtn');
     const switchCameraBtn = getEl('switchCameraBtn');
+    const zoomInBtn = getEl('zoomInBtn');
+    const zoomOutBtn = getEl('zoomOutBtn');
+
+    // ===== Zoom State =====
+    let zoom = 1;
+    const minZoom = 0.5, maxZoom = 3, zoomStep = 0.1;
+    let zoomCenter = {x: 0.5, y: 0.5}; // center of canvas (relative, 0..1)
 
     // ===== State =====
     let trampolineCorners = [];
@@ -211,24 +220,37 @@
     }
 
     function processPose(results) {
-      if (!results || !results.poseLandmarks) return;
+      if (!results || !results.poseLandmarks) {
+        console.log("No pose landmarks detected.");
+        return;
+      }
       const mainLandmarks = selectMainAthlete(results, trampolineCorners);
-      if (!mainLandmarks) {
+      if (!mainLandmarks || !mainLandmarks[27] || !mainLandmarks[28]) {
+        console.log("Main athlete not found or ankle landmarks missing.");
         widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
         jumpState = 'on_ground'; // Reset jump state if no athlete
         return;
       }
 
-      // Use ankles to determine airborne status
       const lAnkle = mainLandmarks[27], rAnkle = mainLandmarks[28];
       const minY = Math.min(lAnkle.y, rAnkle.y);
-
       const airborneThreshold = 0.86; // tweak for your camera angle
       const isAirborne = minY < airborneThreshold;
+
+      // Debug logs
+      console.log({
+        lAnkle: lAnkle,
+        rAnkle: rAnkle,
+        minY: minY,
+        airborneThreshold: airborneThreshold,
+        isAirborne: isAirborne,
+        jumpState: jumpState
+      });
 
       if (jumpState === 'on_ground' && isAirborne) {
         jumpState = 'in_air';
         jumpStartTime = performance.now();
+        console.log("Jump started (takeoff detected). Time:", jumpStartTime);
       }
 
       if (jumpState === 'in_air' && !isAirborne) {
@@ -238,6 +260,16 @@
         const gravity = 9.81;
         const jumpHeight = (gravity * airtime * airtime) / 8;
         widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(airtime: ${airtime.toFixed(2)}s)`;
+        // Send jump data to parent via postMessage
+        window.parent.postMessage(
+          {
+            type: "jumptek_jump",
+            height: jumpHeight,
+            airtime: airtime
+          },
+          "*"
+        );
+        console.log("Jump landed. Airtime:", airtime, "Jump Height:", jumpHeight);
       }
 
       // Display "Ready" message if standing in trampoline
@@ -269,6 +301,17 @@
       if (!canvas || !ctx || !video) return;
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Zoom transform
+        ctx.save();
+        // Calculate center point for zoom
+        const cx = canvas.width * zoomCenter.x;
+        const cy = canvas.height * zoomCenter.y;
+        ctx.translate(cx, cy);
+        ctx.scale(zoom, zoom);
+        ctx.translate(-cx, -cy);
+
+        // Draw video frame
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
         // Draw trampoline corners/polygon
         if (trampolineCorners.length > 0) {
@@ -305,6 +348,7 @@
             drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
           }
         }
+        ctx.restore();
       }
       requestAnimationFrame(drawLoop);
     }
@@ -314,8 +358,12 @@
       // Mark trampoline corners (in order)
       if (trampolineCorners.length < 4) {
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        trampolineCorners.push([x, y]);
+        // Take zoom/pan into account
+        const cx = canvas.width * zoomCenter.x;
+        const cy = canvas.height * zoomCenter.y;
+        const zx = (e.clientX - rect.left - cx) / zoom + cx;
+        const zy = (e.clientY - rect.top  - cy) / zoom + cy;
+        trampolineCorners.push([zx, zy]);
         if (trampolineCorners.length === 4) {
           trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
         } else {
@@ -331,6 +379,52 @@
       trackedAthleteIndex = null;
       lastTrackedLandmarks = null;
       jumpState = 'on_ground';
+    });
+
+    // Zoom button handlers
+    function setZoom(newZoom) {
+      zoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+    }
+    zoomInBtn.addEventListener('click', function() {
+      setZoom(zoom + zoomStep);
+    });
+    zoomOutBtn.addEventListener('click', function() {
+      setZoom(zoom - zoomStep);
+    });
+
+    // Mouse wheel zoom (with Ctrl key)
+    canvas.addEventListener('wheel', function(e) {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        if (e.deltaY < 0) setZoom(zoom + zoomStep);
+        else setZoom(zoom - zoomStep);
+      }
+    }, {passive: false});
+
+    // Pinch-to-zoom for touch devices
+    let lastDist = null;
+    canvas.addEventListener('touchstart', function(e) {
+      if (e.touches.length === 2) {
+        lastDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+      }
+    });
+    canvas.addEventListener('touchmove', function(e) {
+      if (e.touches.length === 2 && lastDist !== null) {
+        const newDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const delta = (newDist - lastDist) / 200; // scale sensitivity
+        setZoom(zoom + delta);
+        lastDist = newDist;
+        e.preventDefault();
+      }
+    }, {passive: false});
+    canvas.addEventListener('touchend', function(e) {
+      if (e.touches.length < 2) lastDist = null;
     });
 
     function poseLoop() {
@@ -358,6 +452,8 @@
       trampolineNotice.style.color = "#ff0";
       show(canvas);
       show(restartDrawBtn);
+      show(zoomInBtn);
+      show(zoomOutBtn);
       try {
         await startCamera();
         await enumerateVideoDevices();
