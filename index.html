@@ -16,7 +16,7 @@
     #canvas { z-index: 2; pointer-events: auto; }
     #video { z-index: 1; opacity: 0; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
-    #switchCameraBtn, #settingsBtn, #zoomInBtn, #zoomOutBtn, #restartDrawBtn {
+    #switchCameraBtn, #restartDrawBtn {
       padding: 10px 18px; color: #fff;
       border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
@@ -25,10 +25,8 @@
     }
     #restartDrawBtn { background: #e74c3c; }
     #restartDrawBtn:hover { background: #b53224; }
-    #switchCameraBtn:hover, #settingsBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
-    #switchCameraBtn img, #settingsBtn img { width: 28px; height: 28px; display: block; }
-    #zoomControls { position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
-    #zoomInBtn, #zoomOutBtn { font-size: 2rem; padding: 5px 15px; width: 60px; height: 60px; border-radius: 50%; background: rgba(39, 174, 96, 0.8); box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
+    #switchCameraBtn:hover { background: #219150; }
+    #switchCameraBtn img { width: 28px; height: 28px; display: block; }
     #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; }
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; z-index: 20;}
     #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 30; white-space: pre-line;}
@@ -41,18 +39,11 @@
       <button id="switchCameraBtn" aria-label="Switch camera" tabindex="0" role="button">
         <img src="https://static-00.iconduck.com/assets.00/camera-switch-icon-1024x1024-9oe5epjn.png" alt="Switch Camera">
       </button>
-      <button class="settings-btn" id="settingsBtn" aria-label="Open settings" tabindex="0" role="button">
-        <img src="https://creazilla-store.fra1.digitaloceanspaces.com/icons/3430447/ruler-icon-md.png" alt="Calibration Settings" />
-      </button>
       <button id="restartDrawBtn" aria-label="Restart" tabindex="0" role="button">Restart</button>
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline</div>
     <div id="loadingIndicator" style="display:none;">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
-    <div id="zoomControls">
-      <button id="zoomInBtn">+</button>
-      <button id="zoomOutBtn">-</button>
-    </div>
   </div>
   <video id="video" autoplay playsinline muted style="opacity:0;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:0;"></video>
   <!-- Dependencies -->
@@ -82,11 +73,8 @@
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
     const video = getEl('video');
     const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
-    const settingsBtn = getEl('settingsBtn');
     const loadingIndicator = getEl('loadingIndicator');
     const trampolineNotice = getEl('trampolineNotice');
-    const zoomInBtn = getEl('zoomInBtn');
-    const zoomOutBtn = getEl('zoomOutBtn');
     const restartDrawBtn = getEl('restartDrawBtn');
     const switchCameraBtn = getEl('switchCameraBtn');
 
@@ -96,8 +84,7 @@
     let lastPoseResults = null;
     let inAir = false, takeoffTime = 0;
     let videoDevices = [], currentDeviceIndex = 0;
-    let currentStream = null, videoTrack = null, zoomCapabilities = null;
-    let pose = null, poseLoaded = false, poseLoopActive = false;
+    let currentStream = null, videoTrack = null, pose = null, poseLoaded = false;
 
     function resizeCanvasToScreen() {
       canvas.width = window.innerWidth;
@@ -116,7 +103,7 @@
       show(loadingIndicator);
       if (currentStream) {
         try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
-        videoTrack = null; zoomCapabilities = null;
+        videoTrack = null;
       }
       let constraints = {
         audio: false,
@@ -133,9 +120,6 @@
       await video.play();
       hide(loadingIndicator);
       videoTrack = stream.getVideoTracks()[0];
-      zoomCapabilities = (videoTrack && videoTrack.getCapabilities && videoTrack.getCapabilities().zoom) ? videoTrack.getCapabilities().zoom : null;
-      zoomInBtn.disabled = !zoomCapabilities;
-      zoomOutBtn.disabled = !zoomCapabilities;
       resizeCanvasToScreen();
     }
 
@@ -162,65 +146,67 @@
         [h[6], h[7], 1]
       ];
     }
-    function applyHomography(H, x, y) {
-      const d = H[2][0]*x+H[2][1]*y+H[2][2];
-      const u = (H[0][0]*x+H[0][1]*y+H[0][2])/d;
-      const v = (H[1][0]*x+H[1][1]*y+H[1][2])/d;
-      return [u, v];
-    }
-
-    // 2D polygon in meters (trampoline base, for filtering in world space)
-    const TRAMPOLINE_WIDTH_M = 3.048;  // 10ft
-    const TRAMPOLINE_LENGTH_M = 5.1816; // 17ft
-    function getTrampolineWorldCorners() {
-      return [
-        [0, 0],
-        [TRAMPOLINE_WIDTH_M, 0],
-        [TRAMPOLINE_WIDTH_M, TRAMPOLINE_LENGTH_M],
-        [0, TRAMPOLINE_LENGTH_M]
-      ];
-    }
-
-    // Convert screen (image) x,y to trampoline meters (x,y)
-    function screenToTrampolineMeters(x, y) {
-      if (!homography) return null;
-      return applyHomography(homography, x, y);
-    }
 
     // ===== Jump Logic =====
     let jumpState = 'on_ground';
     let jumpStartTime = 0;
-    let lastInTrampoline = false;
 
-    function isAthleteInTrampoline(landmarks) {
-      if (trampolineCorners.length !== 4 || !homography || !landmarks) return false;
-      // Use the midpoint between both ankles as the "body location"
-      const lAnkle = landmarks[27], rAnkle = landmarks[28];
-      if (!lAnkle || !rAnkle) return false;
-      const x = (lAnkle.x + rAnkle.x) / 2 * canvas.width;
-      const y = (lAnkle.y + rAnkle.y) / 2 * canvas.height;
-      return pointInPolygon(x, y, trampolineCorners);
+    // --- Helper: count keypoints in trampoline polygon ---
+    function countKeypointsInPolygon(landmarks, polygon) {
+      let count = 0;
+      for (let i = 0; i < landmarks.length; i++) {
+        const lm = landmarks[i];
+        const x = lm.x * canvas.width;
+        const y = lm.y * canvas.height;
+        if (pointInPolygon(x, y, polygon)) count++;
+      }
+      // Bonus: prioritize if hips (23, 24) or nose (0) are inside
+      if (pointInPolygon(landmarks[23].x * canvas.width, landmarks[23].y * canvas.height, polygon)) count += 2;
+      if (pointInPolygon(landmarks[24].x * canvas.width, landmarks[24].y * canvas.height, polygon)) count += 2;
+      if (pointInPolygon(landmarks[0].x * canvas.width, landmarks[0].y * canvas.height, polygon)) count += 1;
+      return count;
+    }
+
+    function selectMainAthlete(results, polygon) {
+      // Multi-pose support (future-proofing): poseLandmarks can be array of arrays
+      let candidates = [];
+      if (Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0])) {
+        for (let i = 0; i < results.poseLandmarks.length; i++) {
+          const landmarks = results.poseLandmarks[i];
+          const score = countKeypointsInPolygon(landmarks, polygon);
+          candidates.push({ landmarks, score });
+        }
+      } else if (results.poseLandmarks) {
+        // Single-pose
+        const landmarks = results.poseLandmarks;
+        const score = countKeypointsInPolygon(landmarks, polygon);
+        candidates.push({ landmarks, score });
+      }
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates.length > 0 && candidates[0].score > 0 ? candidates[0].landmarks : null;
     }
 
     function processPose(results) {
       if (!results || !results.poseLandmarks) return;
-
-      // Only process athlete if in trampoline
-      const inTrampoline = isAthleteInTrampoline(results.poseLandmarks);
+      const mainLandmarks = selectMainAthlete(results, trampolineCorners);
+      if (!mainLandmarks) {
+        widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
+        return;
+      }
 
       // Use ankles to determine airborne status
-      const lAnkle = results.poseLandmarks[27], rAnkle = results.poseLandmarks[28];
+      const lAnkle = mainLandmarks[27], rAnkle = mainLandmarks[28];
       const minY = Math.min(lAnkle.y, rAnkle.y);
 
-      const airborneThreshold = 0.86; // tweak for your camera angle, closer to 1 is closer to bottom
-      const isAirborne = minY < airborneThreshold && inTrampoline;
+      const airborneThreshold = 0.86; // tweak for your camera angle
+      const isAirborne = minY < airborneThreshold;
 
       if (jumpState === 'on_ground' && isAirborne) {
         jumpState = 'in_air';
         jumpStartTime = performance.now();
       }
 
-      if (jumpState === 'in_air' && !isAirborne && inTrampoline) {
+      if (jumpState === 'in_air' && !isAirborne) {
         jumpState = 'on_ground';
         const jumpEndTime = performance.now();
         const airtime = (jumpEndTime - jumpStartTime) / 1000;
@@ -230,17 +216,16 @@
       }
 
       // Display "Ready" message if standing in trampoline
-      if (jumpState === 'on_ground' && inTrampoline) {
+      if (jumpState === 'on_ground') {
         widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
       }
-      lastInTrampoline = inTrampoline;
     }
 
     // ===== Pose Setup =====
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 1, // or 2 for higher accuracy if performance allows
+        modelComplexity: 1, // Default (do NOT increase for this request)
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
@@ -287,10 +272,13 @@
           });
           ctx.restore();
         }
-        // Draw pose
+        // Draw main pose if present
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
-          drawConnectors(ctx, lastPoseResults.poseLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
-          drawLandmarks(ctx, lastPoseResults.poseLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
+          const mainLandmarks = selectMainAthlete(lastPoseResults, trampolineCorners);
+          if (mainLandmarks) {
+            drawConnectors(ctx, mainLandmarks, POSE_CONNECTIONS, { color: "#f00", lineWidth: 4 });
+            drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
+          }
         }
       }
       requestAnimationFrame(drawLoop);
@@ -304,8 +292,6 @@
         const x = e.clientX - rect.left, y = e.clientY - rect.top;
         trampolineCorners.push([x, y]);
         if (trampolineCorners.length === 4) {
-          // Compute homography for mapping screen to trampoline meters
-          homography = computeHomography(trampolineCorners, getTrampolineWorldCorners());
           trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
         } else {
           trampolineNotice.textContent = `Corner ${trampolineCorners.length}/4 marked. Continue.`;
@@ -319,40 +305,22 @@
       trampolineNotice.textContent = "Tap the four corners of the trampoline";
     });
 
-    settingsBtn.addEventListener('click', function() {
-      alert("Settings coming soon!");
-    });
-
-    zoomInBtn.addEventListener('click', function() {
-      if (!zoomCapabilities || !videoTrack) return;
-      let current = videoTrack.getSettings().zoom || zoomCapabilities.min;
-      let next = Math.min(zoomCapabilities.max, current + (zoomCapabilities.step || 0.1));
-      videoTrack.applyConstraints({ advanced: [{ zoom: next }] });
-    });
-    zoomOutBtn.addEventListener('click', function() {
-      if (!zoomCapabilities || !videoTrack) return;
-      let current = videoTrack.getSettings().zoom || zoomCapabilities.min;
-      let next = Math.max(zoomCapabilities.min, current - (zoomCapabilities.step || 0.1));
-      videoTrack.applyConstraints({ advanced: [{ zoom: next }] });
-    });
-
     function poseLoop() {
-      if (poseLoopActive) return;
-      poseLoopActive = true;
-      (async function loop() {
-        while (poseLoaded) {
-          const start = performance.now();
-          try {
-            if (video.readyState === 4) {
-              await pose.send({ image: video });
-            }
-          } catch (e) {}
-          const elapsed = performance.now() - start;
-          const wait = Math.max(0, 16 - elapsed);
-          await new Promise(res => setTimeout(res, wait));
-        }
-        poseLoopActive = false;
-      })();
+      if (poseLoaded) {
+        (async function loop() {
+          while (poseLoaded) {
+            const start = performance.now();
+            try {
+              if (video.readyState === 4) {
+                await pose.send({ image: video });
+              }
+            } catch (e) {}
+            const elapsed = performance.now() - start;
+            const wait = Math.max(0, 16 - elapsed);
+            await new Promise(res => setTimeout(res, wait));
+          }
+        })();
+      }
     }
 
     window.addEventListener('DOMContentLoaded', async function() {
