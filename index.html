@@ -53,12 +53,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
   <script>
-    // ===== Utility Functions =====
     function show(el) { if (el) el.style.display = ""; }
     function hide(el) { if (el) el.style.display = "none"; }
     function getEl(id) { return document.getElementById(id); }
 
-    // --- Point in Polygon (for trampoline) ---
     function pointInPolygon(x, y, corners) {
       let inside = false;
       for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
@@ -71,7 +69,6 @@
       return inside;
     }
 
-    // ===== DOM Elements =====
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
     const video = getEl('video');
     const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
@@ -82,16 +79,23 @@
     const zoomInBtn = getEl('zoomInBtn');
     const zoomOutBtn = getEl('zoomOutBtn');
 
-    // ===== Native Camera Zoom State =====
     let maxNativeZoom = 1, minNativeZoom = 1, currentNativeZoom = 1, zoomStep = 0.1;
 
-    // ===== State =====
     let trampolineCorners = [];
     let homography = null;
     let lastPoseResults = null;
     let inAir = false, takeoffTime = 0;
     let videoDevices = [], currentDeviceIndex = 0;
     let currentStream = null, videoTrack = null, pose = null, poseLoaded = false;
+
+    // Jump display variables
+    let jumpState = 'on_ground';
+    let jumpStartTime = 0;
+    let lastJumpHeight = 0;
+    let lastJumpAirtime = 0;
+    let lastSeenLandmarks = null;
+    let poseLastSeenTime = 0;
+    const POSE_LOST_TIMEOUT = 400; // ms
 
     function resizeCanvasToScreen() {
       canvas.width = window.innerWidth;
@@ -129,7 +133,6 @@
       videoTrack = stream.getVideoTracks()[0];
       resizeCanvasToScreen();
 
-      // Native camera zoom support
       if (videoTrack && typeof videoTrack.getCapabilities === "function") {
         const caps = videoTrack.getCapabilities();
         if (caps.zoom) {
@@ -154,27 +157,6 @@
       catch (e) { trampolineNotice.textContent = 'Unable to switch camera: ' + e; trampolineNotice.style.color = "#f00"; }
     });
 
-    // ===== Homography helpers =====
-    function computeHomography(src, dst) {
-      const X = [], Y = [];
-      for (let i = 0; i < 4; i++) {
-        X.push([src[i][0], src[i][1], 1, 0, 0, 0, -dst[i][0]*src[i][0], -dst[i][0]*src[i][1]]);
-        X.push([0,0,0,src[i][0],src[i][1],1,-dst[i][1]*src[i][0],-dst[i][1]*src[i][1]]);
-        Y.push(dst[i][0]); Y.push(dst[i][1]);
-      }
-      const Xt = numeric.transpose(X), XtX = numeric.dot(Xt,X), XtY = numeric.dot(Xt,Y);
-      const h = numeric.solve(XtX, XtY);
-      return [
-        [h[0], h[1], h[2]],
-        [h[3], h[4], h[5]],
-        [h[6], h[7], 1]
-      ];
-    }
-
-    // ===== Jump Logic and rest unchanged =====
-    let jumpState = 'on_ground';
-    let jumpStartTime = 0;
-
     function countKeypointsInPolygon(landmarks, polygon) {
       let count = 0;
       for (let i = 0; i < landmarks.length; i++) {
@@ -183,7 +165,6 @@
         const y = lm.y * canvas.height;
         if (pointInPolygon(x, y, polygon)) count++;
       }
-      // Bonus: prioritize if hips (23, 24) or nose (0) are inside
       if (pointInPolygon(landmarks[23].x * canvas.width, landmarks[23].y * canvas.height, polygon)) count += 2;
       if (pointInPolygon(landmarks[24].x * canvas.width, landmarks[24].y * canvas.height, polygon)) count += 2;
       if (pointInPolygon(landmarks[0].x * canvas.width, landmarks[0].y * canvas.height, polygon)) count += 1;
@@ -225,27 +206,41 @@
     }
 
     function processPose(results) {
-      if (!results || !results.poseLandmarks) return;
-      const mainLandmarks = selectMainAthlete(results, trampolineCorners);
-      if (!mainLandmarks || !mainLandmarks[27] || !mainLandmarks[28]) {
-        widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
-        jumpState = 'on_ground';
+      const now = performance.now();
+      let mainLandmarks = selectMainAthlete(results, trampolineCorners);
+
+      if (mainLandmarks && mainLandmarks[27] && mainLandmarks[28]) {
+        lastSeenLandmarks = mainLandmarks;
+        poseLastSeenTime = now;
+      } else if (lastSeenLandmarks && (now - poseLastSeenTime) < POSE_LOST_TIMEOUT) {
+        mainLandmarks = lastSeenLandmarks;
+      } else {
+        // Pose lost too long; show last jump if present, otherwise 0
+        if (lastJumpHeight > 0) {
+          widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
+        } else {
+          widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
+        }
         return;
       }
+
       const lAnkle = mainLandmarks[27], rAnkle = mainLandmarks[28];
       const minY = Math.min(lAnkle.y, rAnkle.y);
       const airborneThreshold = 0.86;
       const isAirborne = minY < airborneThreshold;
+
       if (jumpState === 'on_ground' && isAirborne) {
         jumpState = 'in_air';
-        jumpStartTime = performance.now();
+        jumpStartTime = now;
       }
       if (jumpState === 'in_air' && !isAirborne) {
         jumpState = 'on_ground';
-        const jumpEndTime = performance.now();
+        const jumpEndTime = now;
         const airtime = (jumpEndTime - jumpStartTime) / 1000;
         const gravity = 9.81;
         const jumpHeight = (gravity * airtime * airtime) / 8;
+        lastJumpHeight = jumpHeight;
+        lastJumpAirtime = airtime;
         widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(airtime: ${airtime.toFixed(2)}s)`;
         window.parent.postMessage(
           {
@@ -255,9 +250,14 @@
           },
           "*"
         );
+        return;
       }
-      if (jumpState === 'on_ground') {
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m`;
+
+      // Always show the last jump result (or 0 if never jumped)
+      if (lastJumpHeight > 0) {
+        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
+      } else {
+        widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
       }
     }
 
@@ -340,9 +340,11 @@
       trackedAthleteIndex = null;
       lastTrackedLandmarks = null;
       jumpState = 'on_ground';
+      lastJumpHeight = 0;
+      lastJumpAirtime = 0;
+      widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
     });
 
-    // Native zoom button handlers
     async function setNativeZoom(zoomValue) {
       if (videoTrack && typeof videoTrack.getCapabilities === "function") {
         zoomValue = Math.max(minNativeZoom, Math.min(maxNativeZoom, zoomValue));
@@ -362,7 +364,6 @@
       setNativeZoom(currentNativeZoom - zoomStep);
     });
 
-    // Mouse wheel zoom (with Ctrl key)
     canvas.addEventListener('wheel', function(e) {
       if (e.ctrlKey && videoTrack && typeof videoTrack.getCapabilities === "function") {
         e.preventDefault();
@@ -371,7 +372,6 @@
       }
     }, {passive: false});
 
-    // Pinch-to-zoom for touch devices
     let lastDist = null;
     canvas.addEventListener('touchstart', function(e) {
       if (e.touches.length === 2) {
