@@ -152,14 +152,14 @@
     let athleteInMat = false;
     let lastDMTFlightTime = 0;
 
-    // Movement tracking for enhanced filtering
+    // Movement tracking for enhanced filtering - RELAXED THRESHOLDS
     let athletePositionHistory = new Map(); // Track position history per athlete
     let trackedAthleteIndex = null;
     let lastTrackedLandmarks = null;
-    const POSITION_HISTORY_LENGTH = 10; // Number of frames to keep
-    const MIN_MOVEMENT_THRESHOLD = 0.015; // Minimum movement to consider as "active"
-    const MIN_VERTICAL_VELOCITY = 0.008; // Minimum upward velocity to trigger jump detection
-    const CENTER_WEIGHT_FACTOR = 2.0; // How much to boost center proximity scores
+    const POSITION_HISTORY_LENGTH = 8; // Reduced from 10
+    const MIN_MOVEMENT_THRESHOLD = 0.008; // Reduced from 0.015 - more sensitive
+    const MIN_VERTICAL_VELOCITY = 0.005; // Reduced from 0.008 - more sensitive
+    const CENTER_WEIGHT_FACTOR = 1.2; // Reduced from 2.0 - less aggressive
 
     // Enhanced athlete tracking with movement and position analysis
     class AthleteTracker {
@@ -168,6 +168,8 @@
         this.positionHistory = [];
         this.lastUpdateTime = performance.now();
         this.confidence = 0;
+        this.isNewTracker = true; // Flag for new trackers
+        this.framesSinceCreation = 0;
         this.updatePosition(landmarks);
       }
 
@@ -187,6 +189,12 @@
         }
 
         this.lastUpdateTime = now;
+        this.framesSinceCreation++;
+        
+        // Mark as not new after a few frames
+        if (this.framesSinceCreation > 3) {
+          this.isNewTracker = false;
+        }
       }
 
       calculateCenterOfMass(landmarks) {
@@ -227,25 +235,39 @@
       }
 
       isActivelyMoving() {
+        // Be more lenient for new trackers
+        const threshold = this.isNewTracker ? MIN_MOVEMENT_THRESHOLD * 0.5 : MIN_MOVEMENT_THRESHOLD;
         const velocity = this.getMovementVelocity();
-        return velocity.magnitude > MIN_MOVEMENT_THRESHOLD;
+        return velocity.magnitude > threshold;
       }
 
       isJumping() {
+        // Be more lenient for new trackers
+        const threshold = this.isNewTracker ? MIN_VERTICAL_VELOCITY * 0.5 : MIN_VERTICAL_VELOCITY;
         const verticalVel = this.getVerticalVelocity();
-        return verticalVel > MIN_VERTICAL_VELOCITY;
+        return verticalVel > threshold;
       }
 
       getActivityScore() {
         const velocity = this.getMovementVelocity();
         const verticalVel = this.getVerticalVelocity();
         
-        // Base activity score from overall movement
-        let score = Math.min(velocity.magnitude / MIN_MOVEMENT_THRESHOLD, 3.0);
+        // More generous base scoring
+        let score = 1.0; // Start with base score of 1.0
+        
+        // Add movement bonus
+        if (velocity.magnitude > MIN_MOVEMENT_THRESHOLD) {
+          score += Math.min(velocity.magnitude / MIN_MOVEMENT_THRESHOLD, 2.0);
+        }
         
         // Bonus for upward movement (jumping)
         if (verticalVel > 0) {
-          score += Math.min(verticalVel / MIN_VERTICAL_VELOCITY, 2.0);
+          score += Math.min(verticalVel / MIN_VERTICAL_VELOCITY, 1.5);
+        }
+        
+        // Boost for new trackers to help initial detection
+        if (this.isNewTracker) {
+          score *= 1.3;
         }
         
         return score;
@@ -278,9 +300,9 @@
         }
       }
       
-      // Remove stale trackers
+      // Remove stale trackers (longer timeout)
       for (let [id, tracker] of athleteTrackers) {
-        if (!activeTrackers.has(id) && (now - tracker.lastUpdateTime) > 1000) {
+        if (!activeTrackers.has(id) && (now - tracker.lastUpdateTime) > 2000) { // Increased from 1000ms
           athleteTrackers.delete(id);
         }
       }
@@ -307,11 +329,14 @@
       // Base score from keypoints in polygon
       let score = countKeypointsInPolygon(landmarks, polygon);
       
+      // Early return if no keypoints in polygon
+      if (score === 0) return 0;
+      
       // Get athlete tracker for movement analysis
       const tracker = athleteTrackers.get(trackerId);
-      if (!tracker) return score;
+      if (!tracker) return score; // Return base score if no tracker yet
       
-      // Center-weighted scoring
+      // Center-weighted scoring (less aggressive now)
       const centerMass = tracker.calculateCenterOfMass(landmarks);
       const centerX = centerMass.x * canvas.width;
       const centerY = centerMass.y * canvas.height;
@@ -319,24 +344,29 @@
       const polygonRadius = getPolygonRadius(polygon);
       const centerProximity = Math.max(0, 1 - (distToCenter / polygonRadius));
       
-      // Apply center weighting
+      // Apply center weighting (reduced impact)
       score *= (1 + centerProximity * CENTER_WEIGHT_FACTOR);
       
-      // Movement-based filtering
+      // Movement-based filtering (more lenient)
       const activityScore = tracker.getActivityScore();
-      score *= (0.3 + activityScore * 0.7); // Base 30%, up to 100% with activity
+      score *= (0.5 + activityScore * 0.5); // Base 50%, up to 100% with activity
       
-      // Bonus for jumping motion in regular trampoline mode
-      if (!isDMTMode && tracker.isJumping()) {
-        score *= 1.5;
+      // Less strict filtering for initial detection
+      if (tracker.isNewTracker || tracker.framesSinceCreation < 10) {
+        score *= 1.2; // 20% boost for new detections
       }
       
-      // DMT-specific filtering
+      // Bonus for jumping motion in regular trampoline mode (reduced)
+      if (!isDMTMode && tracker.isJumping()) {
+        score *= 1.2; // Reduced from 1.5
+      }
+      
+      // DMT-specific filtering (more lenient)
       if (isDMTMode) {
-        if (dmtState === 'waiting' && tracker.isActivelyMoving()) {
-          score *= 1.3; // Prefer moving athletes when waiting
+        if (dmtState === 'waiting' && (tracker.isActivelyMoving() || tracker.isNewTracker)) {
+          score *= 1.1; // Reduced bonus
         } else if (dmtState === 'on_trampoline' && tracker.isJumping()) {
-          score *= 1.4; // Prefer jumping athletes when on trampoline
+          score *= 1.2; // Reduced bonus
         }
       }
       
@@ -368,8 +398,8 @@
       // Sort by score and apply minimum thresholds
       candidates.sort((a, b) => b.score - a.score);
       
-      // Require minimum score for tracking
-      const minScoreThreshold = isDMTMode ? 1.0 : 0.5;
+      // Much lower minimum score thresholds for better initial detection
+      const minScoreThreshold = isDMTMode ? 0.3 : 0.2; // Significantly reduced
       
       if (candidates.length > 0 && candidates[0].score > minScoreThreshold) {
         trackedAthleteIndex = candidates[0].index;
@@ -377,11 +407,12 @@
         return lastTrackedLandmarks;
       }
       
-      // Try to maintain tracking of current athlete if they're still visible
+      // More forgiving continuation tracking
       if (trackedAthleteIndex !== null && multiPose && 
           results.poseLandmarks[trackedAthleteIndex]) {
         const tracker = athleteTrackers.get(trackedAthleteIndex);
-        if (tracker && tracker.isActivelyMoving()) {
+        // Allow tracking even without active movement for a few frames
+        if (tracker && (tracker.isActivelyMoving() || tracker.framesSinceCreation < 15)) {
           lastTrackedLandmarks = results.poseLandmarks[trackedAthleteIndex];
           return lastTrackedLandmarks;
         }
@@ -389,7 +420,7 @@
       
       if (trackedAthleteIndex !== null && !multiPose && results.poseLandmarks) {
         const tracker = athleteTrackers.get(0);
-        if (tracker && tracker.isActivelyMoving()) {
+        if (tracker && (tracker.isActivelyMoving() || tracker.framesSinceCreation < 15)) {
           lastTrackedLandmarks = results.poseLandmarks;
           return lastTrackedLandmarks;
         }
@@ -540,25 +571,22 @@
         mainLandmarks = lastSeenLandmarks;
       }
 
-      // Enhanced DMT State Machine with movement validation
+      // More lenient DMT State Machine
       switch (dmtState) {
         case 'waiting':
           if (athleteInTrampolineNow && !athleteInTrampoline) {
-            // Verify athlete is actively moving before confirming entry
-            const tracker = athleteTrackers.get(trackedAthleteIndex);
-            if (tracker && tracker.isActivelyMoving()) {
-              dmtState = 'on_trampoline';
-              dmtEntryTime = now;
-              console.log('DMT: Active athlete entered trampoline');
-            }
+            // More lenient entry detection - don't require active movement immediately
+            dmtState = 'on_trampoline';
+            dmtEntryTime = now;
+            console.log('DMT: Athlete entered trampoline');
           }
           break;
           
         case 'on_trampoline':
           if (!athleteInTrampolineNow && athleteInTrampoline) {
-            // Verify athlete was jumping before confirming takeoff
+            // More lenient takeoff detection
             const tracker = athleteTrackers.get(trackedAthleteIndex);
-            if (tracker && (tracker.isJumping() || tracker.getVerticalVelocity() > 0)) {
+            if (!tracker || tracker.getVerticalVelocity() >= 0) { // Allow neutral or upward movement
               dmtState = 'in_flight';
               dmtTakeoffTime = now;
               console.log('DMT: Athlete took off from trampoline');
@@ -630,7 +658,7 @@
         return;
       }
 
-      // Enhanced regular trampoline mode logic
+      // More lenient regular trampoline mode logic
       const now = performance.now();
       let mainLandmarks = selectMainAthlete(results, trampolineCorners);
 
@@ -653,14 +681,11 @@
       const airborneThreshold = 0.86;
       const isAirborne = minY < airborneThreshold;
 
-      // Enhanced jump detection with movement validation
+      // More lenient jump detection
       if (jumpState === 'on_ground' && isAirborne) {
-        // Verify athlete is actually jumping before triggering
-        const tracker = athleteTrackers.get(trackedAthleteIndex);
-        if (tracker && (tracker.isJumping() || tracker.getVerticalVelocity() > MIN_VERTICAL_VELOCITY / 2)) {
-          jumpState = 'in_air';
-          jumpStartTime = now;
-        }
+        // Don't require movement validation for regular trampoline mode
+        jumpState = 'in_air';
+        jumpStartTime = now;
       }
       
       if (jumpState === 'in_air' && !isAirborne) {
@@ -668,8 +693,8 @@
         const jumpEndTime = now;
         const airtime = (jumpEndTime - jumpStartTime) / 1000;
         
-        // Only record jumps above minimum threshold
-        if (airtime > 0.1) { // Minimum 100ms airtime
+        // Reduced minimum airtime threshold
+        if (airtime > 0.05) { // Reduced from 100ms to 50ms
           const gravity = 9.81;
           const jumpHeight = (gravity * airtime * airtime) / 8;
           lastJumpHeight = jumpHeight;
@@ -701,8 +726,8 @@
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
-        minDetectionConfidence: 0.4, // Slightly higher for better quality
-        minTrackingConfidence: 0.4
+        minDetectionConfidence: 0.3, // Back to original value
+        minTrackingConfidence: 0.3
       });
       pose.onResults(results => {
         lastPoseResults = results;
