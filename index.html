@@ -16,7 +16,7 @@
     #canvas { z-index: 2; pointer-events: auto; }
     #video { z-index: 1; opacity: 0; }
     #buttonRow { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; z-index: 20; }
-    #switchCameraBtn, #restartDrawBtn, #zoomInBtn, #zoomOutBtn {
+    #switchCameraBtn, #restartDrawBtn, #zoomInBtn, #zoomOutBtn, #dmtModeBtn {
       padding: 10px 18px; color: #fff;
       border: none; border-radius: 16px; font-size: 1.3rem; cursor: pointer;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s;
@@ -24,12 +24,16 @@
       background: #27ae60;
     }
     #restartDrawBtn { background: #e74c3c; }
+    #dmtModeBtn { background: #8e44ad; }
+    #dmtModeBtn.active { background: #9b59b6; box-shadow: 0 0 15px rgba(155, 89, 182, 0.6); }
     #restartDrawBtn:hover { background: #b53224; }
+    #dmtModeBtn:hover { background: #7d3c98; }
     #switchCameraBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
     #switchCameraBtn img { width: 28px; height: 28px; display: block; }
-    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.1rem; font-family: monospace;}
-    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; }
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 10;}
+    #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem; font-weight: bold; display: none; }
+    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; font-weight: bold; z-index: 25; text-align: center; }
+    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; font-weight: bold; text-align: center; }
+    #dmtMatNotice { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); color: #ff6b35; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.1rem; font-weight: bold; z-index: 25; text-align: center; display: none; }
   </style>
 </head>
 <body>
@@ -41,9 +45,11 @@
       </button>
       <button id="zoomInBtn" aria-label="Zoom In" tabindex="0" role="button">+</button>
       <button id="zoomOutBtn" aria-label="Zoom Out" tabindex="0" role="button">−</button>
+      <button id="dmtModeBtn" aria-label="DMT Mode" tabindex="0" role="button">DMT</button>
       <button id="restartDrawBtn" aria-label="Restart" tabindex="0" role="button">Restart</button>
     </div>
     <div id="trampolineNotice">Tap the four corners of the trampoline</div>
+    <div id="dmtMatNotice">Now tap the four corners of the landing mat</div>
     <div id="loadingIndicator" style="display:none;">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
   </div>
@@ -74,19 +80,26 @@
     const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
     const loadingIndicator = getEl('loadingIndicator');
     const trampolineNotice = getEl('trampolineNotice');
+    const dmtMatNotice = getEl('dmtMatNotice');
     const restartDrawBtn = getEl('restartDrawBtn');
     const switchCameraBtn = getEl('switchCameraBtn');
     const zoomInBtn = getEl('zoomInBtn');
     const zoomOutBtn = getEl('zoomOutBtn');
+    const dmtModeBtn = getEl('dmtModeBtn');
 
     let maxNativeZoom = 1, minNativeZoom = 1, currentNativeZoom = 1, zoomStep = 0.1;
 
     let trampolineCorners = [];
+    let dmtMatCorners = [];
     let homography = null;
     let lastPoseResults = null;
     let inAir = false, takeoffTime = 0;
     let videoDevices = [], currentDeviceIndex = 0;
     let currentStream = null, videoTrack = null, pose = null, poseLoaded = false;
+
+    // Mode variables
+    let isDMTMode = false;
+    let setupPhase = 'trampoline'; // 'trampoline' or 'mat'
 
     // Jump display variables
     let jumpState = 'on_ground';
@@ -96,6 +109,16 @@
     let lastSeenLandmarks = null;
     let poseLastSeenTime = 0;
     const POSE_LOST_TIMEOUT = 400; // ms
+
+    // DMT-specific variables
+    let dmtState = 'waiting'; // 'waiting', 'on_trampoline', 'in_flight', 'landed'
+    let dmtEntryTime = 0;
+    let dmtTakeoffTime = 0;
+    let dmtLandingTime = 0;
+    let dmtFlightTime = 0;
+    let athleteInTrampoline = false;
+    let athleteInMat = false;
+    let lastDMTFlightTime = 0;
 
     function resizeCanvasToScreen() {
       canvas.width = window.innerWidth;
@@ -157,6 +180,61 @@
       catch (e) { trampolineNotice.textContent = 'Unable to switch camera: ' + e; trampolineNotice.style.color = "#f00"; }
     });
 
+    dmtModeBtn.addEventListener('click', function() {
+      isDMTMode = !isDMTMode;
+      if (isDMTMode) {
+        dmtModeBtn.classList.add('active');
+        dmtModeBtn.textContent = 'DMT ON';
+        resetDMTTracking();
+        updateNotices();
+      } else {
+        dmtModeBtn.classList.remove('active');
+        dmtModeBtn.textContent = 'DMT';
+        hide(dmtMatNotice);
+        updateNotices();
+      }
+    });
+
+    function resetDMTTracking() {
+      dmtState = 'waiting';
+      dmtEntryTime = 0;
+      dmtTakeoffTime = 0;
+      dmtLandingTime = 0;
+      dmtFlightTime = 0;
+      athleteInTrampoline = false;
+      athleteInMat = false;
+      setupPhase = 'trampoline';
+    }
+
+    function updateNotices() {
+      if (isDMTMode) {
+        if (setupPhase === 'trampoline') {
+          if (trampolineCorners.length === 4) {
+            trampolineNotice.textContent = "DMT trampoline marked. Ready for mat setup.";
+            show(dmtMatNotice);
+            setupPhase = 'mat';
+          } else {
+            trampolineNotice.textContent = `DMT Mode: Mark trampoline corners (${trampolineCorners.length}/4)`;
+            hide(dmtMatNotice);
+          }
+        } else if (setupPhase === 'mat') {
+          if (dmtMatCorners.length === 4) {
+            trampolineNotice.textContent = "DMT setup complete. Ready to track flights!";
+            hide(dmtMatNotice);
+          } else {
+            dmtMatNotice.textContent = `Mark landing mat corners (${dmtMatCorners.length}/4)`;
+          }
+        }
+      } else {
+        if (trampolineCorners.length === 4) {
+          trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
+        } else {
+          trampolineNotice.textContent = "Tap the four corners of the trampoline";
+        }
+        hide(dmtMatNotice);
+      }
+    }
+
     function countKeypointsInPolygon(landmarks, polygon) {
       let count = 0;
       for (let i = 0; i < landmarks.length; i++) {
@@ -205,7 +283,114 @@
       return null;
     }
 
+    function processDMTPose(results) {
+      const now = performance.now();
+      
+      // Check if athlete is in trampoline area
+      let mainLandmarks = null;
+      if (trampolineCorners.length === 4) {
+        mainLandmarks = selectMainAthlete(results, trampolineCorners);
+      }
+      
+      // Check if athlete is in mat area
+      let athleteInMatNow = false;
+      if (dmtMatCorners.length === 4 && results.poseLandmarks) {
+        const matLandmarks = selectMainAthlete(results, dmtMatCorners);
+        athleteInMatNow = matLandmarks !== null;
+      }
+
+      // Update tracking states
+      const athleteInTrampolineNow = mainLandmarks !== null;
+
+      if (mainLandmarks && mainLandmarks[27] && mainLandmarks[28]) {
+        lastSeenLandmarks = mainLandmarks;
+        poseLastSeenTime = now;
+      } else if (lastSeenLandmarks && (now - poseLastSeenTime) < POSE_LOST_TIMEOUT) {
+        mainLandmarks = lastSeenLandmarks;
+      }
+
+      // DMT State Machine
+      switch (dmtState) {
+        case 'waiting':
+          if (athleteInTrampolineNow && !athleteInTrampoline) {
+            dmtState = 'on_trampoline';
+            dmtEntryTime = now;
+            console.log('DMT: Athlete entered trampoline');
+          }
+          break;
+          
+        case 'on_trampoline':
+          if (!athleteInTrampolineNow && athleteInTrampoline) {
+            dmtState = 'in_flight';
+            dmtTakeoffTime = now;
+            console.log('DMT: Athlete took off from trampoline');
+          }
+          break;
+          
+        case 'in_flight':
+          if (athleteInMatNow && !athleteInMat) {
+            dmtState = 'landed';
+            dmtLandingTime = now;
+            dmtFlightTime = (dmtLandingTime - dmtTakeoffTime) / 1000;
+            lastDMTFlightTime = dmtFlightTime;
+            
+            // Calculate estimated jump height from flight time
+            const gravity = 9.81;
+            const jumpHeight = (gravity * dmtFlightTime * dmtFlightTime) / 8;
+            lastJumpHeight = jumpHeight;
+            lastJumpAirtime = dmtFlightTime;
+            
+            widgetJumpHeightDisplay.textContent = `DMT Flight: ${dmtFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
+            
+            // Send message to parent
+            window.parent.postMessage(
+              {
+                type: "jumptek_dmt_flight",
+                flightTime: dmtFlightTime,
+                height: jumpHeight,
+                entryTime: dmtEntryTime,
+                takeoffTime: dmtTakeoffTime,
+                landingTime: dmtLandingTime
+              },
+              "*"
+            );
+            
+            console.log(`DMT: Landed on mat. Flight time: ${dmtFlightTime.toFixed(2)}s`);
+            
+            // Reset for next athlete after a short delay
+            setTimeout(() => {
+              dmtState = 'waiting';
+              console.log('DMT: Ready for next athlete');
+            }, 2000);
+          }
+          break;
+          
+        case 'landed':
+          // Waiting for reset
+          break;
+      }
+
+      // Update previous states
+      athleteInTrampoline = athleteInTrampolineNow;
+      athleteInMat = athleteInMatNow;
+
+      // Display current state
+      if (lastDMTFlightTime > 0) {
+        const gravity = 9.81;
+        const jumpHeight = (gravity * lastDMTFlightTime * lastDMTFlightTime) / 8;
+        widgetJumpHeightDisplay.textContent = `DMT Flight: ${lastDMTFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
+      } else {
+        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState}\nFlight: 0.00s`;
+      }
+    }
+
     function processPose(results) {
+      if (isDMTMode) {
+        processDMTPose(results);
+        return;
+      }
+
+      // Original trampoline mode logic
       const now = performance.now();
       let mainLandmarks = selectMainAthlete(results, trampolineCorners);
 
@@ -215,7 +400,6 @@
       } else if (lastSeenLandmarks && (now - poseLastSeenTime) < POSE_LOST_TIMEOUT) {
         mainLandmarks = lastSeenLandmarks;
       } else {
-        // Pose lost too long; show last jump if present, otherwise 0
         if (lastJumpHeight > 0) {
           widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
         } else {
@@ -253,7 +437,6 @@
         return;
       }
 
-      // Always show the last jump result (or 0 if never jumped)
       if (lastJumpHeight > 0) {
         widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
       } else {
@@ -283,6 +466,8 @@
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height);
+        
+        // Draw trampoline area
         if (trampolineCorners.length > 0) {
           ctx.save();
           ctx.strokeStyle = "#0ff"; ctx.lineWidth = 3;
@@ -309,6 +494,36 @@
           });
           ctx.restore();
         }
+
+        // Draw DMT mat area (if in DMT mode)
+        if (isDMTMode && dmtMatCorners.length > 0) {
+          ctx.save();
+          ctx.strokeStyle = "#ff6b35"; ctx.lineWidth = 3;
+          ctx.fillStyle = "#ff6b35";
+          ctx.beginPath();
+          dmtMatCorners.forEach(([x, y], idx) => {
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          if (dmtMatCorners.length === 4) ctx.closePath();
+          ctx.stroke();
+          dmtMatCorners.forEach(([x, y], idx) => {
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = "#222";
+            ctx.font = "bold 18px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(`M${idx + 1}`, x, y);
+            ctx.fillStyle = "#ff6b35";
+          });
+          ctx.restore();
+        }
+
+        // Draw pose landmarks
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           const mainLandmarks = selectMainAthlete(lastPoseResults, trampolineCorners);
           if (mainLandmarks) {
@@ -321,28 +536,39 @@
     }
 
     canvas.addEventListener('click', function(e) {
-      if (trampolineCorners.length < 4) {
-        const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left, y = e.clientY - rect.top;
-        trampolineCorners.push([x, y]);
-        if (trampolineCorners.length === 4) {
-          trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
-        } else {
-          trampolineNotice.textContent = `Corner ${trampolineCorners.length}/4 marked. Continue.`;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left, y = e.clientY - rect.top;
+      
+      if (isDMTMode) {
+        if (setupPhase === 'trampoline' && trampolineCorners.length < 4) {
+          trampolineCorners.push([x, y]);
+          updateNotices();
+        } else if (setupPhase === 'mat' && dmtMatCorners.length < 4) {
+          dmtMatCorners.push([x, y]);
+          updateNotices();
+        }
+      } else {
+        if (trampolineCorners.length < 4) {
+          trampolineCorners.push([x, y]);
+          updateNotices();
         }
       }
     });
 
     restartDrawBtn.addEventListener('click', function() {
       trampolineCorners = [];
+      dmtMatCorners = [];
       homography = null;
-      trampolineNotice.textContent = "Tap the four corners of the trampoline";
       trackedAthleteIndex = null;
       lastTrackedLandmarks = null;
       jumpState = 'on_ground';
       lastJumpHeight = 0;
       lastJumpAirtime = 0;
-      widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
+      lastDMTFlightTime = 0;
+      resetDMTTracking();
+      setupPhase = 'trampoline';
+      updateNotices();
+      widgetJumpHeightDisplay.textContent = isDMTMode ? "DMT Flight: 0.00s" : "Jump: 0.00 m";
     });
 
     async function setNativeZoom(zoomValue) {
@@ -443,7 +669,7 @@
         }
         drawLoop();
         poseLoop();
-        trampolineNotice.textContent = "Tap the four corners of the trampoline";
+        updateNotices();
         trampolineNotice.style.color = "#0f0";
       } catch (e) {
         trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
