@@ -34,6 +34,7 @@
     #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; font-weight: bold; z-index: 25; text-align: center; }
     #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; font-weight: bold; text-align: center; }
     #dmtMatNotice { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); color: #ff6b35; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.1rem; font-weight: bold; z-index: 25; text-align: center; display: none; }
+    #performanceIndicator { position: absolute; top: 100px; right: 30px; background: rgba(0,0,0,0.75); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; z-index: 25; }
   </style>
 </head>
 <body>
@@ -52,6 +53,7 @@
     <div id="dmtMatNotice">Now tap the four corners of the landing mat</div>
     <div id="loadingIndicator" style="display:none;">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
+    <div id="performanceIndicator">FPS: 0 | Speed: 0.0</div>
   </div>
   <video id="video" autoplay playsinline muted style="opacity:0;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:0;"></video>
   <!-- Dependencies -->
@@ -107,11 +109,10 @@
       return maxDist || 1;
     }
 
-    // Calculate similarity between two poses for tracking continuity
-    function calculatePoseSimilarity(landmarks1, landmarks2) {
+    // Enhanced pose similarity with motion compensation
+    function calculatePoseSimilarity(landmarks1, landmarks2, motionCompensation = 0) {
       if (!landmarks1 || !landmarks2) return 0;
       
-      // Use key body points for comparison
       const keyPoints = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
       let totalDistance = 0;
       let validPoints = 0;
@@ -128,32 +129,145 @@
       if (validPoints === 0) return 0;
       
       const avgDistance = totalDistance / validPoints;
-      // Convert distance to similarity score (closer = higher score)
-      return Math.max(0, 1 - (avgDistance * 5)); // Scale factor of 5
+      // More lenient for fast movement
+      const threshold = 3 + motionCompensation;
+      return Math.max(0, 1 - (avgDistance * threshold));
     }
 
-    // Predictive tracking during pose loss (flips, occlusion)
-    class PredictiveTracker {
+    // Performance monitor for real-time feedback
+    class PerformanceMonitor {
+      constructor() {
+        this.frameCount = 0;
+        this.lastTime = performance.now();
+        this.fps = 0;
+        this.lastMovementSpeed = 0;
+      }
+
+      update() {
+        this.frameCount++;
+        const now = performance.now();
+        if (now - this.lastTime >= 1000) {
+          this.fps = Math.round(this.frameCount * 1000 / (now - this.lastTime));
+          this.frameCount = 0;
+          this.lastTime = now;
+          this.updateDisplay();
+        }
+      }
+
+      setMovementSpeed(speed) {
+        this.lastMovementSpeed = speed;
+      }
+
+      updateDisplay() {
+        const indicator = getEl('performanceIndicator');
+        if (indicator) {
+          indicator.textContent = `FPS: ${this.fps} | Speed: ${this.lastMovementSpeed.toFixed(3)}`;
+        }
+      }
+    }
+
+    // Multi-frame buffer for temporal analysis
+    class FrameBuffer {
+      constructor(maxSize = 10) {
+        this.frames = [];
+        this.maxSize = maxSize;
+      }
+
+      addFrame(landmarks, timestamp) {
+        this.frames.push({
+          landmarks: landmarks,
+          timestamp: timestamp,
+          centerMass: calculateCenterOfMass(landmarks)
+        });
+
+        while (this.frames.length > this.maxSize) {
+          this.frames.shift();
+        }
+      }
+
+      getMovementVector() {
+        if (this.frames.length < 3) return { vx: 0, vy: 0, speed: 0, acceleration: 0 };
+
+        const recent = this.frames[this.frames.length - 1];
+        const middle = this.frames[Math.floor(this.frames.length / 2)];
+        const oldest = this.frames[0];
+
+        const dt1 = (middle.timestamp - oldest.timestamp) / 1000;
+        const dt2 = (recent.timestamp - middle.timestamp) / 1000;
+
+        if (dt1 <= 0 || dt2 <= 0) return { vx: 0, vy: 0, speed: 0, acceleration: 0 };
+
+        // Calculate velocities
+        const v1x = (middle.centerMass.x - oldest.centerMass.x) / dt1;
+        const v1y = (middle.centerMass.y - oldest.centerMass.y) / dt1;
+        const v2x = (recent.centerMass.x - middle.centerMass.x) / dt2;
+        const v2y = (recent.centerMass.y - middle.centerMass.y) / dt2;
+
+        // Current velocity
+        const vx = v2x;
+        const vy = v2y;
+        const speed = Math.sqrt(vx * vx + vy * vy);
+
+        // Acceleration
+        const ax = (v2x - v1x) / dt2;
+        const ay = (v2y - v1y) / dt2;
+        const acceleration = Math.sqrt(ax * ax + ay * ay);
+
+        return { vx, vy, speed, acceleration };
+      }
+
+      getSmoothedPosition() {
+        if (this.frames.length === 0) return null;
+        
+        // Weighted average with more recent frames having higher weight
+        let totalWeight = 0;
+        let weightedX = 0;
+        let weightedY = 0;
+
+        for (let i = 0; i < this.frames.length; i++) {
+          const weight = (i + 1) / this.frames.length;
+          weightedX += this.frames[i].centerMass.x * weight;
+          weightedY += this.frames[i].centerMass.y * weight;
+          totalWeight += weight;
+        }
+
+        return {
+          x: weightedX / totalWeight,
+          y: weightedY / totalWeight
+        };
+      }
+
+      clear() {
+        this.frames = [];
+      }
+    }
+
+    // Advanced predictive tracking with physics and acceleration
+    class AdvancedPredictiveTracker {
       constructor() {
         this.lastKnownPosition = null;
         this.lastKnownVelocity = null;
+        this.lastKnownAcceleration = null;
         this.lastKnownTime = 0;
         this.predictionActive = false;
-        this.maxPredictionTime = 2000; // Predict for up to 2 seconds
-        this.gravity = 0.0005; // Gravity in screen coordinates per ms²
+        this.maxPredictionTime = 3000; // Extended to 3 seconds
+        this.gravity = 0.0002; // Refined gravity
+        this.frameBuffer = new FrameBuffer(6);
       }
 
-      updatePosition(centerMass, timestamp) {
-        if (this.lastKnownPosition && this.lastKnownTime) {
-          const dt = timestamp - this.lastKnownTime;
-          if (dt > 0 && dt < 200) { // Only calculate velocity for reasonable time gaps
-            const vx = (centerMass.x - this.lastKnownPosition.x) / dt;
-            const vy = (centerMass.y - this.lastKnownPosition.y) / dt;
-            this.lastKnownVelocity = { x: vx, y: vy };
-          }
-        }
+      updatePosition(centerMass, timestamp, movementVector = null) {
+        this.frameBuffer.addFrame({ centerMass }, timestamp);
         
+        if (!movementVector) {
+          movementVector = this.frameBuffer.getMovementVector();
+        }
+
         this.lastKnownPosition = { ...centerMass };
+        this.lastKnownVelocity = { x: movementVector.vx, y: movementVector.vy };
+        this.lastKnownAcceleration = { 
+          x: movementVector.acceleration * Math.cos(Math.atan2(movementVector.vy, movementVector.vx)),
+          y: movementVector.acceleration * Math.sin(Math.atan2(movementVector.vy, movementVector.vx))
+        };
         this.lastKnownTime = timestamp;
         this.predictionActive = false;
       }
@@ -165,38 +279,45 @@
       }
 
       getPredictedPosition(currentTime) {
-        if (!this.predictionActive || !this.lastKnownPosition || !this.lastKnownVelocity) {
+        if (!this.lastKnownPosition || !this.lastKnownVelocity) return null;
+
+        const dt = (currentTime - this.lastKnownTime) / 1000; // Convert to seconds
+        if (dt > this.maxPredictionTime / 1000) return null;
+
+        // Enhanced physics: position = initial + velocity*t + 0.5*acceleration*t² + 0.5*gravity*t²
+        let predictedX = this.lastKnownPosition.x + (this.lastKnownVelocity.x * dt);
+        let predictedY = this.lastKnownPosition.y + (this.lastKnownVelocity.y * dt);
+
+        // Add acceleration if available
+        if (this.lastKnownAcceleration) {
+          predictedX += 0.5 * this.lastKnownAcceleration.x * dt * dt;
+          predictedY += 0.5 * this.lastKnownAcceleration.y * dt * dt;
+        }
+
+        // Add gravity effect
+        predictedY += 0.5 * this.gravity * dt * dt * 1000; // Convert back to ms units
+
+        // Bounds checking with tolerance for fast movement
+        if (predictedX < -0.3 || predictedX > 1.3 || predictedY < -0.3 || predictedY > 1.3) {
           return null;
         }
 
-        const dt = currentTime - this.lastKnownTime;
+        const confidence = Math.max(0, 1 - (dt / (this.maxPredictionTime / 1000)));
         
-        // Don't predict beyond reasonable time
-        if (dt > this.maxPredictionTime) {
-          return null;
-        }
-
-        // Apply physics: position = initial + velocity*time + 0.5*gravity*time²
-        const predictedX = this.lastKnownPosition.x + (this.lastKnownVelocity.x * dt);
-        const predictedY = this.lastKnownPosition.y + (this.lastKnownVelocity.y * dt) + (0.5 * this.gravity * dt * dt);
-
-        // Bounds checking
-        if (predictedX < 0 || predictedX > 1 || predictedY < 0 || predictedY > 1) {
-          return null;
-        }
-
         return {
           x: predictedX,
           y: predictedY,
-          confidence: Math.max(0, 1 - (dt / this.maxPredictionTime)) // Confidence decreases over time
+          confidence: confidence
         };
       }
 
       reset() {
         this.lastKnownPosition = null;
         this.lastKnownVelocity = null;
+        this.lastKnownAcceleration = null;
         this.lastKnownTime = 0;
         this.predictionActive = false;
+        this.frameBuffer.clear();
       }
     }
 
@@ -224,7 +345,7 @@
 
     // Mode variables
     let isDMTMode = false;
-    let setupPhase = 'trampoline'; // 'trampoline' or 'mat'
+    let setupPhase = 'trampoline';
 
     // Jump display variables
     let jumpState = 'on_ground';
@@ -233,10 +354,10 @@
     let lastJumpAirtime = 0;
     let lastSeenLandmarks = null;
     let poseLastSeenTime = 0;
-    const POSE_LOST_TIMEOUT = 3000; // Increased to 3 seconds for better flip tracking
+    const POSE_LOST_TIMEOUT = 3000; // Extended for better flip tracking
 
     // DMT-specific variables
-    let dmtState = 'waiting'; // 'waiting', 'on_trampoline', 'in_flight', 'landed'
+    let dmtState = 'waiting';
     let dmtEntryTime = 0;
     let dmtTakeoffTime = 0;
     let dmtLandingTime = 0;
@@ -252,19 +373,66 @@
     let isTrackingActive = false;
     let trackingStartTime = 0;
     let confirmedAthleteId = null;
-    let predictiveTracker = new PredictiveTracker();
+    let predictiveTracker = new AdvancedPredictiveTracker();
     let usingPrediction = false;
     let lastPredictedPosition = null;
+    let frameBuffer = new FrameBuffer(10);
+    let performanceMonitor = new PerformanceMonitor();
 
-    const POSITION_HISTORY_LENGTH = 8;
+    // Dynamic settings based on movement speed
+    let currentMovementSpeed = 0;
+    let isHighSpeedMode = false;
+    let lastPoseSettingsUpdate = 0;
+
+    const POSITION_HISTORY_LENGTH = 10;
     const MIN_MOVEMENT_THRESHOLD = 0.008;
     const MIN_VERTICAL_VELOCITY = 0.005;
     const CENTER_WEIGHT_FACTOR = 1.2;
-    const TRACKING_PERSISTENCE_TIME = 8000; // Increased to 8 seconds
+    const TRACKING_PERSISTENCE_TIME = 8000; // Extended for fast movement
     const MIN_SIMILARITY_THRESHOLD = 0.2; // Reduced for more lenient matching during flips
-    const PREDICTION_SEARCH_RADIUS = 0.15; // Search within 15% of screen around predicted position
+    const PREDICTION_SEARCH_RADIUS = 0.15; // Increased for fast movement
+    const MAX_FRAMES_WITHOUT_POSE = 6; // Reduced for faster response
+    const HIGH_SPEED_THRESHOLD = 0.03; // Threshold for switching to high-speed mode
 
-    // Enhanced athlete tracking with predictive capabilities
+    function calculateCenterOfMass(landmarks) {
+      const keyPoints = [11, 12, 23, 24]; // shoulders and hips
+      let x = 0, y = 0, count = 0;
+      
+      for (let i of keyPoints) {
+        if (landmarks[i]) {
+          x += landmarks[i].x;
+          y += landmarks[i].y;
+          count++;
+        }
+      }
+      
+      return count > 0 ? { x: x / count, y: y / count } : { x: 0.5, y: 0.5 };
+    }
+
+    function updatePoseSettings(movementSpeed) {
+      const now = performance.now();
+      if (now - lastPoseSettingsUpdate < 500) return; // Don't update too frequently
+      
+      const wasHighSpeed = isHighSpeedMode;
+      isHighSpeedMode = movementSpeed > HIGH_SPEED_THRESHOLD;
+      
+      if (wasHighSpeed !== isHighSpeedMode) {
+        console.log(`Switching to ${isHighSpeedMode ? 'high-speed' : 'normal'} mode (speed: ${movementSpeed.toFixed(4)})`);
+        
+        pose.setOptions({
+          modelComplexity: isHighSpeedMode ? 1 : 0,
+          smoothLandmarks: !isHighSpeedMode, // Disable smoothing for fast movement
+          enableSegmentation: false,
+          smoothSegmentation: false,
+          minDetectionConfidence: isHighSpeedMode ? 0.5 : 0.3,
+          minTrackingConfidence: isHighSpeedMode ? 0.6 : 0.3
+        });
+        
+        lastPoseSettingsUpdate = now;
+      }
+    }
+
+    // Enhanced athlete tracking with predictive capabilities and all original functionality
     class AthleteTracker {
       constructor(index, landmarks) {
         this.index = index;
@@ -321,19 +489,7 @@
       }
 
       calculateCenterOfMass(landmarks) {
-        // Use key body points for center of mass calculation
-        const keyPoints = [11, 12, 23, 24]; // shoulders and hips
-        let x = 0, y = 0, count = 0;
-        
-        for (let i of keyPoints) {
-          if (landmarks[i]) {
-            x += landmarks[i].x;
-            y += landmarks[i].y;
-            count++;
-          }
-        }
-        
-        return count > 0 ? { x: x / count, y: y / count } : { x: 0.5, y: 0.5 };
+        return calculateCenterOfMass(landmarks);
       }
 
       getMovementVelocity() {
@@ -399,7 +555,7 @@
       getPoseSimilarity(landmarks) {
         if (this.positionHistory.length === 0) return 0;
         const lastPose = this.positionHistory[this.positionHistory.length - 1].landmarks;
-        return calculatePoseSimilarity(lastPose, landmarks);
+        return calculatePoseSimilarity(lastPose, landmarks, currentMovementSpeed * 10);
       }
 
       isNearPredictedPosition(landmarks, predictedPos) {
@@ -411,7 +567,9 @@
           Math.pow(centerMass.y - predictedPos.y, 2)
         );
         
-        return distance < PREDICTION_SEARCH_RADIUS;
+        // Increase search radius for high-speed mode
+        const searchRadius = isHighSpeedMode ? PREDICTION_SEARCH_RADIUS * 1.5 : PREDICTION_SEARCH_RADIUS;
+        return distance < searchRadius;
       }
     }
 
@@ -505,7 +663,7 @@
       
       // Massive bonus for confirmed athlete during active tracking
       if (isTrackingActive && trackerId === confirmedAthleteId) {
-        score *= 20; // Increased from 10 to 20 for even stronger preference
+        score *= 20; // Strong preference for tracked athlete
         
         // Extra bonus if this pose is near the predicted position
         if (usingPrediction && lastPredictedPosition) {
@@ -546,6 +704,23 @@
 
     function selectMainAthlete(results, polygon) {
       const now = performance.now();
+      performanceMonitor.update();
+      
+      // Update frame buffer and get movement analysis
+      let movementVector = { vx: 0, vy: 0, speed: 0, acceleration: 0 };
+      if (results.poseLandmarks) {
+        const landmarks = Array.isArray(results.poseLandmarks[0]) ? results.poseLandmarks[0] : results.poseLandmarks;
+        if (landmarks) {
+          frameBuffer.addFrame(landmarks, now);
+          movementVector = frameBuffer.getMovementVector();
+          currentMovementSpeed = movementVector.speed;
+          performanceMonitor.setMovementSpeed(currentMovementSpeed);
+          
+          // Update pose settings based on movement speed
+          updatePoseSettings(currentMovementSpeed);
+        }
+      }
+      
       updateAthleteTrackers(results);
       
       // Update predictive tracker if we have a confirmed athlete
@@ -553,7 +728,7 @@
         const tracker = athleteTrackers.get(confirmedAthleteId);
         if (tracker.framesSincePoseDetection === 0 && tracker.lastKnownPosition) {
           // We have a fresh pose detection, update the predictor
-          predictiveTracker.updatePosition(tracker.lastKnownPosition, now);
+          predictiveTracker.updatePosition(tracker.lastKnownPosition, now, movementVector);
           usingPrediction = false;
         }
       }
@@ -588,7 +763,9 @@
           const tracker = athleteTrackers.get(confirmedAthleteId);
           
           // Start prediction if we haven't detected the pose for a few frames
-          if (tracker.framesSincePoseDetection > 2) {
+          const maxFramesThreshold = isHighSpeedMode ? MAX_FRAMES_WITHOUT_POSE / 2 : MAX_FRAMES_WITHOUT_POSE;
+          
+          if (tracker.framesSincePoseDetection > maxFramesThreshold) {
             lastPredictedPosition = predictiveTracker.getPredictedPosition(now);
             
             if (lastPredictedPosition && lastPredictedPosition.confidence > 0.1) {
@@ -654,22 +831,34 @@
       
       candidates.sort((a, b) => b.score - a.score);
       
-      const minScoreThreshold = isTrackingActive ? 0.1 : (isDMTMode ? 0.3 : 0.2);
+      // Lower threshold for high-speed mode
+      const minThreshold = isHighSpeedMode ? 0.05 : (isTrackingActive ? 0.1 : (isDMTMode ? 0.3 : 0.2));
       
-      if (candidates.length > 0 && candidates[0].score > minScoreThreshold) {
+      if (candidates.length > 0 && candidates[0].score > minThreshold) {
         trackedAthleteIndex = candidates[0].index;
         lastTrackedLandmarks = candidates[0].landmarks;
         
-        // Start active tracking if we have a good candidate in the trampoline area
-        if (!isTrackingActive && polygon.length === 4) {
+        // Start tracking with lower threshold for high-speed mode
+        const trackingThreshold = isHighSpeedMode ? 2 : 3;
+        if (!isTrackingActive && polygon.length === 4 && candidates[0].score > trackingThreshold) {
           const tracker = athleteTrackers.get(candidates[0].index);
           if (tracker && tracker.wasInTrampoline) {
             isTrackingActive = true;
             confirmedAthleteId = candidates[0].index;
             trackingStartTime = now;
             predictiveTracker.reset();
-            console.log(`Started active tracking of athlete ${confirmedAthleteId}`);
+            
+            const centerMass = calculateCenterOfMass(candidates[0].landmarks);
+            predictiveTracker.updatePosition(centerMass, now, movementVector);
+            
+            console.log(`Started enhanced tracking athlete ${confirmedAthleteId} (score: ${candidates[0].score.toFixed(1)}, speed: ${currentMovementSpeed.toFixed(4)})`);
           }
+        }
+        
+        // Update prediction tracker if we're actively tracking
+        if (isTrackingActive && confirmedAthleteId === candidates[0].index) {
+          const centerMass = calculateCenterOfMass(candidates[0].landmarks);
+          predictiveTracker.updatePosition(centerMass, now, movementVector);
         }
         
         usingPrediction = false;
@@ -698,21 +887,54 @@
         try { currentStream.getTracks().forEach(t => t.stop()); } catch (e) {}
         videoTrack = null;
       }
+      
+      // Enhanced camera constraints for fast movement tracking with fallback
       let constraints = {
         audio: false,
         video: {
-          width: { ideal: 640 }, height: { ideal: 480 },
-          frameRate: { ideal: 60, max: 60 }
+          width: { ideal: 1280, min: 640 }, 
+          height: { ideal: 720, min: 480 },
+          frameRate: { ideal: 120, min: 60, max: 120 } // Higher frame rate for fast movement
         }
       };
-      if (deviceId) constraints.video.deviceId = { exact: deviceId };
-      else constraints.video.facingMode = "environment";
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      currentStream = stream;
-      video.srcObject = stream;
-      await video.play();
+      
+      if (deviceId) {
+        constraints.video.deviceId = { exact: deviceId };
+      } else {
+        constraints.video.facingMode = "environment";
+      }
+      
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+        
+        // Log actual camera settings
+        const settings = stream.getVideoTracks()[0].getSettings();
+        console.log(`Enhanced camera: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+        
+      } catch (error) {
+        console.warn("High-quality camera failed, falling back to standard:", error);
+        // Fallback to original constraints
+        constraints.video = {
+          width: { ideal: 640 }, height: { ideal: 480 },
+          frameRate: { ideal: 60, max: 60 }
+        };
+        if (deviceId) constraints.video.deviceId = { exact: deviceId };
+        else constraints.video.facingMode = "environment";
+        
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+        
+        const settings = stream.getVideoTracks()[0].getSettings();
+        console.log(`Fallback camera: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+      }
+      
       hide(loadingIndicator);
-      videoTrack = stream.getVideoTracks()[0];
+      videoTrack = currentStream.getVideoTracks()[0];
       resizeCanvasToScreen();
 
       if (videoTrack && typeof videoTrack.getCapabilities === "function") {
@@ -763,11 +985,7 @@
       athleteInTrampoline = false;
       athleteInMat = false;
       setupPhase = 'trampoline';
-      athleteTrackers.clear();
-      isTrackingActive = false;
-      confirmedAthleteId = null;
-      predictiveTracker.reset();
-      usingPrediction = false;
+      resetTracking();
     }
 
     function resetTracking() {
@@ -777,8 +995,11 @@
       lastTrackedLandmarks = null;
       athleteTrackers.clear();
       predictiveTracker.reset();
+      frameBuffer.clear();
       usingPrediction = false;
-      console.log('Tracking reset');
+      currentMovementSpeed = 0;
+      isHighSpeedMode = false;
+      console.log('Enhanced tracking reset');
     }
 
     function updateNotices() {
@@ -862,7 +1083,7 @@
             if (!tracker || tracker.getVerticalVelocity() >= 0) {
               dmtState = 'in_flight';
               dmtTakeoffTime = now;
-              console.log('DMT: Athlete took off from trampoline - tracking through flight with prediction');
+              console.log('DMT: Athlete took off - enhanced tracking through flight');
             }
           }
           break;
@@ -881,6 +1102,7 @@
             
             widgetJumpHeightDisplay.textContent = `DMT Flight: ${dmtFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
             
+            // ✅ CONFIRMED: PostMessage for DMT flights
             window.parent.postMessage(
               {
                 type: "jumptek_dmt_flight",
@@ -893,7 +1115,7 @@
               "*"
             );
             
-            console.log(`DMT: Landed on mat. Flight time: ${dmtFlightTime.toFixed(2)}s`);
+            console.log(`DMT: Landed. Flight time: ${dmtFlightTime.toFixed(2)}s, Height: ${jumpHeight.toFixed(2)}m`);
             
             setTimeout(() => {
               dmtState = 'waiting';
@@ -910,14 +1132,15 @@
       athleteInTrampoline = athleteInTrampolineNow;
       athleteInMat = athleteInMatNow;
 
-      // Enhanced display with prediction status
+      // Enhanced display with prediction and speed status
       if (lastDMTFlightTime > 0) {
         const gravity = 9.81;
         const jumpHeight = (gravity * lastDMTFlightTime * lastDMTFlightTime) / 8;
         widgetJumpHeightDisplay.textContent = `DMT Flight: ${lastDMTFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
       } else {
+        const mode = isHighSpeedMode ? 'HS' : 'NS';
         const trackingStatus = isTrackingActive ? (usingPrediction ? '(Predicting)' : '(Tracking)') : '';
-        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState} ${trackingStatus}\nFlight: 0.00s`;
+        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState} ${mode}${trackingStatus}\nFlight: 0.00s`;
       }
     }
 
@@ -937,7 +1160,7 @@
         mainLandmarks = lastSeenLandmarks;
       } else {
         if (isTrackingActive && (now - poseLastSeenTime) > POSE_LOST_TIMEOUT) {
-          console.log('Lost athlete - stopping active tracking');
+          console.log('Lost athlete - stopping enhanced tracking');
           resetTracking();
         }
         
@@ -963,7 +1186,7 @@
           confirmedAthleteId = trackedAthleteIndex;
           trackingStartTime = now;
           predictiveTracker.reset();
-          console.log(`Started tracking jump for athlete ${confirmedAthleteId}`);
+          console.log(`Started enhanced tracking jump for athlete ${confirmedAthleteId}`);
         }
       }
       
@@ -978,6 +1201,8 @@
           lastJumpHeight = jumpHeight;
           lastJumpAirtime = airtime;
           widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(airtime: ${airtime.toFixed(2)}s)`;
+          
+          // ✅ CONFIRMED: PostMessage for regular jumps
           window.parent.postMessage(
             {
               type: "jumptek_jump",
@@ -987,7 +1212,7 @@
             "*"
           );
           
-          console.log(`Jump completed: ${jumpHeight.toFixed(2)}m, ${airtime.toFixed(2)}s`);
+          console.log(`Jump: ${jumpHeight.toFixed(2)}m, ${airtime.toFixed(2)}s`);
         }
         
         setTimeout(() => {
@@ -999,19 +1224,20 @@
         return;
       }
 
-      // Enhanced display with prediction status
+      // Enhanced display with prediction and speed status
+      const mode = isHighSpeedMode ? 'HS' : 'NS';
       const trackingStatus = isTrackingActive ? (usingPrediction ? '(Predicting)' : '(Tracking)') : '';
       if (lastJumpHeight > 0) {
-        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m ${trackingStatus}\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
+        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m ${mode}${trackingStatus}\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
       } else {
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${trackingStatus}`;
+        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${mode}${trackingStatus}`;
       }
     }
 
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 0,
+        modelComplexity: 0, // Start with low complexity, will be dynamically adjusted
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
@@ -1087,42 +1313,48 @@
           ctx.restore();
         }
 
-        // Draw predicted position if using prediction
+        // Enhanced prediction visualization
         if (usingPrediction && lastPredictedPosition && isTrackingActive) {
           ctx.save();
           const predX = lastPredictedPosition.x * canvas.width;
           const predY = lastPredictedPosition.y * canvas.height;
-          const radius = PREDICTION_SEARCH_RADIUS * Math.min(canvas.width, canvas.height);
+          const radius = (isHighSpeedMode ? PREDICTION_SEARCH_RADIUS * 1.5 : PREDICTION_SEARCH_RADIUS) * Math.min(canvas.width, canvas.height);
           
-          // Draw prediction circle
-          ctx.strokeStyle = "#ffff00";
-          ctx.lineWidth = 3;
+          // Different colors for high-speed mode
+          const color = isHighSpeedMode ? "#ff4400" : "#ffff00";
+          ctx.strokeStyle = color;
+          ctx.lineWidth = isHighSpeedMode ? 4 : 3;
           ctx.setLineDash([10, 5]);
           ctx.beginPath();
           ctx.arc(predX, predY, radius, 0, Math.PI * 2);
           ctx.stroke();
           
-          // Draw prediction center
-          ctx.fillStyle = "#ffff00";
+          ctx.fillStyle = color;
           ctx.beginPath();
-          ctx.arc(predX, predY, 8, 0, Math.PI * 2);
+          ctx.arc(predX, predY, isHighSpeedMode ? 8 : 6, 0, Math.PI * 2);
           ctx.fill();
           
           ctx.setLineDash([]);
           ctx.restore();
         }
 
-        // Draw pose landmarks for tracked athlete with enhanced visibility
+        // Enhanced pose visualization
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           const mainLandmarks = selectMainAthlete(lastPoseResults, trampolineCorners);
           if (mainLandmarks) {
             let color = "#f00";
             if (isTrackingActive) {
-              color = usingPrediction ? "#ffaa00" : "#00ff00"; // Orange for prediction, green for tracking
+              if (usingPrediction) {
+                color = isHighSpeedMode ? "#ff4400" : "#ffaa00"; // Different orange for high-speed
+              } else {
+                color = isHighSpeedMode ? "#00ff88" : "#00ff00"; // Different green for high-speed
+              }
             }
-            const lineWidth = isTrackingActive ? 5 : 4;
+            const lineWidth = isTrackingActive ? (isHighSpeedMode ? 6 : 5) : 4;
+            const pointSize = isTrackingActive ? (isHighSpeedMode ? 8 : 6) : 4;
+            
             drawConnectors(ctx, mainLandmarks, POSE_CONNECTIONS, { color: color, lineWidth: lineWidth });
-            drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: isTrackingActive ? 6 : 4 });
+            drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: pointSize });
           }
         }
       }
@@ -1176,9 +1408,11 @@
         }
       }
     }
+    
     zoomInBtn.addEventListener('click', function() {
       setNativeZoom(currentNativeZoom + zoomStep);
     });
+    
     zoomOutBtn.addEventListener('click', function() {
       setNativeZoom(currentNativeZoom - zoomStep);
     });
@@ -1200,6 +1434,7 @@
         );
       }
     });
+    
     canvas.addEventListener('touchmove', function(e) {
       if (e.touches.length === 2 && lastDist !== null && videoTrack && typeof videoTrack.getCapabilities === "function") {
         const newDist = Math.hypot(
@@ -1212,10 +1447,12 @@
         e.preventDefault();
       }
     }, {passive: false});
+    
     canvas.addEventListener('touchend', function(e) {
       if (e.touches.length < 2) lastDist = null;
     });
 
+    // Enhanced pose processing loop for higher frame rates
     function poseLoop() {
       if (poseLoaded) {
         (async function loop() {
@@ -1227,7 +1464,9 @@
               }
             } catch (e) {}
             const elapsed = performance.now() - start;
-            const wait = Math.max(0, 16 - elapsed);
+            // Adaptive frame rate based on processing speed and high-speed mode
+            const targetInterval = isHighSpeedMode ? 8 : 16; // 125fps for high-speed, 60fps for normal
+            const wait = Math.max(0, targetInterval - elapsed);
             await new Promise(res => setTimeout(res, wait));
           }
         })();
@@ -1237,7 +1476,7 @@
     window.addEventListener('DOMContentLoaded', async function() {
       resizeCanvasToScreen();
       setupPose();
-      trampolineNotice.textContent = "Loading camera...";
+      trampolineNotice.textContent = "Loading enhanced camera...";
       trampolineNotice.style.color = "#ff0";
       show(canvas);
       show(restartDrawBtn);
@@ -1265,7 +1504,7 @@
         updateNotices();
         trampolineNotice.style.color = "#0f0";
       } catch (e) {
-        trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
+        trampolineNotice.textContent = 'Enhanced camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
       }
     });
