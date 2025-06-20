@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek: Trampoline Jump Tracker (Airtime Only)</title>
+  <title>JumpTek: Trampoline Jump Tracker (Optimized)</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -53,7 +53,7 @@
     <div id="dmtMatNotice">Now tap the four corners of the landing mat</div>
     <div id="loadingIndicator" style="display:none;">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
-    <div id="performanceIndicator">FPS: 0 | Speed: 0.0</div>
+    <div id="performanceIndicator">FPS: 0 | Mode: Normal</div>
   </div>
   <video id="video" autoplay playsinline muted style="opacity:0;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:0;"></video>
   <!-- Dependencies -->
@@ -77,76 +77,19 @@
       return inside;
     }
 
-    // Calculate distance from point to center of polygon
-    function distanceToPolygonCenter(x, y, polygon) {
-      if (polygon.length === 0) return Infinity;
-      let centerX = 0, centerY = 0;
-      for (let [px, py] of polygon) {
-        centerX += px;
-        centerY += py;
-      }
-      centerX /= polygon.length;
-      centerY /= polygon.length;
-      return Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-    }
-
-    // Calculate maximum distance from center to any corner (for normalization)
-    function getPolygonRadius(polygon) {
-      if (polygon.length === 0) return 1;
-      let centerX = 0, centerY = 0;
-      for (let [px, py] of polygon) {
-        centerX += px;
-        centerY += py;
-      }
-      centerX /= polygon.length;
-      centerY /= polygon.length;
-      
-      let maxDist = 0;
-      for (let [px, py] of polygon) {
-        const dist = Math.sqrt((px - centerX) ** 2 + (py - centerY) ** 2);
-        maxDist = Math.max(maxDist, dist);
-      }
-      return maxDist || 1;
-    }
-
-    // Enhanced pose similarity with motion compensation
-    function calculatePoseSimilarity(landmarks1, landmarks2, motionCompensation = 0) {
-      if (!landmarks1 || !landmarks2) return 0;
-      
-      const keyPoints = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-      let totalDistance = 0;
-      let validPoints = 0;
-      
-      for (let i of keyPoints) {
-        if (landmarks1[i] && landmarks2[i]) {
-          const dx = landmarks1[i].x - landmarks2[i].x;
-          const dy = landmarks1[i].y - landmarks2[i].y;
-          totalDistance += Math.sqrt(dx * dx + dy * dy);
-          validPoints++;
-        }
-      }
-      
-      if (validPoints === 0) return 0;
-      
-      const avgDistance = totalDistance / validPoints;
-      // More lenient for fast movement
-      const threshold = 3 + motionCompensation;
-      return Math.max(0, 1 - (avgDistance * threshold));
-    }
-
-    // Performance monitor for real-time feedback
-    class PerformanceMonitor {
+    // Optimized performance monitor - reduced update frequency
+    class OptimizedPerformanceMonitor {
       constructor() {
         this.frameCount = 0;
         this.lastTime = performance.now();
         this.fps = 0;
-        this.lastMovementSpeed = 0;
+        this.updateInterval = 2000; // Update every 2 seconds instead of 1
       }
 
       update() {
         this.frameCount++;
         const now = performance.now();
-        if (now - this.lastTime >= 1000) {
+        if (now - this.lastTime >= this.updateInterval) {
           this.fps = Math.round(this.frameCount * 1000 / (now - this.lastTime));
           this.frameCount = 0;
           this.lastTime = now;
@@ -154,170 +97,63 @@
         }
       }
 
-      setMovementSpeed(speed) {
-        this.lastMovementSpeed = speed;
-      }
-
       updateDisplay() {
         const indicator = getEl('performanceIndicator');
         if (indicator) {
-          indicator.textContent = `FPS: ${this.fps} | Speed: ${this.lastMovementSpeed.toFixed(3)}`;
+          const mode = isHighSpeedMode ? 'High-Speed' : 'Normal';
+          indicator.textContent = `FPS: ${this.fps} | Mode: ${mode}`;
         }
       }
     }
 
-    // Multi-frame buffer for temporal analysis
-    class FrameBuffer {
-      constructor(maxSize = 10) {
-        this.frames = [];
-        this.maxSize = maxSize;
-      }
-
-      addFrame(landmarks, timestamp) {
-        this.frames.push({
-          landmarks: landmarks,
-          timestamp: timestamp,
-          centerMass: calculateCenterOfMass(landmarks)
-        });
-
-        while (this.frames.length > this.maxSize) {
-          this.frames.shift();
-        }
-      }
-
-      getMovementVector() {
-        if (this.frames.length < 3) return { vx: 0, vy: 0, speed: 0, acceleration: 0 };
-
-        const recent = this.frames[this.frames.length - 1];
-        const middle = this.frames[Math.floor(this.frames.length / 2)];
-        const oldest = this.frames[0];
-
-        const dt1 = (middle.timestamp - oldest.timestamp) / 1000;
-        const dt2 = (recent.timestamp - middle.timestamp) / 1000;
-
-        if (dt1 <= 0 || dt2 <= 0) return { vx: 0, vy: 0, speed: 0, acceleration: 0 };
-
-        // Calculate velocities
-        const v1x = (middle.centerMass.x - oldest.centerMass.x) / dt1;
-        const v1y = (middle.centerMass.y - oldest.centerMass.y) / dt1;
-        const v2x = (recent.centerMass.x - middle.centerMass.x) / dt2;
-        const v2y = (recent.centerMass.y - middle.centerMass.y) / dt2;
-
-        // Current velocity
-        const vx = v2x;
-        const vy = v2y;
-        const speed = Math.sqrt(vx * vx + vy * vy);
-
-        // Acceleration
-        const ax = (v2x - v1x) / dt2;
-        const ay = (v2y - v1y) / dt2;
-        const acceleration = Math.sqrt(ax * ax + ay * ay);
-
-        return { vx, vy, speed, acceleration };
-      }
-
-      getSmoothedPosition() {
-        if (this.frames.length === 0) return null;
-        
-        // Weighted average with more recent frames having higher weight
-        let totalWeight = 0;
-        let weightedX = 0;
-        let weightedY = 0;
-
-        for (let i = 0; i < this.frames.length; i++) {
-          const weight = (i + 1) / this.frames.length;
-          weightedX += this.frames[i].centerMass.x * weight;
-          weightedY += this.frames[i].centerMass.y * weight;
-          totalWeight += weight;
-        }
-
-        return {
-          x: weightedX / totalWeight,
-          y: weightedY / totalWeight
-        };
-      }
-
-      clear() {
-        this.frames = [];
-      }
-    }
-
-    // Advanced predictive tracking with physics and acceleration
-    class AdvancedPredictiveTracker {
+    // Simplified predictive tracker - removed heavy calculations
+    class SimplePredictiveTracker {
       constructor() {
         this.lastKnownPosition = null;
         this.lastKnownVelocity = null;
-        this.lastKnownAcceleration = null;
         this.lastKnownTime = 0;
-        this.predictionActive = false;
-        this.maxPredictionTime = 3000; // Extended to 3 seconds
-        this.gravity = 0.0002; // Refined gravity
-        this.frameBuffer = new FrameBuffer(6);
+        this.maxPredictionTime = 2000; // Reduced from 3 seconds
+        this.gravity = 0.0003;
       }
 
-      updatePosition(centerMass, timestamp, movementVector = null) {
-        this.frameBuffer.addFrame({ centerMass }, timestamp);
-        
-        if (!movementVector) {
-          movementVector = this.frameBuffer.getMovementVector();
+      updatePosition(centerMass, timestamp) {
+        if (this.lastKnownPosition && this.lastKnownTime) {
+          const dt = timestamp - this.lastKnownTime;
+          if (dt > 0 && dt < 150) {
+            const vx = (centerMass.x - this.lastKnownPosition.x) / dt;
+            const vy = (centerMass.y - this.lastKnownPosition.y) / dt;
+            this.lastKnownVelocity = { x: vx, y: vy };
+          }
         }
-
+        
         this.lastKnownPosition = { ...centerMass };
-        this.lastKnownVelocity = { x: movementVector.vx, y: movementVector.vy };
-        this.lastKnownAcceleration = { 
-          x: movementVector.acceleration * Math.cos(Math.atan2(movementVector.vy, movementVector.vx)),
-          y: movementVector.acceleration * Math.sin(Math.atan2(movementVector.vy, movementVector.vx))
-        };
         this.lastKnownTime = timestamp;
-        this.predictionActive = false;
-      }
-
-      startPrediction(timestamp) {
-        if (!this.lastKnownPosition || !this.lastKnownVelocity) return null;
-        this.predictionActive = true;
-        return this.getPredictedPosition(timestamp);
       }
 
       getPredictedPosition(currentTime) {
         if (!this.lastKnownPosition || !this.lastKnownVelocity) return null;
 
-        const dt = (currentTime - this.lastKnownTime) / 1000; // Convert to seconds
-        if (dt > this.maxPredictionTime / 1000) return null;
+        const dt = currentTime - this.lastKnownTime;
+        if (dt > this.maxPredictionTime) return null;
 
-        // Enhanced physics: position = initial + velocity*t + 0.5*acceleration*t² + 0.5*gravity*t²
-        let predictedX = this.lastKnownPosition.x + (this.lastKnownVelocity.x * dt);
-        let predictedY = this.lastKnownPosition.y + (this.lastKnownVelocity.y * dt);
+        const predictedX = this.lastKnownPosition.x + (this.lastKnownVelocity.x * dt);
+        const predictedY = this.lastKnownPosition.y + (this.lastKnownVelocity.y * dt) + (0.5 * this.gravity * dt * dt);
 
-        // Add acceleration if available
-        if (this.lastKnownAcceleration) {
-          predictedX += 0.5 * this.lastKnownAcceleration.x * dt * dt;
-          predictedY += 0.5 * this.lastKnownAcceleration.y * dt * dt;
-        }
-
-        // Add gravity effect
-        predictedY += 0.5 * this.gravity * dt * dt * 1000; // Convert back to ms units
-
-        // Bounds checking with tolerance for fast movement
-        if (predictedX < -0.3 || predictedX > 1.3 || predictedY < -0.3 || predictedY > 1.3) {
+        if (predictedX < -0.2 || predictedX > 1.2 || predictedY < -0.2 || predictedY > 1.2) {
           return null;
         }
 
-        const confidence = Math.max(0, 1 - (dt / (this.maxPredictionTime / 1000)));
-        
         return {
           x: predictedX,
           y: predictedY,
-          confidence: confidence
+          confidence: Math.max(0, 1 - (dt / this.maxPredictionTime))
         };
       }
 
       reset() {
         this.lastKnownPosition = null;
         this.lastKnownVelocity = null;
-        this.lastKnownAcceleration = null;
         this.lastKnownTime = 0;
-        this.predictionActive = false;
-        this.frameBuffer.clear();
       }
     }
 
@@ -337,9 +173,7 @@
 
     let trampolineCorners = [];
     let dmtMatCorners = [];
-    let homography = null;
     let lastPoseResults = null;
-    let inAir = false, takeoffTime = 0;
     let videoDevices = [], currentDeviceIndex = 0;
     let currentStream = null, videoTrack = null, pose = null, poseLoaded = false;
 
@@ -354,7 +188,7 @@
     let lastJumpAirtime = 0;
     let lastSeenLandmarks = null;
     let poseLastSeenTime = 0;
-    const POSE_LOST_TIMEOUT = 3000; // Extended for better flip tracking
+    const POSE_LOST_TIMEOUT = 2000;
 
     // DMT-specific variables
     let dmtState = 'waiting';
@@ -366,336 +200,69 @@
     let athleteInMat = false;
     let lastDMTFlightTime = 0;
 
-    // Enhanced tracking variables
-    let athletePositionHistory = new Map();
+    // Simplified tracking variables
     let trackedAthleteIndex = null;
     let lastTrackedLandmarks = null;
     let isTrackingActive = false;
-    let trackingStartTime = 0;
     let confirmedAthleteId = null;
-    let predictiveTracker = new AdvancedPredictiveTracker();
+    let predictiveTracker = new SimplePredictiveTracker();
     let usingPrediction = false;
     let lastPredictedPosition = null;
-    let frameBuffer = new FrameBuffer(10);
-    let performanceMonitor = new PerformanceMonitor();
+    let performanceMonitor = new OptimizedPerformanceMonitor();
 
-    // Dynamic settings based on movement speed
+    // Optimized settings
     let currentMovementSpeed = 0;
     let isHighSpeedMode = false;
     let lastPoseSettingsUpdate = 0;
+    let frameSkipCounter = 0;
 
-    const POSITION_HISTORY_LENGTH = 10;
-    const MIN_MOVEMENT_THRESHOLD = 0.008;
-    const MIN_VERTICAL_VELOCITY = 0.005;
-    const CENTER_WEIGHT_FACTOR = 1.2;
-    const TRACKING_PERSISTENCE_TIME = 8000; // Extended for fast movement
-    const MIN_SIMILARITY_THRESHOLD = 0.2; // Reduced for more lenient matching during flips
-    const PREDICTION_SEARCH_RADIUS = 0.15; // Increased for fast movement
-    const MAX_FRAMES_WITHOUT_POSE = 6; // Reduced for faster response
-    const HIGH_SPEED_THRESHOLD = 0.03; // Threshold for switching to high-speed mode
+    const HIGH_SPEED_THRESHOLD = 0.04;
+    const PREDICTION_SEARCH_RADIUS = 0.12;
 
     function calculateCenterOfMass(landmarks) {
-      const keyPoints = [11, 12, 23, 24]; // shoulders and hips
-      let x = 0, y = 0, count = 0;
-      
-      for (let i of keyPoints) {
-        if (landmarks[i]) {
-          x += landmarks[i].x;
-          y += landmarks[i].y;
-          count++;
-        }
+      // Simplified - only use hips for faster calculation
+      const hip1 = landmarks[23], hip2 = landmarks[24];
+      if (hip1 && hip2) {
+        return { x: (hip1.x + hip2.x) / 2, y: (hip1.y + hip2.y) / 2 };
       }
-      
-      return count > 0 ? { x: x / count, y: y / count } : { x: 0.5, y: 0.5 };
+      return { x: 0.5, y: 0.5 };
     }
 
     function updatePoseSettings(movementSpeed) {
       const now = performance.now();
-      if (now - lastPoseSettingsUpdate < 500) return; // Don't update too frequently
+      if (now - lastPoseSettingsUpdate < 1000) return; // Update less frequently
       
       const wasHighSpeed = isHighSpeedMode;
       isHighSpeedMode = movementSpeed > HIGH_SPEED_THRESHOLD;
       
       if (wasHighSpeed !== isHighSpeedMode) {
-        console.log(`Switching to ${isHighSpeedMode ? 'high-speed' : 'normal'} mode (speed: ${movementSpeed.toFixed(4)})`);
+        console.log(`Mode: ${isHighSpeedMode ? 'High-Speed' : 'Normal'}`);
         
         pose.setOptions({
           modelComplexity: isHighSpeedMode ? 1 : 0,
-          smoothLandmarks: !isHighSpeedMode, // Disable smoothing for fast movement
+          smoothLandmarks: !isHighSpeedMode,
           enableSegmentation: false,
           smoothSegmentation: false,
-          minDetectionConfidence: isHighSpeedMode ? 0.5 : 0.3,
-          minTrackingConfidence: isHighSpeedMode ? 0.6 : 0.3
+          minDetectionConfidence: isHighSpeedMode ? 0.6 : 0.4,
+          minTrackingConfidence: isHighSpeedMode ? 0.7 : 0.4
         });
         
         lastPoseSettingsUpdate = now;
       }
     }
 
-    // Enhanced athlete tracking with predictive capabilities and all original functionality
-    class AthleteTracker {
-      constructor(index, landmarks) {
-        this.index = index;
-        this.positionHistory = [];
-        this.lastUpdateTime = performance.now();
-        this.confidence = 0;
-        this.isNewTracker = true;
-        this.framesSinceCreation = 0;
-        this.lastKnownPosition = null;
-        this.trackingPriority = 0;
-        this.wasInTrampoline = false;
-        this.framesSincePoseDetection = 0;
-        this.updatePosition(landmarks);
-      }
-
-      updatePosition(landmarks) {
-        const now = performance.now();
-        const centerMass = this.calculateCenterOfMass(landmarks);
-        
-        this.positionHistory.push({
-          position: centerMass,
-          timestamp: now,
-          landmarks: landmarks
-        });
-
-        this.lastKnownPosition = centerMass;
-        this.framesSincePoseDetection = 0;
-
-        // Keep only recent history
-        while (this.positionHistory.length > POSITION_HISTORY_LENGTH) {
-          this.positionHistory.shift();
-        }
-
-        this.lastUpdateTime = now;
-        this.framesSinceCreation++;
-        
-        if (this.framesSinceCreation > 3) {
-          this.isNewTracker = false;
-        }
-
-        // Increase tracking priority if this athlete was in the trampoline
-        if (trampolineCorners.length === 4) {
-          const x = centerMass.x * canvas.width;
-          const y = centerMass.y * canvas.height;
-          if (pointInPolygon(x, y, trampolineCorners)) {
-            this.wasInTrampoline = true;
-            this.trackingPriority = Math.max(this.trackingPriority, 3);
-          }
-        }
-      }
-
-      incrementFramesSincePose() {
-        this.framesSincePoseDetection++;
-      }
-
-      calculateCenterOfMass(landmarks) {
-        return calculateCenterOfMass(landmarks);
-      }
-
-      getMovementVelocity() {
-        if (this.positionHistory.length < 2) return { x: 0, y: 0, magnitude: 0 };
-        
-        const recent = this.positionHistory[this.positionHistory.length - 1];
-        const previous = this.positionHistory[this.positionHistory.length - 2];
-        
-        const dt = (recent.timestamp - previous.timestamp) / 1000;
-        if (dt === 0) return { x: 0, y: 0, magnitude: 0 };
-        
-        const vx = (recent.position.x - previous.position.x) / dt;
-        const vy = (recent.position.y - previous.position.y) / dt;
-        const magnitude = Math.sqrt(vx * vx + vy * vy);
-        
-        return { x: vx, y: vy, magnitude: magnitude };
-      }
-
-      getVerticalVelocity() {
-        const velocity = this.getMovementVelocity();
-        return -velocity.y;
-      }
-
-      isActivelyMoving() {
-        const threshold = this.isNewTracker ? MIN_MOVEMENT_THRESHOLD * 0.5 : MIN_MOVEMENT_THRESHOLD;
-        const velocity = this.getMovementVelocity();
-        return velocity.magnitude > threshold;
-      }
-
-      isJumping() {
-        const threshold = this.isNewTracker ? MIN_VERTICAL_VELOCITY * 0.5 : MIN_VERTICAL_VELOCITY;
-        const verticalVel = this.getVerticalVelocity();
-        return verticalVel > threshold;
-      }
-
-      getActivityScore() {
-        const velocity = this.getMovementVelocity();
-        const verticalVel = this.getVerticalVelocity();
-        
-        let score = 1.0;
-        
-        if (velocity.magnitude > MIN_MOVEMENT_THRESHOLD) {
-          score += Math.min(velocity.magnitude / MIN_MOVEMENT_THRESHOLD, 2.0);
-        }
-        
-        if (verticalVel > 0) {
-          score += Math.min(verticalVel / MIN_VERTICAL_VELOCITY, 1.5);
-        }
-        
-        if (this.isNewTracker) {
-          score *= 1.3;
-        }
-
-        if (this.wasInTrampoline) {
-          score *= 1.5;
-        }
-
-        score += this.trackingPriority * 0.5;
-        
-        return score;
-      }
-
-      getPoseSimilarity(landmarks) {
-        if (this.positionHistory.length === 0) return 0;
-        const lastPose = this.positionHistory[this.positionHistory.length - 1].landmarks;
-        return calculatePoseSimilarity(lastPose, landmarks, currentMovementSpeed * 10);
-      }
-
-      isNearPredictedPosition(landmarks, predictedPos) {
-        if (!predictedPos) return false;
-        
-        const centerMass = this.calculateCenterOfMass(landmarks);
-        const distance = Math.sqrt(
-          Math.pow(centerMass.x - predictedPos.x, 2) + 
-          Math.pow(centerMass.y - predictedPos.y, 2)
-        );
-        
-        // Increase search radius for high-speed mode
-        const searchRadius = isHighSpeedMode ? PREDICTION_SEARCH_RADIUS * 1.5 : PREDICTION_SEARCH_RADIUS;
-        return distance < searchRadius;
-      }
-    }
-
-    let athleteTrackers = new Map();
-
-    function updateAthleteTrackers(results) {
-      const now = performance.now();
-      const activeTrackers = new Set();
-      
-      // Increment frames since pose detection for all trackers
-      for (let [id, tracker] of athleteTrackers) {
-        tracker.incrementFramesSincePose();
-      }
-      
-      // Process current detections
-      if (results.poseLandmarks) {
-        const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
-        const poseArray = multiPose ? results.poseLandmarks : [results.poseLandmarks];
-        
-        for (let i = 0; i < poseArray.length; i++) {
-          const landmarks = poseArray[i];
-          if (!landmarks) continue;
-          
-          const trackerId = multiPose ? i : 0;
-          activeTrackers.add(trackerId);
-          
-          if (athleteTrackers.has(trackerId)) {
-            athleteTrackers.get(trackerId).updatePosition(landmarks);
-          } else {
-            athleteTrackers.set(trackerId, new AthleteTracker(trackerId, landmarks));
-          }
-        }
-      }
-      
-      // Keep trackers alive longer, especially during active tracking
-      for (let [id, tracker] of athleteTrackers) {
-        const timeSinceUpdate = now - tracker.lastUpdateTime;
-        const shouldKeep = activeTrackers.has(id) || 
-                          (isTrackingActive && id === confirmedAthleteId && timeSinceUpdate < TRACKING_PERSISTENCE_TIME) ||
-                          (tracker.wasInTrampoline && timeSinceUpdate < 5000);
-        
-        if (!shouldKeep) {
-          athleteTrackers.delete(id);
-        }
-      }
-    }
-
-    function countKeypointsInPolygon(landmarks, polygon) {
-      let count = 0;
-      for (let i = 0; i < landmarks.length; i++) {
-        const lm = landmarks[i];
-        const x = lm.x * canvas.width;
-        const y = lm.y * canvas.height;
-        if (pointInPolygon(x, y, polygon)) count++;
-      }
-      if (pointInPolygon(landmarks[23].x * canvas.width, landmarks[23].y * canvas.height, polygon)) count += 2;
-      if (pointInPolygon(landmarks[24].x * canvas.width, landmarks[24].y * canvas.height, polygon)) count += 2;
-      if (pointInPolygon(landmarks[0].x * canvas.width, landmarks[0].y * canvas.height, polygon)) count += 1;
-      return count;
-    }
-
-    function calculateEnhancedAthleteScore(landmarks, polygon, trackerId, isInitialDetection = true) {
-      const tracker = athleteTrackers.get(trackerId);
-      if (!tracker) return 0;
+    // Simplified athlete scoring - removed heavy calculations
+    function calculateSimpleAthleteScore(landmarks, polygon) {
+      if (polygon.length !== 4) return 0;
       
       let score = 0;
-      
-      // For initial detection, require some presence in polygon
-      if (isInitialDetection && polygon.length === 4) {
-        score = countKeypointsInPolygon(landmarks, polygon);
-        if (score === 0) return 0;
-      } else {
-        score = 10;
-      }
-      
-      // Center-weighted scoring (only if using polygon)
-      if (isInitialDetection && polygon.length === 4) {
-        const centerMass = tracker.calculateCenterOfMass(landmarks);
-        const centerX = centerMass.x * canvas.width;
-        const centerY = centerMass.y * canvas.height;
-        const distToCenter = distanceToPolygonCenter(centerX, centerY, polygon);
-        const polygonRadius = getPolygonRadius(polygon);
-        const centerProximity = Math.max(0, 1 - (distToCenter / polygonRadius));
-        
-        score *= (1 + centerProximity * CENTER_WEIGHT_FACTOR);
-      }
-      
-      // Movement-based scoring
-      const activityScore = tracker.getActivityScore();
-      score *= (0.5 + activityScore * 0.5);
-      
-      // Massive bonus for confirmed athlete during active tracking
-      if (isTrackingActive && trackerId === confirmedAthleteId) {
-        score *= 20; // Strong preference for tracked athlete
-        
-        // Extra bonus if this pose is near the predicted position
-        if (usingPrediction && lastPredictedPosition) {
-          if (tracker.isNearPredictedPosition(landmarks, lastPredictedPosition)) {
-            score *= 5; // Huge bonus for poses near prediction
-            console.log('Found pose near predicted position!');
-          }
-        }
-      }
-      
-      // More lenient pose similarity for tracking continuation during flips
-      if (!isInitialDetection && lastTrackedLandmarks) {
-        const similarity = tracker.getPoseSimilarity(landmarks);
-        if (similarity > MIN_SIMILARITY_THRESHOLD) {
-          score *= (1 + similarity * 2);
-        } else {
-          // Don't heavily penalize during flips - athlete might look very different
-          score *= 0.5; // Reduced penalty from 0.1 to 0.5
-        }
-      }
-      
-      // Bonus for jumping motion
-      if (!isDMTMode && tracker.isJumping()) {
-        score *= 1.2;
-      }
-      
-      // DMT-specific filtering
-      if (isDMTMode) {
-        if (dmtState === 'waiting' && (tracker.isActivelyMoving() || tracker.isNewTracker)) {
-          score *= 1.1;
-        } else if (dmtState === 'on_trampoline' && tracker.isJumping()) {
-          score *= 1.2;
+      // Quick keypoint counting
+      for (let i = 0; i < landmarks.length; i += 2) { // Skip every other point for speed
+        const lm = landmarks[i];
+        if (lm) {
+          const x = lm.x * canvas.width;
+          const y = lm.y * canvas.height;
+          if (pointInPolygon(x, y, polygon)) score++;
         }
       }
       
@@ -704,165 +271,83 @@
 
     function selectMainAthlete(results, polygon) {
       const now = performance.now();
-      performanceMonitor.update();
       
-      // Update frame buffer and get movement analysis
-      let movementVector = { vx: 0, vy: 0, speed: 0, acceleration: 0 };
-      if (results.poseLandmarks) {
-        const landmarks = Array.isArray(results.poseLandmarks[0]) ? results.poseLandmarks[0] : results.poseLandmarks;
-        if (landmarks) {
-          frameBuffer.addFrame(landmarks, now);
-          movementVector = frameBuffer.getMovementVector();
-          currentMovementSpeed = movementVector.speed;
-          performanceMonitor.setMovementSpeed(currentMovementSpeed);
-          
-          // Update pose settings based on movement speed
+      // Skip heavy processing every few frames for performance
+      frameSkipCounter++;
+      if (frameSkipCounter % 3 === 0) { // Only do heavy processing every 3rd frame
+        performanceMonitor.update();
+        
+        // Simple movement calculation
+        if (results.poseLandmarks && lastTrackedLandmarks) {
+          const currentCenter = calculateCenterOfMass(results.poseLandmarks);
+          const lastCenter = calculateCenterOfMass(lastTrackedLandmarks);
+          const distance = Math.sqrt(
+            Math.pow(currentCenter.x - lastCenter.x, 2) + 
+            Math.pow(currentCenter.y - lastCenter.y, 2)
+          );
+          currentMovementSpeed = distance * 60; // Approximate speed
           updatePoseSettings(currentMovementSpeed);
         }
       }
       
-      updateAthleteTrackers(results);
-      
-      // Update predictive tracker if we have a confirmed athlete
-      if (isTrackingActive && confirmedAthleteId !== null && athleteTrackers.has(confirmedAthleteId)) {
-        const tracker = athleteTrackers.get(confirmedAthleteId);
-        if (tracker.framesSincePoseDetection === 0 && tracker.lastKnownPosition) {
-          // We have a fresh pose detection, update the predictor
-          predictiveTracker.updatePosition(tracker.lastKnownPosition, now, movementVector);
-          usingPrediction = false;
-        }
-      }
-      
-      // If we're actively tracking and the confirmed athlete is still visible, prioritize them
+      // If we're tracking someone, prioritize them heavily
       if (isTrackingActive && confirmedAthleteId !== null) {
         const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
         
-        // First try to find the confirmed athlete in current detections
         if (multiPose && results.poseLandmarks[confirmedAthleteId]) {
-          const landmarks = results.poseLandmarks[confirmedAthleteId];
-          const score = calculateEnhancedAthleteScore(landmarks, polygon, confirmedAthleteId, false);
-          if (score > 0.1) {
-            trackedAthleteIndex = confirmedAthleteId;
-            lastTrackedLandmarks = landmarks;
-            usingPrediction = false;
-            return landmarks;
-          }
+          lastTrackedLandmarks = results.poseLandmarks[confirmedAthleteId];
+          return lastTrackedLandmarks;
         } else if (!multiPose && results.poseLandmarks && confirmedAthleteId === 0) {
-          const landmarks = results.poseLandmarks;
-          const score = calculateEnhancedAthleteScore(landmarks, polygon, 0, false);
-          if (score > 0.1) {
-            trackedAthleteIndex = 0;
-            lastTrackedLandmarks = landmarks;
-            usingPrediction = false;
-            return landmarks;
-          }
+          lastTrackedLandmarks = results.poseLandmarks;
+          return lastTrackedLandmarks;
         }
         
-        // If confirmed athlete not found directly, try to find them using prediction
-        if (athleteTrackers.has(confirmedAthleteId)) {
-          const tracker = athleteTrackers.get(confirmedAthleteId);
-          
-          // Start prediction if we haven't detected the pose for a few frames
-          const maxFramesThreshold = isHighSpeedMode ? MAX_FRAMES_WITHOUT_POSE / 2 : MAX_FRAMES_WITHOUT_POSE;
-          
-          if (tracker.framesSincePoseDetection > maxFramesThreshold) {
-            lastPredictedPosition = predictiveTracker.getPredictedPosition(now);
-            
-            if (lastPredictedPosition && lastPredictedPosition.confidence > 0.1) {
-              usingPrediction = true;
-              
-              // Look for any pose near the predicted position
-              if (results.poseLandmarks) {
-                const poseArray = multiPose ? results.poseLandmarks : [results.poseLandmarks];
-                
-                for (let i = 0; i < poseArray.length; i++) {
-                  const landmarks = poseArray[i];
-                  if (!landmarks) continue;
-                  
-                  const testTracker = new AthleteTracker(i, landmarks);
-                  if (testTracker.isNearPredictedPosition(landmarks, lastPredictedPosition)) {
-                    // Found a pose near prediction - likely our athlete!
-                    console.log(`Found athlete ${confirmedAthleteId} near predicted position`);
-                    
-                    // Update the confirmed athlete's tracker
-                    tracker.updatePosition(landmarks);
-                    trackedAthleteIndex = i;
-                    lastTrackedLandmarks = landmarks;
-                    
-                    // Update athletic tracker mapping
-                    if (i !== confirmedAthleteId) {
-                      athleteTrackers.delete(confirmedAthleteId);
-                      athleteTrackers.set(i, tracker);
-                      confirmedAthleteId = i;
-                      trackedAthleteIndex = i;
-                    }
-                    
-                    usingPrediction = false;
-                    return landmarks;
-                  }
-                }
-              }
-              
-              // No pose found near prediction, but keep tracking state alive
-              console.log(`Predicting athlete ${confirmedAthleteId} position (confidence: ${lastPredictedPosition.confidence.toFixed(2)})`);
-              return lastTrackedLandmarks; // Return last known landmarks
-            }
+        // Simple prediction fallback
+        if (frameSkipCounter % 5 === 0) { // Update prediction less frequently
+          lastPredictedPosition = predictiveTracker.getPredictedPosition(now);
+          if (lastPredictedPosition && lastPredictedPosition.confidence > 0.2) {
+            usingPrediction = true;
+            return lastTrackedLandmarks;
           }
         }
       }
       
-      // Otherwise, find the best candidate
-      let candidates = [];
-      let multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
+      // Find best candidate with simplified scoring
+      let bestScore = 0;
+      let bestLandmarks = null;
+      let bestIndex = -1;
       
-      if (multiPose) {
-        for (let i = 0; i < results.poseLandmarks.length; i++) {
-          const landmarks = results.poseLandmarks[i];
-          if (!landmarks) continue;
-          
-          const score = calculateEnhancedAthleteScore(landmarks, polygon, i, !isTrackingActive);
-          candidates.push({ index: i, landmarks, score });
+      const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
+      const poseArray = multiPose ? results.poseLandmarks : [results.poseLandmarks];
+      
+      for (let i = 0; i < poseArray.length; i++) {
+        const landmarks = poseArray[i];
+        if (!landmarks) continue;
+        
+        const score = calculateSimpleAthleteScore(landmarks, polygon);
+        if (score > bestScore) {
+          bestScore = score;
+          bestLandmarks = landmarks;
+          bestIndex = multiPose ? i : 0;
         }
-      } else if (results.poseLandmarks) {
-        const landmarks = results.poseLandmarks;
-        const score = calculateEnhancedAthleteScore(landmarks, polygon, 0, !isTrackingActive);
-        candidates.push({ index: 0, landmarks, score });
       }
       
-      candidates.sort((a, b) => b.score - a.score);
-      
-      // Lower threshold for high-speed mode
-      const minThreshold = isHighSpeedMode ? 0.05 : (isTrackingActive ? 0.1 : (isDMTMode ? 0.3 : 0.2));
-      
-      if (candidates.length > 0 && candidates[0].score > minThreshold) {
-        trackedAthleteIndex = candidates[0].index;
-        lastTrackedLandmarks = candidates[0].landmarks;
+      if (bestScore > 2) { // Lower threshold for better responsiveness
+        trackedAthleteIndex = bestIndex;
+        lastTrackedLandmarks = bestLandmarks;
         
-        // Start tracking with lower threshold for high-speed mode
-        const trackingThreshold = isHighSpeedMode ? 2 : 3;
-        if (!isTrackingActive && polygon.length === 4 && candidates[0].score > trackingThreshold) {
-          const tracker = athleteTrackers.get(candidates[0].index);
-          if (tracker && tracker.wasInTrampoline) {
-            isTrackingActive = true;
-            confirmedAthleteId = candidates[0].index;
-            trackingStartTime = now;
-            predictiveTracker.reset();
-            
-            const centerMass = calculateCenterOfMass(candidates[0].landmarks);
-            predictiveTracker.updatePosition(centerMass, now, movementVector);
-            
-            console.log(`Started enhanced tracking athlete ${confirmedAthleteId} (score: ${candidates[0].score.toFixed(1)}, speed: ${currentMovementSpeed.toFixed(4)})`);
-          }
-        }
-        
-        // Update prediction tracker if we're actively tracking
-        if (isTrackingActive && confirmedAthleteId === candidates[0].index) {
-          const centerMass = calculateCenterOfMass(candidates[0].landmarks);
-          predictiveTracker.updatePosition(centerMass, now, movementVector);
+        // Start tracking
+        if (!isTrackingActive && polygon.length === 4) {
+          isTrackingActive = true;
+          confirmedAthleteId = bestIndex;
+          predictiveTracker.reset();
+          const centerMass = calculateCenterOfMass(bestLandmarks);
+          predictiveTracker.updatePosition(centerMass, now);
+          console.log(`Started tracking athlete ${confirmedAthleteId}`);
         }
         
         usingPrediction = false;
-        return lastTrackedLandmarks;
+        return bestLandmarks;
       }
       
       return null;
@@ -888,13 +373,13 @@
         videoTrack = null;
       }
       
-      // Enhanced camera constraints for fast movement tracking with fallback
+      // Optimized camera constraints - more realistic targets
       let constraints = {
         audio: false,
         video: {
           width: { ideal: 1280, min: 640 }, 
           height: { ideal: 720, min: 480 },
-          frameRate: { ideal: 120, min: 60, max: 120 } // Higher frame rate for fast movement
+          frameRate: { ideal: 60, max: 60 } // Realistic 60fps max
         }
       };
       
@@ -910,16 +395,14 @@
         video.srcObject = stream;
         await video.play();
         
-        // Log actual camera settings
         const settings = stream.getVideoTracks()[0].getSettings();
-        console.log(`Enhanced camera: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
+        console.log(`Camera: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
         
       } catch (error) {
-        console.warn("High-quality camera failed, falling back to standard:", error);
-        // Fallback to original constraints
+        console.warn("High-quality camera failed, using fallback");
         constraints.video = {
           width: { ideal: 640 }, height: { ideal: 480 },
-          frameRate: { ideal: 60, max: 60 }
+          frameRate: { ideal: 30, max: 30 }
         };
         if (deviceId) constraints.video.deviceId = { exact: deviceId };
         else constraints.video.facingMode = "environment";
@@ -928,9 +411,6 @@
         currentStream = stream;
         video.srcObject = stream;
         await video.play();
-        
-        const settings = stream.getVideoTracks()[0].getSettings();
-        console.log(`Fallback camera: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
       }
       
       hide(loadingIndicator);
@@ -945,11 +425,9 @@
           currentNativeZoom = videoTrack.getSettings().zoom || minNativeZoom;
           show(zoomInBtn);
           show(zoomOutBtn);
-          console.log("Native camera zoom supported:", minNativeZoom, maxNativeZoom);
         } else {
           hide(zoomInBtn);
           hide(zoomOutBtn);
-          console.log("Native camera zoom NOT supported on this device.");
         }
       }
     }
@@ -993,13 +471,11 @@
       confirmedAthleteId = null;
       trackedAthleteIndex = null;
       lastTrackedLandmarks = null;
-      athleteTrackers.clear();
       predictiveTracker.reset();
-      frameBuffer.clear();
       usingPrediction = false;
       currentMovementSpeed = 0;
       isHighSpeedMode = false;
-      console.log('Enhanced tracking reset');
+      console.log('Tracking reset');
     }
 
     function updateNotices() {
@@ -1039,23 +515,13 @@
         mainLandmarks = selectMainAthlete(results, trampolineCorners);
       }
       
-      // Check if athlete is in mat area using predicted or actual position
+      // Simplified mat detection
       let athleteInMatNow = false;
-      if (dmtMatCorners.length === 4) {
-        let checkPosition = null;
-        
-        if (lastTrackedLandmarks && athleteTrackers.has(confirmedAthleteId)) {
-          const tracker = athleteTrackers.get(confirmedAthleteId);
-          checkPosition = tracker.calculateCenterOfMass(lastTrackedLandmarks);
-        } else if (usingPrediction && lastPredictedPosition) {
-          checkPosition = lastPredictedPosition;
-        }
-        
-        if (checkPosition) {
-          const x = checkPosition.x * canvas.width;
-          const y = checkPosition.y * canvas.height;
-          athleteInMatNow = pointInPolygon(x, y, dmtMatCorners);
-        }
+      if (dmtMatCorners.length === 4 && lastTrackedLandmarks) {
+        const centerMass = calculateCenterOfMass(lastTrackedLandmarks);
+        const x = centerMass.x * canvas.width;
+        const y = centerMass.y * canvas.height;
+        athleteInMatNow = pointInPolygon(x, y, dmtMatCorners);
       }
 
       const athleteInTrampolineNow = mainLandmarks !== null;
@@ -1067,7 +533,7 @@
         mainLandmarks = lastSeenLandmarks;
       }
 
-      // Enhanced DMT State Machine with predictive tracking
+      // DMT State Machine
       switch (dmtState) {
         case 'waiting':
           if (athleteInTrampolineNow && !athleteInTrampoline) {
@@ -1079,12 +545,9 @@
           
         case 'on_trampoline':
           if (!athleteInTrampolineNow && athleteInTrampoline) {
-            const tracker = athleteTrackers.get(confirmedAthleteId);
-            if (!tracker || tracker.getVerticalVelocity() >= 0) {
-              dmtState = 'in_flight';
-              dmtTakeoffTime = now;
-              console.log('DMT: Athlete took off - enhanced tracking through flight');
-            }
+            dmtState = 'in_flight';
+            dmtTakeoffTime = now;
+            console.log('DMT: Athlete took off');
           }
           break;
           
@@ -1102,7 +565,7 @@
             
             widgetJumpHeightDisplay.textContent = `DMT Flight: ${dmtFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
             
-            // ✅ CONFIRMED: PostMessage for DMT flights
+            // PostMessage for DMT flights
             window.parent.postMessage(
               {
                 type: "jumptek_dmt_flight",
@@ -1115,12 +578,11 @@
               "*"
             );
             
-            console.log(`DMT: Landed. Flight time: ${dmtFlightTime.toFixed(2)}s, Height: ${jumpHeight.toFixed(2)}m`);
+            console.log(`DMT: Landed. Flight time: ${dmtFlightTime.toFixed(2)}s`);
             
             setTimeout(() => {
               dmtState = 'waiting';
               resetTracking();
-              console.log('DMT: Ready for next athlete');
             }, 3000);
           }
           break;
@@ -1132,15 +594,14 @@
       athleteInTrampoline = athleteInTrampolineNow;
       athleteInMat = athleteInMatNow;
 
-      // Enhanced display with prediction and speed status
+      // Display status
       if (lastDMTFlightTime > 0) {
         const gravity = 9.81;
         const jumpHeight = (gravity * lastDMTFlightTime * lastDMTFlightTime) / 8;
         widgetJumpHeightDisplay.textContent = `DMT Flight: ${lastDMTFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
       } else {
-        const mode = isHighSpeedMode ? 'HS' : 'NS';
         const trackingStatus = isTrackingActive ? (usingPrediction ? '(Predicting)' : '(Tracking)') : '';
-        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState} ${mode}${trackingStatus}\nFlight: 0.00s`;
+        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState} ${trackingStatus}`;
       }
     }
 
@@ -1160,12 +621,11 @@
         mainLandmarks = lastSeenLandmarks;
       } else {
         if (isTrackingActive && (now - poseLastSeenTime) > POSE_LOST_TIMEOUT) {
-          console.log('Lost athlete - stopping enhanced tracking');
           resetTracking();
         }
         
         if (lastJumpHeight > 0) {
-          widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
+          widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(${lastJumpAirtime.toFixed(2)}s)`;
         } else {
           widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
         }
@@ -1184,9 +644,8 @@
         if (!isTrackingActive && trackedAthleteIndex !== null) {
           isTrackingActive = true;
           confirmedAthleteId = trackedAthleteIndex;
-          trackingStartTime = now;
           predictiveTracker.reset();
-          console.log(`Started enhanced tracking jump for athlete ${confirmedAthleteId}`);
+          console.log(`Started tracking athlete ${confirmedAthleteId}`);
         }
       }
       
@@ -1200,9 +659,9 @@
           const jumpHeight = (gravity * airtime * airtime) / 8;
           lastJumpHeight = jumpHeight;
           lastJumpAirtime = airtime;
-          widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(airtime: ${airtime.toFixed(2)}s)`;
+          widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(${airtime.toFixed(2)}s)`;
           
-          // ✅ CONFIRMED: PostMessage for regular jumps
+          // PostMessage for regular jumps
           window.parent.postMessage(
             {
               type: "jumptek_jump",
@@ -1224,25 +683,24 @@
         return;
       }
 
-      // Enhanced display with prediction and speed status
-      const mode = isHighSpeedMode ? 'HS' : 'NS';
+      // Display status
       const trackingStatus = isTrackingActive ? (usingPrediction ? '(Predicting)' : '(Tracking)') : '';
       if (lastJumpHeight > 0) {
-        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m ${mode}${trackingStatus}\n(airtime: ${lastJumpAirtime.toFixed(2)}s)`;
+        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m ${trackingStatus}\n(${lastJumpAirtime.toFixed(2)}s)`;
       } else {
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${mode}${trackingStatus}`;
+        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${trackingStatus}`;
       }
     }
 
     function setupPose() {
       pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
-        modelComplexity: 0, // Start with low complexity, will be dynamically adjusted
+        modelComplexity: 0,
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
-        minDetectionConfidence: 0.3,
-        minTrackingConfidence: 0.3
+        minDetectionConfidence: 0.4,
+        minTrackingConfidence: 0.4
       });
       pose.onResults(results => {
         lastPoseResults = results;
@@ -1285,7 +743,7 @@
           ctx.restore();
         }
 
-        // Draw DMT mat area (if in DMT mode)
+        // Draw DMT mat area
         if (isDMTMode && dmtMatCorners.length > 0) {
           ctx.save();
           ctx.strokeStyle = "#ff6b35"; ctx.lineWidth = 3;
@@ -1313,48 +771,38 @@
           ctx.restore();
         }
 
-        // Enhanced prediction visualization
+        // Simple prediction visualization
         if (usingPrediction && lastPredictedPosition && isTrackingActive) {
           ctx.save();
           const predX = lastPredictedPosition.x * canvas.width;
           const predY = lastPredictedPosition.y * canvas.height;
-          const radius = (isHighSpeedMode ? PREDICTION_SEARCH_RADIUS * 1.5 : PREDICTION_SEARCH_RADIUS) * Math.min(canvas.width, canvas.height);
+          const radius = PREDICTION_SEARCH_RADIUS * Math.min(canvas.width, canvas.height);
           
-          // Different colors for high-speed mode
-          const color = isHighSpeedMode ? "#ff4400" : "#ffff00";
-          ctx.strokeStyle = color;
-          ctx.lineWidth = isHighSpeedMode ? 4 : 3;
-          ctx.setLineDash([10, 5]);
+          ctx.strokeStyle = "#ffff00";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 4]);
           ctx.beginPath();
           ctx.arc(predX, predY, radius, 0, Math.PI * 2);
           ctx.stroke();
           
-          ctx.fillStyle = color;
+          ctx.fillStyle = "#ffff00";
           ctx.beginPath();
-          ctx.arc(predX, predY, isHighSpeedMode ? 8 : 6, 0, Math.PI * 2);
+          ctx.arc(predX, predY, 6, 0, Math.PI * 2);
           ctx.fill();
           
           ctx.setLineDash([]);
           ctx.restore();
         }
 
-        // Enhanced pose visualization
+        // Simple pose visualization
         if (lastPoseResults && lastPoseResults.poseLandmarks) {
           const mainLandmarks = selectMainAthlete(lastPoseResults, trampolineCorners);
           if (mainLandmarks) {
-            let color = "#f00";
-            if (isTrackingActive) {
-              if (usingPrediction) {
-                color = isHighSpeedMode ? "#ff4400" : "#ffaa00"; // Different orange for high-speed
-              } else {
-                color = isHighSpeedMode ? "#00ff88" : "#00ff00"; // Different green for high-speed
-              }
-            }
-            const lineWidth = isTrackingActive ? (isHighSpeedMode ? 6 : 5) : 4;
-            const pointSize = isTrackingActive ? (isHighSpeedMode ? 8 : 6) : 4;
+            let color = isTrackingActive ? (usingPrediction ? "#ffaa00" : "#00ff00") : "#f00";
+            const lineWidth = isTrackingActive ? 5 : 4;
             
             drawConnectors(ctx, mainLandmarks, POSE_CONNECTIONS, { color: color, lineWidth: lineWidth });
-            drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: pointSize });
+            drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
           }
         }
       }
@@ -1384,7 +832,6 @@
     restartDrawBtn.addEventListener('click', function() {
       trampolineCorners = [];
       dmtMatCorners = [];
-      homography = null;
       jumpState = 'on_ground';
       lastJumpHeight = 0;
       lastJumpAirtime = 0;
@@ -1402,7 +849,6 @@
         try {
           await videoTrack.applyConstraints({advanced: [{zoom: zoomValue}]});
           currentNativeZoom = zoomValue;
-          console.log("Set native camera zoom to", zoomValue);
         } catch (e) {
           console.warn("Unable to set native zoom:", e);
         }
@@ -1452,7 +898,7 @@
       if (e.touches.length < 2) lastDist = null;
     });
 
-    // Enhanced pose processing loop for higher frame rates
+    // Optimized pose processing loop - realistic frame rates
     function poseLoop() {
       if (poseLoaded) {
         (async function loop() {
@@ -1464,8 +910,8 @@
               }
             } catch (e) {}
             const elapsed = performance.now() - start;
-            // Adaptive frame rate based on processing speed and high-speed mode
-            const targetInterval = isHighSpeedMode ? 8 : 16; // 125fps for high-speed, 60fps for normal
+            // Realistic target: 30fps max to maintain stability
+            const targetInterval = 33; // ~30fps
             const wait = Math.max(0, targetInterval - elapsed);
             await new Promise(res => setTimeout(res, wait));
           }
@@ -1476,7 +922,7 @@
     window.addEventListener('DOMContentLoaded', async function() {
       resizeCanvasToScreen();
       setupPose();
-      trampolineNotice.textContent = "Loading enhanced camera...";
+      trampolineNotice.textContent = "Loading camera...";
       trampolineNotice.style.color = "#ff0";
       show(canvas);
       show(restartDrawBtn);
@@ -1504,7 +950,7 @@
         updateNotices();
         trampolineNotice.style.color = "#0f0";
       } catch (e) {
-        trampolineNotice.textContent = 'Enhanced camera init failed: ' + e.toString();
+        trampolineNotice.textContent = 'Camera init failed: ' + e.toString();
         trampolineNotice.style.color = "#f00";
       }
     });
