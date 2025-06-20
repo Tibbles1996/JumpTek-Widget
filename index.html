@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>JumpTek: Trampoline Jump Tracker (Stable Tracking)</title>
+  <title>JumpTek: Airtime Tracking</title>
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
     body { width: 100vw; height: 100vh; background: #222; color: #fff; font-family: Arial, sans-serif; }
@@ -53,7 +53,7 @@
     <div id="dmtMatNotice">Now tap the four corners of the landing mat</div>
     <div id="loadingIndicator" style="display:none;">Loading...</div>
     <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
-    <div id="performanceIndicator">FPS: 0 | Tracking: None</div>
+    <div id="performanceIndicator">FPS: 0 | State: Searching</div>
   </div>
   <video id="video" autoplay playsinline muted style="opacity:0;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:0;"></video>
   <!-- Dependencies -->
@@ -77,19 +77,76 @@
       return inside;
     }
 
-    // Enhanced performance monitor with tracking status
-    class StablePerformanceMonitor {
+    // Movement tracker for detecting active trampolinists
+    class MovementTracker {
+      constructor() {
+        this.positions = [];
+        this.maxHistory = 5;
+        this.currentMovement = 0;
+      }
+
+      addPosition(landmarks, timestamp) {
+        const hip1 = landmarks[23], hip2 = landmarks[24];
+        if (!hip1 || !hip2) return;
+        
+        const centerX = (hip1.x + hip2.x) / 2;
+        const centerY = (hip1.y + hip2.y) / 2;
+        
+        this.positions.push({ x: centerX, y: centerY, time: timestamp });
+        
+        while (this.positions.length > this.maxHistory) {
+          this.positions.shift();
+        }
+        
+        this.updateMovement();
+      }
+
+      updateMovement() {
+        if (this.positions.length < 2) {
+          this.currentMovement = 0;
+          return;
+        }
+        
+        let totalMovement = 0;
+        for (let i = 1; i < this.positions.length; i++) {
+          const prev = this.positions[i - 1];
+          const curr = this.positions[i];
+          const dx = curr.x - prev.x;
+          const dy = curr.y - prev.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          totalMovement += distance;
+        }
+        
+        this.currentMovement = totalMovement;
+      }
+
+      getMovementScore() {
+        return this.currentMovement;
+      }
+
+      isActivelyMoving() {
+        return this.currentMovement > 0.015; // Slightly lower threshold
+      }
+
+      reset() {
+        this.positions = [];
+        this.currentMovement = 0;
+      }
+    }
+
+    // Performance monitor
+    class PerformanceMonitor {
       constructor() {
         this.frameCount = 0;
         this.lastTime = performance.now();
         this.fps = 0;
-        this.updateInterval = 2000;
+        this.lastState = "Searching";
       }
 
       update() {
         this.frameCount++;
         const now = performance.now();
-        if (now - this.lastTime >= this.updateInterval) {
+        if (now - this.lastTime >= 2000) {
           this.fps = Math.round(this.frameCount * 1000 / (now - this.lastTime));
           this.frameCount = 0;
           this.lastTime = now;
@@ -97,77 +154,15 @@
         }
       }
 
+      setState(state) {
+        this.lastState = state;
+      }
+
       updateDisplay() {
         const indicator = getEl('performanceIndicator');
         if (indicator) {
-          const trackingStatus = isTrackingActive ? `ID:${confirmedAthleteId}` : 'None';
-          const predictionStatus = usingPrediction ? ' (Pred)' : '';
-          indicator.textContent = `FPS: ${this.fps} | Tracking: ${trackingStatus}${predictionStatus}`;
+          indicator.textContent = `FPS: ${this.fps} | State: ${this.lastState}`;
         }
-      }
-    }
-
-    // Stable predictive tracker with better persistence
-    class StablePredictiveTracker {
-      constructor() {
-        this.lastKnownPosition = null;
-        this.lastKnownVelocity = null;
-        this.lastKnownTime = 0;
-        this.maxPredictionTime = 3000; // Extended back to 3 seconds
-        this.gravity = 0.0003;
-        this.positionHistory = []; // Keep recent positions for stability
-        this.maxHistorySize = 5;
-      }
-
-      updatePosition(centerMass, timestamp) {
-        // Add to position history
-        this.positionHistory.push({ position: centerMass, timestamp });
-        while (this.positionHistory.length > this.maxHistorySize) {
-          this.positionHistory.shift();
-        }
-
-        // Calculate velocity from recent history for stability
-        if (this.positionHistory.length >= 2) {
-          const recent = this.positionHistory[this.positionHistory.length - 1];
-          const previous = this.positionHistory[this.positionHistory.length - 2];
-          const dt = (recent.timestamp - previous.timestamp);
-          
-          if (dt > 0 && dt < 200) {
-            const vx = (recent.position.x - previous.position.x) / dt;
-            const vy = (recent.position.y - previous.position.y) / dt;
-            this.lastKnownVelocity = { x: vx, y: vy };
-          }
-        }
-        
-        this.lastKnownPosition = { ...centerMass };
-        this.lastKnownTime = timestamp;
-      }
-
-      getPredictedPosition(currentTime) {
-        if (!this.lastKnownPosition || !this.lastKnownVelocity) return null;
-
-        const dt = currentTime - this.lastKnownTime;
-        if (dt > this.maxPredictionTime) return null;
-
-        const predictedX = this.lastKnownPosition.x + (this.lastKnownVelocity.x * dt);
-        const predictedY = this.lastKnownPosition.y + (this.lastKnownVelocity.y * dt) + (0.5 * this.gravity * dt * dt);
-
-        if (predictedX < -0.3 || predictedX > 1.3 || predictedY < -0.3 || predictedY > 1.3) {
-          return null;
-        }
-
-        return {
-          x: predictedX,
-          y: predictedY,
-          confidence: Math.max(0, 1 - (dt / this.maxPredictionTime))
-        };
-      }
-
-      reset() {
-        this.lastKnownPosition = null;
-        this.lastKnownVelocity = null;
-        this.lastKnownTime = 0;
-        this.positionHistory = [];
       }
     }
 
@@ -195,16 +190,13 @@
     let isDMTMode = false;
     let setupPhase = 'trampoline';
 
-    // Jump display variables
+    // Jump variables
     let jumpState = 'on_ground';
     let jumpStartTime = 0;
     let lastJumpHeight = 0;
     let lastJumpAirtime = 0;
-    let lastSeenLandmarks = null;
-    let poseLastSeenTime = 0;
-    const POSE_LOST_TIMEOUT = 3000; // Extended timeout
 
-    // DMT-specific variables
+    // DMT variables
     let dmtState = 'waiting';
     let dmtEntryTime = 0;
     let dmtTakeoffTime = 0;
@@ -214,292 +206,193 @@
     let athleteInMat = false;
     let lastDMTFlightTime = 0;
 
-    // Stable tracking variables
-    let trackedAthleteIndex = null;
-    let lastTrackedLandmarks = null;
-    let isTrackingActive = false;
-    let confirmedAthleteId = null;
-    let predictiveTracker = new StablePredictiveTracker();
-    let usingPrediction = false;
-    let lastPredictedPosition = null;
-    let performanceMonitor = new StablePerformanceMonitor();
-    let trackingLockStrength = 0; // How committed we are to current athlete
-    let framesWithoutDetection = 0;
+    // Simplified tracking with different phases
+    let trackingState = 'searching'; // 'searching', 'tracking_ground', 'tracking_air'
+    let currentAthlete = null;
+    let movementTracker = new MovementTracker();
+    let lastAthletePosition = null;
+    let trackingStartedInTrampoline = false;
+    
+    let performanceMonitor = new PerformanceMonitor();
 
-    // Enhanced tracking persistence settings
-    let currentMovementSpeed = 0;
-    let isHighSpeedMode = false;
-    let lastPoseSettingsUpdate = 0;
-    let frameSkipCounter = 0;
-
-    const HIGH_SPEED_THRESHOLD = 0.04;
-    const PREDICTION_SEARCH_RADIUS = 0.15;
-    const MAX_FRAMES_WITHOUT_DETECTION = 10; // Allow more frames without detection
-    const TRACKING_LOCK_THRESHOLD = 5; // Frames needed to lock onto an athlete
-    const MIN_TRACKING_SCORE = 1; // Lower threshold for continuing tracking
-
-    function calculateCenterOfMass(landmarks) {
-      // Use multiple key points for more stable center calculation
-      const keyPoints = [11, 12, 23, 24]; // shoulders and hips
-      let x = 0, y = 0, count = 0;
-      
-      for (let i of keyPoints) {
-        if (landmarks[i]) {
-          x += landmarks[i].x;
-          y += landmarks[i].y;
-          count++;
-        }
-      }
-      
-      return count > 0 ? { x: x / count, y: y / count } : { x: 0.5, y: 0.5 };
-    }
-
-    function updatePoseSettings(movementSpeed) {
-      const now = performance.now();
-      if (now - lastPoseSettingsUpdate < 1000) return;
-      
-      const wasHighSpeed = isHighSpeedMode;
-      isHighSpeedMode = movementSpeed > HIGH_SPEED_THRESHOLD;
-      
-      if (wasHighSpeed !== isHighSpeedMode) {
-        console.log(`Mode: ${isHighSpeedMode ? 'High-Speed' : 'Normal'} (speed: ${movementSpeed.toFixed(4)})`);
-        
-        pose.setOptions({
-          modelComplexity: isHighSpeedMode ? 1 : 0,
-          smoothLandmarks: !isHighSpeedMode,
-          enableSegmentation: false,
-          smoothSegmentation: false,
-          minDetectionConfidence: isHighSpeedMode ? 0.6 : 0.4,
-          minTrackingConfidence: isHighSpeedMode ? 0.7 : 0.4
-        });
-        
-        lastPoseSettingsUpdate = now;
-      }
-    }
-
-    // Enhanced athlete scoring with position-based tracking
-    function calculateStableAthleteScore(landmarks, polygon, candidateIndex) {
+    function countKeypointsInArea(landmarks, polygon) {
       if (polygon.length !== 4) return 0;
       
-      let score = 0;
-      
-      // Basic keypoint counting
-      for (let i = 0; i < landmarks.length; i += 2) {
+      let count = 0;
+      const keyPoints = [0, 11, 12, 23, 24, 27, 28]; // nose, shoulders, hips, ankles
+      for (let i of keyPoints) {
         const lm = landmarks[i];
         if (lm) {
           const x = lm.x * canvas.width;
           const y = lm.y * canvas.height;
-          if (pointInPolygon(x, y, polygon)) score++;
+          if (pointInPolygon(x, y, polygon)) count++;
         }
       }
-      
-      // If we're actively tracking, heavily favor the confirmed athlete
-      if (isTrackingActive && candidateIndex === confirmedAthleteId) {
-        score *= 50; // Massive preference for tracked athlete
-        
-        // Position continuity bonus
-        if (lastTrackedLandmarks) {
-          const currentCenter = calculateCenterOfMass(landmarks);
-          const lastCenter = calculateCenterOfMass(lastTrackedLandmarks);
-          const distance = Math.sqrt(
-            Math.pow(currentCenter.x - lastCenter.x, 2) + 
-            Math.pow(currentCenter.y - lastCenter.y, 2)
-          );
-          
-          // Closer to last position = higher score
-          if (distance < 0.1) { // Within 10% of screen
-            score *= (1 + (0.1 - distance) * 10); // Up to 2x bonus for close positions
-          }
-        }
-        
-        // Prediction bonus
-        if (usingPrediction && lastPredictedPosition) {
-          const currentCenter = calculateCenterOfMass(landmarks);
-          const predDistance = Math.sqrt(
-            Math.pow(currentCenter.x - lastPredictedPosition.x, 2) + 
-            Math.pow(currentCenter.y - lastPredictedPosition.y, 2)
-          );
-          
-          if (predDistance < PREDICTION_SEARCH_RADIUS) {
-            score *= 3; // Strong prediction bonus
-            console.log(`Prediction match for athlete ${candidateIndex}!`);
-          }
-        }
-      }
-      
-      return score;
+      return count;
     }
 
-    function selectMainAthlete(results, polygon) {
+    function calculateAthleteCenter(landmarks) {
+      const hip1 = landmarks[23], hip2 = landmarks[24];
+      if (hip1 && hip2) {
+        return { x: (hip1.x + hip2.x) / 2, y: (hip1.y + hip2.y) / 2 };
+      }
+      return null;
+    }
+
+    function isNearLastPosition(landmarks, lastPos, maxDistance = 0.2) {
+      if (!lastPos) return true;
+      
+      const currentPos = calculateAthleteCenter(landmarks);
+      if (!currentPos) return false;
+      
+      const distance = Math.sqrt(
+        Math.pow(currentPos.x - lastPos.x, 2) + 
+        Math.pow(currentPos.y - lastPos.y, 2)
+      );
+      
+      return distance < maxDistance;
+    }
+
+    // Enhanced athlete selection that works for initial detection AND airtime tracking
+    function findBestAthlete(results, polygon) {
       const now = performance.now();
       
-      // Update performance monitor
-      frameSkipCounter++;
-      if (frameSkipCounter % 3 === 0) {
-        performanceMonitor.update();
+      // If we're already tracking someone, try to continue
+      if (trackingState !== 'searching' && currentAthlete) {
+        // Always try to keep tracking current athlete if pose is still valid
+        if (currentAthlete[27] && currentAthlete[28]) {
+          movementTracker.addPosition(currentAthlete, now);
+          lastAthletePosition = calculateAthleteCenter(currentAthlete);
+          
+          // Update state based on whether they're in trampoline area
+          if (trackingState === 'tracking_ground') {
+            const inTrampoline = countKeypointsInArea(currentAthlete, polygon) > 0;
+            if (!inTrampoline) {
+              trackingState = 'tracking_air';
+              performanceMonitor.setState('Tracking Air');
+              console.log('Athlete left trampoline - tracking in air');
+            }
+          }
+          
+          return currentAthlete;
+        }
         
-        // Simple movement calculation for speed detection
-        if (results.poseLandmarks && lastTrackedLandmarks) {
-          const currentCenter = calculateCenterOfMass(results.poseLandmarks);
-          const lastCenter = calculateCenterOfMass(lastTrackedLandmarks);
-          const distance = Math.sqrt(
-            Math.pow(currentCenter.x - lastCenter.x, 2) + 
-            Math.pow(currentCenter.y - lastCenter.y, 2)
-          );
-          currentMovementSpeed = distance * 30; // Approximate speed
-          updatePoseSettings(currentMovementSpeed);
+        // Lost current athlete - try to find them nearby (especially important in air)
+        if (results.poseLandmarks && lastAthletePosition) {
+          const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
+          const poses = multiPose ? results.poseLandmarks : [results.poseLandmarks];
+          
+          for (let pose of poses) {
+            if (!pose) continue;
+            
+            // More lenient search in air
+            const searchRadius = trackingState === 'tracking_air' ? 0.3 : 0.2;
+            if (isNearLastPosition(pose, lastAthletePosition, searchRadius)) {
+              console.log('Recovered athlete after brief loss');
+              currentAthlete = pose;
+              movementTracker.addPosition(pose, now);
+              lastAthletePosition = calculateAthleteCenter(pose);
+              return pose;
+            }
+          }
+          
+          // Give athlete more time to reappear in air
+          const maxLostTime = trackingState === 'tracking_air' ? 2000 : 1000;
+          
+          // If we lost them for too long, reset
+          setTimeout(() => {
+            if (!currentAthlete || !currentAthlete[27] || !currentAthlete[28]) {
+              console.log('Lost athlete - resetting to search mode');
+              resetTracking();
+            }
+          }, maxLostTime);
+          
+          // Return last known pose for a bit
+          return currentAthlete;
         }
       }
       
-      // If we're actively tracking, try to continue with confirmed athlete
-      if (isTrackingActive && confirmedAthleteId !== null) {
-        const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
+      // Search for new athlete - ONLY require them to be in trampoline initially
+      if (trackingState === 'searching' && polygon.length === 4) {
+        let bestAthlete = null;
+        let bestScore = 0;
+        let candidates = [];
         
-        // Try to find confirmed athlete in current detections
-        let foundConfirmedAthlete = false;
-        
-        if (multiPose && results.poseLandmarks[confirmedAthleteId]) {
-          const landmarks = results.poseLandmarks[confirmedAthleteId];
-          const score = calculateStableAthleteScore(landmarks, polygon, confirmedAthleteId);
+        if (results.poseLandmarks) {
+          const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
+          const poses = multiPose ? results.poseLandmarks : [results.poseLandmarks];
           
-          if (score > MIN_TRACKING_SCORE) {
-            lastTrackedLandmarks = landmarks;
-            predictiveTracker.updatePosition(calculateCenterOfMass(landmarks), now);
-            framesWithoutDetection = 0;
-            usingPrediction = false;
-            trackingLockStrength = Math.min(trackingLockStrength + 1, 20);
-            console.log(`Continuing to track athlete ${confirmedAthleteId} (strength: ${trackingLockStrength})`);
-            return landmarks;
-          }
-        } else if (!multiPose && results.poseLandmarks && confirmedAthleteId === 0) {
-          const landmarks = results.poseLandmarks;
-          const score = calculateStableAthleteScore(landmarks, polygon, 0);
-          
-          if (score > MIN_TRACKING_SCORE) {
-            lastTrackedLandmarks = landmarks;
-            predictiveTracker.updatePosition(calculateCenterOfMass(landmarks), now);
-            framesWithoutDetection = 0;
-            usingPrediction = false;
-            trackingLockStrength = Math.min(trackingLockStrength + 1, 20);
-            return landmarks;
-          }
-        }
-        
-        // Confirmed athlete not found - try prediction
-        framesWithoutDetection++;
-        
-        if (framesWithoutDetection <= MAX_FRAMES_WITHOUT_DETECTION) {
-          // Try to find athlete using prediction
-          if (frameSkipCounter % 3 === 0) { // Update prediction less frequently
-            lastPredictedPosition = predictiveTracker.getPredictedPosition(now);
-          }
-          
-          if (lastPredictedPosition && lastPredictedPosition.confidence > 0.2) {
-            usingPrediction = true;
+          for (let pose of poses) {
+            if (!pose) continue;
             
-            // Look for poses near predicted position
-            const poseArray = multiPose ? results.poseLandmarks : [results.poseLandmarks];
-            let bestMatch = null;
-            let bestScore = 0;
-            let bestIndex = -1;
+            const areaScore = countKeypointsInArea(pose, polygon);
+            if (areaScore < 2) continue; // Must have some presence in trampoline initially
             
-            for (let i = 0; i < poseArray.length; i++) {
-              const landmarks = poseArray[i];
-              if (!landmarks) continue;
+            // Test movement for this pose
+            const tempTracker = new MovementTracker();
+            tempTracker.addPosition(pose, now);
+            
+            // Score based on presence in trampoline area
+            let totalScore = areaScore;
+            
+            // Bonus for being near center
+            const center = calculateAthleteCenter(pose);
+            if (center) {
+              let polygonCenterX = 0, polygonCenterY = 0;
+              for (let [px, py] of polygon) {
+                polygonCenterX += px;
+                polygonCenterY += py;
+              }
+              polygonCenterX /= polygon.length;
+              polygonCenterY /= polygon.length;
               
-              const currentCenter = calculateCenterOfMass(landmarks);
-              const predDistance = Math.sqrt(
-                Math.pow(currentCenter.x - lastPredictedPosition.x, 2) + 
-                Math.pow(currentCenter.y - lastPredictedPosition.y, 2)
+              const centerX = center.x * canvas.width;
+              const centerY = center.y * canvas.height;
+              const distToCenter = Math.sqrt(
+                Math.pow(centerX - polygonCenterX, 2) + 
+                Math.pow(centerY - polygonCenterY, 2)
               );
               
-              if (predDistance < PREDICTION_SEARCH_RADIUS) {
-                const score = calculateStableAthleteScore(landmarks, polygon, i);
-                if (score > bestScore) {
-                  bestScore = score;
-                  bestMatch = landmarks;
-                  bestIndex = i;
-                }
-              }
+              const centerBonus = Math.max(0, 50 - distToCenter / 3);
+              totalScore += centerBonus;
             }
             
-            if (bestMatch) {
-              console.log(`Found athlete ${confirmedAthleteId} via prediction at index ${bestIndex}`);
-              
-              // Update tracking to new index if needed
-              if (bestIndex !== confirmedAthleteId) {
-                console.log(`Athlete moved from index ${confirmedAthleteId} to ${bestIndex}`);
-                confirmedAthleteId = bestIndex;
-                trackedAthleteIndex = bestIndex;
-              }
-              
-              lastTrackedLandmarks = bestMatch;
-              predictiveTracker.updatePosition(calculateCenterOfMass(bestMatch), now);
-              framesWithoutDetection = 0;
-              return bestMatch;
-            }
-            
-            // No match found near prediction, but keep tracking alive
-            console.log(`Predicting athlete ${confirmedAthleteId} position (confidence: ${lastPredictedPosition.confidence.toFixed(2)})`);
-            return lastTrackedLandmarks; // Return last known landmarks
-          }
-        } else {
-          // Lost athlete for too long - only give up if tracking lock is weak
-          if (trackingLockStrength < 5) {
-            console.log(`Lost athlete ${confirmedAthleteId} - weak lock, searching for new target`);
-            resetTracking();
-          } else {
-            // Strong lock - reduce strength but keep trying
-            trackingLockStrength--;
-            console.log(`Lost athlete ${confirmedAthleteId} - strong lock, continuing search (strength: ${trackingLockStrength})`);
-            return lastTrackedLandmarks;
+            candidates.push({ pose, score: totalScore, center });
           }
         }
-      }
-      
-      // Find new athlete to track
-      let bestScore = 0;
-      let bestLandmarks = null;
-      let bestIndex = -1;
-      
-      const multiPose = Array.isArray(results.poseLandmarks) && Array.isArray(results.poseLandmarks[0]);
-      const poseArray = multiPose ? results.poseLandmarks : [results.poseLandmarks];
-      
-      for (let i = 0; i < poseArray.length; i++) {
-        const landmarks = poseArray[i];
-        if (!landmarks) continue;
         
-        const score = calculateStableAthleteScore(landmarks, polygon, i);
-        if (score > bestScore) {
-          bestScore = score;
-          bestLandmarks = landmarks;
-          bestIndex = multiPose ? i : 0;
+        candidates.sort((a, b) => b.score - a.score);
+        
+        if (candidates.length > 0 && candidates[0].score > 3) {
+          bestAthlete = candidates[0].pose;
+          
+          // Start tracking this athlete
+          trackingState = 'tracking_ground';
+          currentAthlete = bestAthlete;
+          trackingStartedInTrampoline = true;
+          
+          movementTracker.reset();
+          movementTracker.addPosition(bestAthlete, now);
+          lastAthletePosition = candidates[0].center;
+          
+          performanceMonitor.setState('Tracking Ground');
+          console.log(`Started tracking athlete in trampoline (score: ${candidates[0].score.toFixed(1)})`);
+          return bestAthlete;
         }
       }
       
-      if (bestScore > 3) { // Threshold for new athlete detection
-        trackedAthleteIndex = bestIndex;
-        lastTrackedLandmarks = bestLandmarks;
-        
-        // Start tracking with lock-in period
-        if (!isTrackingActive && polygon.length === 4) {
-          isTrackingActive = true;
-          confirmedAthleteId = bestIndex;
-          trackingLockStrength = 1; // Start building lock strength
-          framesWithoutDetection = 0;
-          predictiveTracker.reset();
-          
-          const centerMass = calculateCenterOfMass(bestLandmarks);
-          predictiveTracker.updatePosition(centerMass, now);
-          
-          console.log(`Started tracking new athlete ${confirmedAthleteId} (score: ${bestScore.toFixed(1)})`);
-        }
-        
-        usingPrediction = false;
-        return bestLandmarks;
-      }
-      
+      // No athlete found
       return null;
+    }
+
+    function resetTracking() {
+      trackingState = 'searching';
+      currentAthlete = null;
+      movementTracker.reset();
+      lastAthletePosition = null;
+      trackingStartedInTrampoline = false;
+      performanceMonitor.setState('Searching');
+      console.log('Tracking reset - searching for new athlete');
     }
 
     function resizeCanvasToScreen() {
@@ -522,13 +415,11 @@
         videoTrack = null;
       }
       
-      // Optimized camera constraints
       let constraints = {
         audio: false,
         video: {
-          width: { ideal: 1280, min: 640 }, 
-          height: { ideal: 720, min: 480 },
-          frameRate: { ideal: 60, max: 60 }
+          width: { ideal: 640 }, height: { ideal: 480 },
+          frameRate: { ideal: 30, max: 30 }
         }
       };
       
@@ -538,29 +429,10 @@
         constraints.video.facingMode = "environment";
       }
       
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        currentStream = stream;
-        video.srcObject = stream;
-        await video.play();
-        
-        const settings = stream.getVideoTracks()[0].getSettings();
-        console.log(`Camera: ${settings.width}x${settings.height} @ ${settings.frameRate}fps`);
-        
-      } catch (error) {
-        console.warn("High-quality camera failed, using fallback");
-        constraints.video = {
-          width: { ideal: 640 }, height: { ideal: 480 },
-          frameRate: { ideal: 30, max: 30 }
-        };
-        if (deviceId) constraints.video.deviceId = { exact: deviceId };
-        else constraints.video.facingMode = "environment";
-        
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        currentStream = stream;
-        video.srcObject = stream;
-        await video.play();
-      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentStream = stream;
+      video.srcObject = stream;
+      await video.play();
       
       hide(loadingIndicator);
       videoTrack = currentStream.getVideoTracks()[0];
@@ -615,20 +487,6 @@
       resetTracking();
     }
 
-    function resetTracking() {
-      isTrackingActive = false;
-      confirmedAthleteId = null;
-      trackedAthleteIndex = null;
-      lastTrackedLandmarks = null;
-      predictiveTracker.reset();
-      usingPrediction = false;
-      currentMovementSpeed = 0;
-      isHighSpeedMode = false;
-      trackingLockStrength = 0;
-      framesWithoutDetection = 0;
-      console.log('Tracking reset - ready for new athlete');
-    }
-
     function updateNotices() {
       if (isDMTMode) {
         if (setupPhase === 'trampoline') {
@@ -650,7 +508,7 @@
         }
       } else {
         if (trampolineCorners.length === 4) {
-          trampolineNotice.textContent = "Trampoline marked. Ready to track jumps!";
+          trampolineNotice.textContent = "Trampoline marked. Will track athletes through full jump arc!";
         } else {
           trampolineNotice.textContent = "Tap the four corners of the trampoline";
         }
@@ -663,34 +521,32 @@
       
       let mainLandmarks = null;
       if (trampolineCorners.length === 4) {
-        mainLandmarks = selectMainAthlete(results, trampolineCorners);
+        mainLandmarks = findBestAthlete(results, trampolineCorners);
       }
       
-      // Simplified mat detection
+      // Mat detection
       let athleteInMatNow = false;
-      if (dmtMatCorners.length === 4 && lastTrackedLandmarks) {
-        const centerMass = calculateCenterOfMass(lastTrackedLandmarks);
-        const x = centerMass.x * canvas.width;
-        const y = centerMass.y * canvas.height;
-        athleteInMatNow = pointInPolygon(x, y, dmtMatCorners);
+      if (dmtMatCorners.length === 4 && mainLandmarks) {
+        const center = calculateAthleteCenter(mainLandmarks);
+        if (center) {
+          const centerX = center.x * canvas.width;
+          const centerY = center.y * canvas.height;
+          athleteInMatNow = pointInPolygon(centerX, centerY, dmtMatCorners);
+        }
       }
 
-      const athleteInTrampolineNow = mainLandmarks !== null;
+      // For DMT, only count as "in trampoline" if they're in the area AND moving
+      const athleteInTrampolineNow = mainLandmarks !== null && 
+                                    (trackingState === 'tracking_ground' || 
+                                     (countKeypointsInArea(mainLandmarks, trampolineCorners) > 2 && movementTracker.isActivelyMoving()));
 
-      if (mainLandmarks && mainLandmarks[27] && mainLandmarks[28]) {
-        lastSeenLandmarks = mainLandmarks;
-        poseLastSeenTime = now;
-      } else if (lastSeenLandmarks && (now - poseLastSeenTime) < POSE_LOST_TIMEOUT) {
-        mainLandmarks = lastSeenLandmarks;
-      }
-
-      // DMT State Machine
+      // DMT state machine
       switch (dmtState) {
         case 'waiting':
           if (athleteInTrampolineNow && !athleteInTrampoline) {
             dmtState = 'on_trampoline';
             dmtEntryTime = now;
-            console.log('DMT: Athlete entered trampoline');
+            console.log('DMT: Moving athlete entered trampoline');
           }
           break;
           
@@ -698,7 +554,7 @@
           if (!athleteInTrampolineNow && athleteInTrampoline) {
             dmtState = 'in_flight';
             dmtTakeoffTime = now;
-            console.log('DMT: Athlete took off - stable tracking through flight');
+            console.log('DMT: Athlete took off - tracking through full flight');
           }
           break;
           
@@ -716,7 +572,6 @@
             
             widgetJumpHeightDisplay.textContent = `DMT Flight: ${dmtFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
             
-            // PostMessage for DMT flights
             window.parent.postMessage(
               {
                 type: "jumptek_dmt_flight",
@@ -745,37 +600,28 @@
       athleteInTrampoline = athleteInTrampolineNow;
       athleteInMat = athleteInMatNow;
 
-      // Display status
+      // Display
       if (lastDMTFlightTime > 0) {
         const gravity = 9.81;
         const jumpHeight = (gravity * lastDMTFlightTime * lastDMTFlightTime) / 8;
         widgetJumpHeightDisplay.textContent = `DMT Flight: ${lastDMTFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
       } else {
-        const trackingStatus = isTrackingActive ? (usingPrediction ? '(Predicting)' : '(Tracking)') : '';
-        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState} ${trackingStatus}`;
+        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState}`;
       }
     }
 
     function processPose(results) {
+      performanceMonitor.update();
+      
       if (isDMTMode) {
         processDMTPose(results);
         return;
       }
 
       const now = performance.now();
-      let mainLandmarks = selectMainAthlete(results, trampolineCorners);
+      let mainLandmarks = findBestAthlete(results, trampolineCorners);
 
-      if (mainLandmarks && mainLandmarks[27] && mainLandmarks[28]) {
-        lastSeenLandmarks = mainLandmarks;
-        poseLastSeenTime = now;
-      } else if (lastSeenLandmarks && (now - poseLastSeenTime) < POSE_LOST_TIMEOUT) {
-        mainLandmarks = lastSeenLandmarks;
-      } else {
-        if (isTrackingActive && (now - poseLastSeenTime) > POSE_LOST_TIMEOUT) {
-          console.log('Complete pose loss - resetting tracking');
-          resetTracking();
-        }
-        
+      if (!mainLandmarks || !mainLandmarks[27] || !mainLandmarks[28]) {
         if (lastJumpHeight > 0) {
           widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(${lastJumpAirtime.toFixed(2)}s)`;
         } else {
@@ -789,17 +635,10 @@
       const airborneThreshold = 0.86;
       const isAirborne = minY < airborneThreshold;
 
-      if (jumpState === 'on_ground' && isAirborne) {
+      if (jumpState === 'on_ground' && isAirborne && trackingState !== 'searching') {
         jumpState = 'in_air';
         jumpStartTime = now;
-        
-        if (!isTrackingActive && trackedAthleteIndex !== null) {
-          isTrackingActive = true;
-          confirmedAthleteId = trackedAthleteIndex;
-          trackingLockStrength = TRACKING_LOCK_THRESHOLD; // Start with strong lock
-          predictiveTracker.reset();
-          console.log(`Jump detected - locking onto athlete ${confirmedAthleteId}`);
-        }
+        console.log('Jump started - tracking through full arc');
       }
       
       if (jumpState === 'in_air' && !isAirborne) {
@@ -814,7 +653,6 @@
           lastJumpAirtime = airtime;
           widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(${airtime.toFixed(2)}s)`;
           
-          // PostMessage for regular jumps
           window.parent.postMessage(
             {
               type: "jumptek_jump",
@@ -827,24 +665,23 @@
           console.log(`Jump: ${jumpHeight.toFixed(2)}m, ${airtime.toFixed(2)}s`);
         }
         
-        // Don't reset tracking immediately - athlete might do multiple jumps
+        // Reset tracking after jump completes
         setTimeout(() => {
-          if (jumpState === 'on_ground' && trackingLockStrength < 3) {
-            console.log('Jump series ended - ready for new athlete');
+          if (jumpState === 'on_ground') {
             resetTracking();
           }
-        }, 3000);
+        }, 2000);
         
         return;
       }
 
-      // Display status
-      const trackingStatus = isTrackingActive ? 
-        (usingPrediction ? '(Predicting)' : `(Lock:${trackingLockStrength})`) : '';
+      // Display with tracking state
       if (lastJumpHeight > 0) {
-        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m ${trackingStatus}\n(${lastJumpAirtime.toFixed(2)}s)`;
+        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(${lastJumpAirtime.toFixed(2)}s)`;
       } else {
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${trackingStatus}`;
+        const stateText = trackingState === 'searching' ? '' : 
+                         trackingState === 'tracking_ground' ? '(Ground)' : '(Air)';
+        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${stateText}`;
       }
     }
 
@@ -855,8 +692,8 @@
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
-        minDetectionConfidence: 0.4,
-        minTrackingConfidence: 0.4
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
       });
       pose.onResults(results => {
         lastPoseResults = results;
@@ -927,74 +764,48 @@
           ctx.restore();
         }
 
-        // Enhanced prediction visualization
-        if (usingPrediction && lastPredictedPosition && isTrackingActive) {
-          ctx.save();
-          const predX = lastPredictedPosition.x * canvas.width;
-          const predY = lastPredictedPosition.y * canvas.height;
-          const radius = PREDICTION_SEARCH_RADIUS * Math.min(canvas.width, canvas.height);
+        // Pose visualization based on tracking state
+        if (currentAthlete) {
+          let color = "#ff0000";
+          let lineWidth = 4;
           
-          // Pulsing prediction circle
-          const pulsePhase = (performance.now() / 500) % (Math.PI * 2);
-          const pulseRadius = radius * (1 + Math.sin(pulsePhase) * 0.2);
+          switch (trackingState) {
+            case 'searching':
+              color = "#ff0000"; // Red
+              break;
+            case 'tracking_ground':
+              color = "#00ff00"; // Green
+              lineWidth = 5;
+              break;
+            case 'tracking_air':
+              color = "#00aaff"; // Blue for air tracking
+              lineWidth = 6;
+              break;
+          }
           
-          ctx.strokeStyle = "#ffff00";
-          ctx.lineWidth = 3;
-          ctx.setLineDash([8, 4]);
-          ctx.beginPath();
-          ctx.arc(predX, predY, pulseRadius, 0, Math.PI * 2);
-          ctx.stroke();
+          drawConnectors(ctx, currentAthlete, POSE_CONNECTIONS, { color: color, lineWidth: lineWidth });
+          drawLandmarks(ctx, currentAthlete, { color: "#fff", lineWidth: 2, radius: 4 });
           
-          ctx.fillStyle = "#ffff00";
-          ctx.beginPath();
-          ctx.arc(predX, predY, 8, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Confidence text
-          ctx.fillStyle = "#fff";
-          ctx.font = "12px Arial";
-          ctx.fillText(`${(lastPredictedPosition.confidence * 100).toFixed(0)}%`, predX + 15, predY - 15);
-          
-          ctx.setLineDash([]);
-          ctx.restore();
-        }
-
-        // Enhanced pose visualization with lock strength
-        if (lastPoseResults && lastPoseResults.poseLandmarks) {
-          const mainLandmarks = selectMainAthlete(lastPoseResults, trampolineCorners);
-          if (mainLandmarks) {
-            let color = "#f00"; // Red for untracked
-            let lineWidth = 4;
+          // Show tracking state
+          const center = calculateAthleteCenter(currentAthlete);
+          if (center) {
+            const centerX = center.x * canvas.width;
+            const centerY = center.y * canvas.height;
             
-            if (isTrackingActive) {
-              if (usingPrediction) {
-                color = "#ffaa00"; // Orange for prediction
-                lineWidth = 5;
-              } else {
-                // Green intensity based on lock strength
-                const intensity = Math.min(trackingLockStrength / 10, 1);
-                const greenValue = Math.floor(255 * intensity);
-                color = `rgb(0, ${greenValue}, 0)`;
-                lineWidth = 5 + Math.floor(trackingLockStrength / 4); // Thicker for stronger lock
-              }
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.font = "bold 16px Arial";
+            ctx.textAlign = "center";
+            
+            let statusText = "";
+            switch (trackingState) {
+              case 'tracking_ground': statusText = "GROUND"; break;
+              case 'tracking_air': statusText = "AIRTIME"; break;
+              default: statusText = "SEARCH"; break;
             }
             
-            drawConnectors(ctx, mainLandmarks, POSE_CONNECTIONS, { color: color, lineWidth: lineWidth });
-            drawLandmarks(ctx, mainLandmarks, { color: "#fff", lineWidth: 2, radius: 4 });
-            
-            // Show athlete ID
-            if (isTrackingActive) {
-              const centerMass = calculateCenterOfMass(mainLandmarks);
-              const textX = centerMass.x * canvas.width;
-              const textY = centerMass.y * canvas.height - 30;
-              
-              ctx.save();
-              ctx.fillStyle = color;
-              ctx.font = "bold 16px Arial";
-              ctx.textAlign = "center";
-              ctx.fillText(`ID: ${confirmedAthleteId}`, textX, textY);
-              ctx.restore();
-            }
+            ctx.fillText(statusText, centerX, centerY - 50);
+            ctx.restore();
           }
         }
       }
@@ -1090,7 +901,6 @@
       if (e.touches.length < 2) lastDist = null;
     });
 
-    // Stable pose processing loop
     function poseLoop() {
       if (poseLoaded) {
         (async function loop() {
@@ -1102,8 +912,7 @@
               }
             } catch (e) {}
             const elapsed = performance.now() - start;
-            const targetInterval = 33; // ~30fps for stability
-            const wait = Math.max(0, targetInterval - elapsed);
+            const wait = Math.max(0, 33 - elapsed);
             await new Promise(res => setTimeout(res, wait));
           }
         })();
