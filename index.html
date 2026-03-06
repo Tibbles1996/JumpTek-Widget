@@ -184,6 +184,7 @@
     let trampolineCorners = [];
     let dmtMatCorners = [];
     let lastPoseResults = null;
+    let lastRawPoses = []; // All poses detected in last frame, used for always-on skeleton preview
     let videoDevices = [], currentDeviceIndex = 0;
     let currentStream = null, videoTrack = null, pose = null, poseLoaded = false;
 
@@ -839,6 +840,15 @@
             ctx.fillText(statusText, centerX, centerY - 50);
             ctx.restore();
           }
+        } else if (lastRawPoses.length > 0) {
+          // No athlete locked yet — draw all detected skeletons in a muted style so the
+          // user can confirm that pose detection is working before corners are defined.
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          for (const rawPose of lastRawPoses) {
+            drawPoseSkeleton(ctx, rawPose, "#ffffff", 3);
+          }
+          ctx.restore();
         }
       }
       requestAnimationFrame(drawLoop);
@@ -971,9 +981,11 @@
                       ? convertedPoses[0]
                       : convertedPoses
                   };
+                  lastRawPoses = convertedPoses;
                   lastPoseResults = results;
                   processPose(results);
                 } else {
+                  lastRawPoses = [];
                   // No pose detected — still call processPose with empty results so state resets properly
                   processPose({ poseLandmarks: null });
                 }
