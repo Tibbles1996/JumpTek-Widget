@@ -31,10 +31,8 @@
     #switchCameraBtn:hover, #zoomInBtn:hover, #zoomOutBtn:hover { background: #219150; }
     #switchCameraBtn img { width: 28px; height: 28px; display: block; }
     #loadingIndicator { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 30; color: #ff0; background: rgba(0,0,0,0.7); padding: 7px 16px; border-radius: 12px; font-size: 1.2rem; font-weight: bold; display: none; }
-    #trampolineNotice { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; font-weight: bold; z-index: 25; text-align: center; }
-    #widgetJumpHeightDisplay { display: block; position: absolute; top: 60px; right: 30px; background: rgba(0,0,0,0.75); color: #ff0; padding: 12px 20px; border-radius: 12px; font-size: 1.3rem; z-index: 25; font-weight: bold; text-align: center; }
+    #trampolineNotice { display: none !important; position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); color: #0f0; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.2rem; font-weight: bold; z-index: 25; text-align: center; }
     #dmtMatNotice { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); color: #ff6b35; background: rgba(0,0,0,0.7); padding: 10px 24px; border-radius: 16px; font-size: 1.1rem; font-weight: bold; z-index: 25; text-align: center; display: none; }
-    #performanceIndicator { position: absolute; top: 100px; right: 30px; background: rgba(0,0,0,0.75); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: 0.9rem; z-index: 25; }
   </style>
 </head>
 <body>
@@ -49,17 +47,16 @@
       <button id="dmtModeBtn" aria-label="DMT Mode" tabindex="0" role="button">DMT</button>
       <button id="restartDrawBtn" aria-label="Restart" tabindex="0" role="button">Restart</button>
     </div>
-    <div id="trampolineNotice">Tap the four corners of the trampoline</div>
+    <div id="trampolineNotice" style="display:none;">Tap the four corners of the trampoline</div>
     <div id="dmtMatNotice">Now tap the four corners of the landing mat</div>
     <div id="loadingIndicator" style="display:none;">Loading...</div>
-    <div id="widgetJumpHeightDisplay" aria-live="polite">Jump: 0.00 m</div>
-    <div id="performanceIndicator">FPS: 0 | State: Searching</div>
   </div>
   <video id="video" autoplay playsinline muted style="opacity:0;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:0;"></video>
   <!-- Dependencies -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
   <script>
     function show(el) { if (el) el.style.display = ""; }
     function hide(el) { if (el) el.style.display = "none"; }
@@ -134,41 +131,8 @@
       }
     }
 
-    // Performance monitor
-    class PerformanceMonitor {
-      constructor() {
-        this.frameCount = 0;
-        this.lastTime = performance.now();
-        this.fps = 0;
-        this.lastState = "Searching";
-      }
-
-      update() {
-        this.frameCount++;
-        const now = performance.now();
-        if (now - this.lastTime >= 2000) {
-          this.fps = Math.round(this.frameCount * 1000 / (now - this.lastTime));
-          this.frameCount = 0;
-          this.lastTime = now;
-          this.updateDisplay();
-        }
-      }
-
-      setState(state) {
-        this.lastState = state;
-      }
-
-      updateDisplay() {
-        const indicator = getEl('performanceIndicator');
-        if (indicator) {
-          indicator.textContent = `FPS: ${this.fps} | State: ${this.lastState}`;
-        }
-      }
-    }
-
     const canvas = getEl('canvas'), ctx = canvas.getContext('2d');
     const video = getEl('video');
-    const widgetJumpHeightDisplay = getEl('widgetJumpHeightDisplay');
     const loadingIndicator = getEl('loadingIndicator');
     const trampolineNotice = getEl('trampolineNotice');
     const dmtMatNotice = getEl('dmtMatNotice');
@@ -183,6 +147,7 @@
     let trampolineCorners = [];
     let dmtMatCorners = [];
     let lastPoseResults = null;
+    let lastRawPoses = []; // All poses detected in last frame, used for always-on skeleton preview
     let videoDevices = [], currentDeviceIndex = 0;
     let currentStream = null, videoTrack = null, pose = null, poseLoaded = false;
 
@@ -212,8 +177,6 @@
     let movementTracker = new MovementTracker();
     let lastAthletePosition = null;
     let trackingStartedInTrampoline = false;
-    
-    let performanceMonitor = new PerformanceMonitor();
 
     function countKeypointsInArea(landmarks, polygon) {
       if (polygon.length !== 4) return 0;
@@ -269,7 +232,6 @@
             const inTrampoline = countKeypointsInArea(currentAthlete, polygon) > 0;
             if (!inTrampoline) {
               trackingState = 'tracking_air';
-              performanceMonitor.setState('Tracking Air');
               console.log('Athlete left trampoline - tracking in air');
             }
           }
@@ -375,7 +337,6 @@
           movementTracker.addPosition(bestAthlete, now);
           lastAthletePosition = candidates[0].center;
           
-          performanceMonitor.setState('Tracking Ground');
           console.log(`Started tracking athlete in trampoline (score: ${candidates[0].score.toFixed(1)})`);
           return bestAthlete;
         }
@@ -391,7 +352,6 @@
       movementTracker.reset();
       lastAthletePosition = null;
       trackingStartedInTrampoline = false;
-      performanceMonitor.setState('Searching');
       console.log('Tracking reset - searching for new athlete');
     }
 
@@ -570,8 +530,6 @@
             lastJumpHeight = jumpHeight;
             lastJumpAirtime = dmtFlightTime;
             
-            widgetJumpHeightDisplay.textContent = `DMT Flight: ${dmtFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
-            
             window.parent.postMessage(
               {
                 type: "jumptek_dmt_flight",
@@ -599,20 +557,9 @@
 
       athleteInTrampoline = athleteInTrampolineNow;
       athleteInMat = athleteInMatNow;
-
-      // Display
-      if (lastDMTFlightTime > 0) {
-        const gravity = 9.81;
-        const jumpHeight = (gravity * lastDMTFlightTime * lastDMTFlightTime) / 8;
-        widgetJumpHeightDisplay.textContent = `DMT Flight: ${lastDMTFlightTime.toFixed(2)}s\nHeight: ${jumpHeight.toFixed(2)}m`;
-      } else {
-        widgetJumpHeightDisplay.textContent = `DMT: ${dmtState}`;
-      }
     }
 
     function processPose(results) {
-      performanceMonitor.update();
-      
       if (isDMTMode) {
         processDMTPose(results);
         return;
@@ -622,11 +569,6 @@
       let mainLandmarks = findBestAthlete(results, trampolineCorners);
 
       if (!mainLandmarks || !mainLandmarks[27] || !mainLandmarks[28]) {
-        if (lastJumpHeight > 0) {
-          widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(${lastJumpAirtime.toFixed(2)}s)`;
-        } else {
-          widgetJumpHeightDisplay.textContent = "Jump: 0.00 m";
-        }
         return;
       }
 
@@ -651,7 +593,6 @@
           const jumpHeight = (gravity * airtime * airtime) / 8;
           lastJumpHeight = jumpHeight;
           lastJumpAirtime = airtime;
-          widgetJumpHeightDisplay.textContent = `Jump: ${jumpHeight.toFixed(2)} m\n(${airtime.toFixed(2)}s)`;
           
           window.parent.postMessage(
             {
@@ -674,32 +615,55 @@
         
         return;
       }
-
-      // Display with tracking state
-      if (lastJumpHeight > 0) {
-        widgetJumpHeightDisplay.textContent = `Jump: ${lastJumpHeight.toFixed(2)} m\n(${lastJumpAirtime.toFixed(2)}s)`;
-      } else {
-        const stateText = trackingState === 'searching' ? '' : 
-                         trackingState === 'tracking_ground' ? '(Ground)' : '(Air)';
-        widgetJumpHeightDisplay.textContent = `Jump: 0.00 m ${stateText}`;
-      }
     }
 
-    function setupPose() {
-      pose = new window.Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
-      pose.setOptions({
-        modelComplexity: 0,
-        smoothLandmarks: true,
-        enableSegmentation: false,
-        smoothSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
-      pose.onResults(results => {
-        lastPoseResults = results;
-        processPose(results);
-      });
+    async function setupPose() {
+      await tf.ready();
+      await tf.setBackend('webgl');
+      pose = await poseDetection.createDetector(
+        poseDetection.SupportedModels.MoveNet,
+        {
+          modelType: poseDetection.movenet.modelType.THUNDER,
+          enableSmoothing: true,
+          minPoseScore: 0.25
+        }
+      );
       poseLoaded = true;
+    }
+
+    // COCO 17-keypoint connections (MoveNet skeleton)
+    const MOVENET_CONNECTIONS = [
+      [0,1],[0,2],[1,3],[2,4],           // head
+      [5,6],                              // shoulders
+      [5,7],[7,9],[6,8],[8,10],          // arms
+      [5,11],[6,12],[11,12],             // torso
+      [11,13],[13,15],[12,14],[14,16]    // legs
+    ];
+
+    function drawPoseSkeleton(ctx, landmarks, color, lineWidth) {
+      if (!landmarks) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      for (const [a, b] of MOVENET_CONNECTIONS) {
+        const la = landmarks[a], lb = landmarks[b];
+        if (!la || !lb) continue;
+        if ((la.visibility || 0) < 0.3 || (lb.visibility || 0) < 0.3) continue;
+        ctx.beginPath();
+        ctx.moveTo(la.x * canvas.width, la.y * canvas.height);
+        ctx.lineTo(lb.x * canvas.width, lb.y * canvas.height);
+        ctx.stroke();
+      }
+      // Draw keypoints (MoveNet provides 17 COCO keypoints at indices 0-16)
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < 17; i++) {
+        const lm = landmarks[i];
+        if (!lm || (lm.visibility || 0) < 0.3) continue;
+        ctx.beginPath();
+        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     function drawLoop() {
@@ -783,8 +747,7 @@
               break;
           }
           
-          drawConnectors(ctx, currentAthlete, POSE_CONNECTIONS, { color: color, lineWidth: lineWidth });
-          drawLandmarks(ctx, currentAthlete, { color: "#fff", lineWidth: 2, radius: 4 });
+          drawPoseSkeleton(ctx, currentAthlete, color, lineWidth);
           
           // Show tracking state
           const center = calculateAthleteCenter(currentAthlete);
@@ -807,6 +770,15 @@
             ctx.fillText(statusText, centerX, centerY - 50);
             ctx.restore();
           }
+        } else if (lastRawPoses.length > 0) {
+          // No athlete locked yet — draw all detected skeletons in a muted style so the
+          // user can confirm that pose detection is working before corners are defined.
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          for (const rawPose of lastRawPoses) {
+            drawPoseSkeleton(ctx, rawPose, "#ffffff", 3);
+          }
+          ctx.restore();
         }
       }
       requestAnimationFrame(drawLoop);
@@ -843,7 +815,6 @@
       resetDMTTracking();
       setupPhase = 'trampoline';
       updateNotices();
-      widgetJumpHeightDisplay.textContent = isDMTMode ? "DMT Flight: 0.00s" : "Jump: 0.00 m";
     });
 
     async function setNativeZoom(zoomValue) {
@@ -907,10 +878,48 @@
           while (poseLoaded) {
             const start = performance.now();
             try {
-              if (video.readyState === 4) {
-                await pose.send({ image: video });
+              if (video.readyState === 4 && video.videoWidth > 0) {
+                const poses = await pose.estimatePoses(video, { flipHorizontal: false });
+                if (poses && poses.length > 0) {
+                  // Convert MoveNet keypoint format to the landmark format used by processPose.
+                  // MoveNet returns: [{score, keypoints: [{name, score, x, y}, ...]}]
+                  // processPose expects: results.poseLandmarks = array of {x, y, z, visibility}
+                  // MoveNet provides 17 COCO keypoints placed at array indices 0-16.
+                  // Hip and ankle indices are mirrored to the MediaPipe-style indices also used in processPose.
+                  const convertedPoses = poses.map(p => {
+                    const lm = new Array(33).fill(null); // MediaPipe Pose has 33 landmarks total; MoveNet provides 17
+                    p.keypoints.forEach((kp, i) => {
+                      // MoveNet returns pixel coordinates in video space; normalize to 0-1 range
+                      lm[i] = {
+                        x: kp.x / video.videoWidth,
+                        y: kp.y / video.videoHeight,
+                        z: 0,
+                        visibility: kp.score
+                      };
+                    });
+                    // Mirror hips/ankles to expected indices used in code:
+                    // MediaPipe 23=left hip, 24=right hip, 27=left ankle, 28=right ankle
+                    // MoveNet:  11=left hip, 12=right hip, 15=left ankle, 16=right ankle
+                    lm[23] = lm[11]; lm[24] = lm[12];
+                    lm[27] = lm[15]; lm[28] = lm[16];
+                    return lm;
+                  });
+
+                  const results = {
+                    poseLandmarks: convertedPoses.length === 1
+                      ? convertedPoses[0]
+                      : convertedPoses
+                  };
+                  lastRawPoses = convertedPoses;
+                  lastPoseResults = results;
+                  processPose(results);
+                } else {
+                  lastRawPoses = [];
+                  // No pose detected — still call processPose with empty results so state resets properly
+                  processPose({ poseLandmarks: null });
+                }
               }
-            } catch (e) {}
+            } catch (e) { console.warn('poseLoop error:', e); }
             const elapsed = performance.now() - start;
             const wait = Math.max(0, 33 - elapsed);
             await new Promise(res => setTimeout(res, wait));
@@ -921,7 +930,7 @@
 
     window.addEventListener('DOMContentLoaded', async function() {
       resizeCanvasToScreen();
-      setupPose();
+      await setupPose();
       trampolineNotice.textContent = "Loading camera...";
       trampolineNotice.style.color = "#ff0";
       show(canvas);
